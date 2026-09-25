@@ -103,7 +103,7 @@ CLAUDE.md  AGENTS.md   .antigravity/
 
 - [x] Phase 1: config schema, harness generators, drift detection, memory MCP
 - [x] Phase 2: supersearch (text/symbol/git) + codegraph (impact/orphans/cycles) MCP servers
-- [x] Phase 3: skills framework + 10 core skills
+- [x] Phase 3: skills framework + 11 core skills
 - [x] Phase 4: handoff protocol (RFC + bundle + auto-inject) + doctor
 - [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
 - [x] VS Code extension (`editors/vscode/`) — status-bar doctor, skills sidebar, handoff wizard, `--json` CLI output (Issue #2)

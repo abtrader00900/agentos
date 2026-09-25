@@ -7,9 +7,10 @@ import { validateSkillDir, listSkills, parseSkill, testSkills } from "../src/cor
 const skillsRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../skills");
 
 describe("skills framework (FR-6.x)", () => {
-  it("ships exactly the 10 core skills (FR-6.4)", () => {
+  it("ships exactly the 11 core skills (FR-6.4)", () => {
     const names = listSkills(skillsRoot).map((s) => s.name);
     expect(names.sort()).toEqual([
+      "android-testing",
       "api-contract",
       "code-review",
       "commit-message",
