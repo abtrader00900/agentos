@@ -1,0 +1,40 @@
+# Example: Laravel + React full-stack project (copy to your project root)
+project:
+  name: my-saas
+  description: "Multi-tenant SaaS — Laravel API + React dashboard"
+
+stack:
+  - laravel
+  - php
+  - react
+  - typescript
+  - mysql
+
+rules:
+  - id: run-tests-first
+    text: "Before marking any task done, run `php artisan test` and `npm test`, paste results."
+  - id: laravel-conventions
+    text: "Follow Laravel conventions: thin controllers, form requests, service classes in app/Services."
+  - id: no-guessing-deps
+    text: "Use supersearch/codegraph MCP tools to verify dependencies — never guess import paths."
+  - id: migration-safety
+    text: "DB migrations must be reversible. Never edit a migrated migration; create a new one."
+  - id: no-any-ts
+    harnesses: [claude-code, codex]
+    text: "Avoid `any` in TypeScript. Use proper types or `unknown` with narrowing."
+  - id: android-kt-style
+    harnesses: [codex]
+    files: ["**/*.kt"]
+    text: "Kotlin code follows official Android style guide."
+
+skills:
+  - name: tdd-laravel
+
+mcpServers:
+  - name: memory
+    command: npx
+    args: ["tsx", "/path/to/agentos/src/mcp/memory/server.ts"]
+  # After `npm i -g agentos`, use instead:
+  # - name: memory
+  #   command: agentos
+  #   args: ["mcp", "memory"]
