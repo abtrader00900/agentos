@@ -73,7 +73,7 @@ Storage: `<project>/.agentos/memory.json` — local JSON store, atomic writes, m
 
 **supersearch** — `supersearch_text` (regex across project, .gitignore-aware, ripgrep when available) · `supersearch_symbol` (function/class/method definitions via ast-grep) · `supersearch_history` (pickaxe — which commit changed a string) · `supersearch_blame` (per-line authorship)
 
-**codegraph** — `codegraph_impact` (what breaks if I change this file — transitive) · `codegraph_deps` · `codegraph_orphans` (dead code candidates) · `codegraph_cycles` · `codegraph_rebuild` · `codegraph_stats`
+**codegraph** — `codegraph_impact` (what breaks if I change this file — transitive) · `codegraph_deps` · `codegraph_orphans` (dead code candidates) · `codegraph_cycles` · `codegraph_rebuild` · `codegraph_stats`. Import extraction runs on **tree-sitter (WASM)** — real parsing across TS/JS/Python/PHP/Go/Java/Kotlin, `use function`, multi-line imports, dynamic `import()` — with automatic regex fallback. Zero native deps either way.
 Deterministic import-graph (TS/JS, Python, PHP/Laravel, Go, Java/Kotlin), JSON-backed, incremental mtime-based rebuilds.
 
 ## Architecture
@@ -107,6 +107,8 @@ CLAUDE.md  AGENTS.md   .antigravity/
 - [x] Phase 4: handoff protocol (RFC + bundle + auto-inject) + doctor
 - [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
 - [x] VS Code extension (`editors/vscode/`) — status-bar doctor, skills sidebar, handoff wizard, `--json` CLI output (Issue #2)
+- [x] tree-sitter codegraph (Issue #4) — WASM parsing backend + lower-case PHP namespace resolution
+- [x] GitHub Actions CI — test matrix (Node 20/22) + extension compile
 
 ## Editor Integrations
 

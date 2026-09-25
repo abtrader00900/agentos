@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
-import { GraphStore } from "./graph.js";
+import { GraphStore, ensureGraphEngine } from "./graph.js";
 
 /**
  * MCP Codegraph Server (FR-5.x)
@@ -32,6 +32,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "FR-5.3: If I change this file, what breaks? Returns every file that (transitively) depends on it.",
     { file: z.string().describe("Path relative to project root") },
     async ({ file }) => {
+      await ensureGraphEngine();
       store.update(root);
       const direct = store.impact(file);
       if (!direct.length) return fmt([], `Nothing imports "${file}". No impact.`);
@@ -68,6 +69,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "Files nobody imports — dead code candidates (FR-5.6).",
     {},
     async () => {
+      await ensureGraphEngine();
       store.update(root);
       return fmt(store.orphans(), "No orphan files.");
     },
@@ -78,6 +80,8 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "Import cycles in the project (FR-5.6).",
     {},
     async () => {
+      await ensureGraphEngine();
+      store.update(root);
       const cycles = store.cycles();
       return fmt(
         cycles.map((c) => c.join(" → ")),
@@ -91,6 +95,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "Force full graph rebuild (normally incremental updates happen automatically).",
     {},
     async () => {
+      await ensureGraphEngine();
       const r = store.rebuild(root);
       return { content: [{ type: "text", text: `Rebuilt: ${r.scanned} files scanned, ${r.changed} processed.` }] };
     },
@@ -102,7 +107,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     {},
     async () => {
       const s = store.stats();
-      return { content: [{ type: "text", text: `${s.files} files, ${s.edges} dependency edges.` }] };
+      return { content: [{ type: "text", text: `${s.files} files, ${s.edges} dependency edges (engine: ${s.engine}).` }] };
     },
   );
 

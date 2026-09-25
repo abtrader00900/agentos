@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { JsonStore } from "../../core/jsonstore.js";
+import { initTreeSitter, treeSitterActive, extractWithTreeSitter } from "./tsparser.js";
 import path from "node:path";
 
 /**
@@ -7,9 +8,30 @@ import path from "node:path";
  * Deterministic import extraction (no model), SQLite storage,
  * incremental rebuild via mtime tracking (FR-5.4/5.5).
  *
- * NOTE: v0 uses regex import parsing (fast, zero native deps). Upgrade path:
- * tree-sitter (WASM) for deeper call-level graphs in a later phase.
+ * Import extraction: tree-sitter (WASM) when available (Issue #4),
+ * transparent regex fallback — zero native deps either way.
  */
+
+let engineReady: Promise<boolean> | null = null;
+
+/** Best-effort async engine warmup; call before relying on tree-sitter edges. */
+export function ensureGraphEngine(): Promise<boolean> {
+  engineReady ??= initTreeSitter().catch(() => false);
+  return engineReady;
+}
+
+export function graphEngine(): "tree-sitter" | "regex" {
+  return treeSitterActive() ? "tree-sitter" : "regex";
+}
+
+/** tree-sitter extraction when active, regex fallback otherwise. */
+export function extractImportsAuto(filePath: string, content: string): ImportRef[] {
+  if (treeSitterActive()) {
+    const refs = extractWithTreeSitter(filePath, content);
+    if (refs) return refs;
+  }
+  return extractImports(filePath, content);
+}
 
 // ---------- import extraction ----------
 
@@ -66,7 +88,7 @@ export function resolveModule(cwd: string, importerRel: string, specifier: strin
   if (fromRoot) return fromRoot;
 
   // PHP namespace style: App\Models\User → app/Models/User.php
-  if (/^([A-Z][\w]*\\)+[\w]+$/.test(specifier)) {
+  if (/^([A-Za-z_][\w]*\\)+[A-Za-z_][\w]*$/.test(specifier)) {
     const phpPath = specifier.replace(/\\/g, "/");
     const fromApp = resolveAsFileOrDir(path.join(cwd, phpPath), rel);
     if (fromApp) return fromApp;
@@ -172,7 +194,7 @@ export class GraphStore {
       fileRows.set(p, onDisk.get(p)!);
       let content: string;
       try { content = readFileSync(path.join(cwd, p), "utf8"); } catch { continue; }
-      for (const ref of extractImports(p, content)) {
+      for (const ref of extractImportsAuto(p, content)) {
         const dst = resolveModule(cwd, p, ref.specifier);
         if (dst && dst !== p) newEdges.push({ src: p, dst, kind: ref.kind });
       }
@@ -228,8 +250,8 @@ export class GraphStore {
     return found;
   }
 
-  stats(): { files: number; edges: number } {
-    return { files: this.files().size, edges: this.edges().length };
+  stats(): { files: number; edges: number; engine: "tree-sitter" | "regex" } {
+    return { files: this.files().size, edges: this.edges().length, engine: graphEngine() };
   }
 
   rebuild(cwd: string): { scanned: number; changed: number } {
