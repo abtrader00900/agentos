@@ -1,7 +1,7 @@
 {
-  "name": "agentos",
+  "name": "agent-os",
   "version": "0.1.0",
-  "description": "Local-first, multi-harness agent operating system. Zero API dependency.",
+  "description": "Local-first, multi-harness agent operating system. One agent.config.yaml \u2192 Claude Code, Codex, Antigravity, Cursor, Windsurf. Zero API dependency.",
   "type": "module",
   "bin": {
     "agentos": "./dist/cli.js"
@@ -14,7 +14,8 @@
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "mcp:memory": "tsx src/mcp/memory/server.ts"
+    "mcp:memory": "tsx src/mcp/memory/server.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@ast-grep/cli": "^0.45.3",
@@ -31,5 +32,21 @@
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "main": "./dist/cli.js",
+  "files": [
+    "dist",
+    "skills",
+    "RFC",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abtrader00900/agentos.git"
+  },
+  "homepage": "https://github.com/abtrader00900/agentos",
+  "bugs": {
+    "url": "https://github.com/abtrader00900/agentos/issues"
+  }
 }
