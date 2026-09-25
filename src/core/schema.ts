@@ -11,7 +11,7 @@ export const ruleSchema = z.object({
   /** The rule text injected into harness configs */
   text: z.string().min(1),
   /** Which harnesses receive this rule. Default: all */
-  harnesses: z.array(z.enum(["claude-code", "codex", "antigravity"])).optional(),
+  harnesses: z.array(z.enum(["claude-code", "codex", "antigravity", "cursor", "windsurf"])).optional(),
   /** Glob patterns this rule applies to (informational for now) */
   files: z.array(z.string()).optional(),
 });
@@ -47,9 +47,9 @@ export const agentConfigSchema = z.object({
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AgentRule = z.infer<typeof ruleSchema>;
-export type HarnessName = "claude-code" | "codex" | "antigravity";
+export type HarnessName = "claude-code" | "codex" | "antigravity" | "cursor" | "windsurf";
 
-export const ALL_HARNESSES: HarnessName[] = ["claude-code", "codex", "antigravity"];
+export const ALL_HARNESSES: HarnessName[] = ["claude-code", "codex", "antigravity", "cursor", "windsurf"];
 
 export function rulesForHarness(config: AgentConfig, harness: HarnessName): AgentRule[] {
   return config.rules.filter((r) => !r.harnesses || r.harnesses.includes(harness));

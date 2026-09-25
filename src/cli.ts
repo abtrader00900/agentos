@@ -7,6 +7,7 @@ import { status } from "./commands/status.js";
 import { skillList, skillInstall, skillTest } from "./commands/skill.js";
 import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
+import { learn } from "./commands/learn.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -133,6 +134,12 @@ program
       if (!ok) process.exit(1);
     } catch (e) { fail(e); }
   });
+
+program
+  .command("learn")
+  .description("Learn rules from git history (co-changing files, hot spots) — auto-improvement loop")
+  .option("--apply", "append suggestions to agent.config.local.yaml (review, then promote)")
+  .action((opts) => { try { learn({ apply: opts.apply }); } catch (e) { fail(e); } });
 
 function fail(e: unknown): never {
   console.error(`✗ ${(e as Error).message}`);

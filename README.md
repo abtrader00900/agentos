@@ -2,9 +2,9 @@
 
 **Local-first, multi-harness agent operating system. Zero API dependency.**
 
-Ek `agent.config.yaml` → Claude Code, Codex, Antigravity — teeno ke configs, MCP tools, aur shared memory. API ka kharcha zero, har project mein same brain.
+Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf — 5 harnesses ke configs, MCP tools, aur shared memory. API ka kharcha zero, har project mein same brain.
 
-> Status: **v0.1.0 — Phase 1 (M1 complete zone)**. See `docs/` for the full plan.
+> Status: **v0.1.0 — all 4 milestones + Phase 5 shipped** (96 tests green). See `RFC/` for the handoff protocol spec.
 
 ## Why
 
@@ -99,10 +99,27 @@ CLAUDE.md  AGENTS.md   .antigravity/
 
 ## Roadmap
 
-- [x] Phase 1: config schema, 3 harness generators, drift detection, memory MCP
+- [x] Phase 1: config schema, harness generators, drift detection, memory MCP
 - [x] Phase 2: supersearch (text/symbol/git) + codegraph (impact/orphans/cycles) MCP servers
-- [ ] Phase 3: skills framework + 10 core skills
-- [ ] Phase 4: handoff protocol + launch
+- [x] Phase 3: skills framework + 10 core skills
+- [x] Phase 4: handoff protocol (RFC + bundle + auto-inject) + doctor
+- [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
+
+## Handoff Protocol
+
+Switch agents mid-task with zero re-explaining:
+
+```bash
+agentos handoff --to codex --task "Invoice PDF export half-done: queue job done, blade template missing" \
+  --files "app/Jobs/GenerateInvoicePdf.php" --decisions "queue vs sync pending"
+agentos sync   # HANDOFF.md auto-injected into all 5 harness configs
+```
+
+The receiving agent gets: task state, files in progress, pending decisions, open questions, memory snapshot, git state. Spec: `RFC/handoff-protocol.md`.
+
+## Storage
+
+Zero native dependencies — `npm install` never compiles anything. Memory and graph persist as atomic-writes JSON in `.agentos/`. A SQLite backend can plug in behind the same interface later if a project outgrows it.
 
 ## License
 
