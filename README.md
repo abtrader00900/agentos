@@ -6,6 +6,8 @@ Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf —
 
 > Status: **v0.1.0 — all 4 milestones + Phase 5 shipped** (96 tests green). See `RFC/` for the handoff protocol spec.
 
+![AgentOS demo: install → handoff → doctor](docs/images/demo.gif)
+
 ## Why
 
 | Aaj | AgentOS |
