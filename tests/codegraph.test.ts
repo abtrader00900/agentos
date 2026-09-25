@@ -73,7 +73,7 @@ describe("GraphStore (FR-5.x)", () => {
       "src/payment.ts": `import { Invoice } from "./invoice";\nexport function pay() {}`,
       "src/checkout.ts": `import { pay } from "./payment";\nexport function checkout() {}`,
     });
-    const store = new GraphStore(path.join(dir, ".agentos", "graph.db"));
+    const store = new GraphStore(path.join(dir, ".agentos", "graph.json"));
     const r = store.update(dir);
     expect(r.scanned).toBe(3);
 
@@ -90,7 +90,7 @@ describe("GraphStore (FR-5.x)", () => {
       "src/a.ts": `import { b } from "./b";`,
       "src/b.ts": `import { a } from "./a";`,
     });
-    const store = new GraphStore(path.join(dir, ".agentos", "graph.db"));
+    const store = new GraphStore(path.join(dir, ".agentos", "graph.json"));
     store.update(dir);
     const cycles = store.cycles();
     expect(cycles.length).toBeGreaterThan(0);
@@ -104,7 +104,7 @@ describe("GraphStore (FR-5.x)", () => {
       "src/user.ts": `import { u } from "./used";`,
       "src/dead.ts": `export const dead = 1;`,
     });
-    const store = new GraphStore(path.join(dir, ".agentos", "graph.db"));
+    const store = new GraphStore(path.join(dir, ".agentos", "graph.json"));
     store.update(dir);
     // orphans = files nobody imports; entry points (user.ts) legitimately appear
     const orphans = store.orphans();
@@ -116,7 +116,7 @@ describe("GraphStore (FR-5.x)", () => {
 
   it("incremental update only reprocesses changed files (FR-5.4)", () => {
     proj({ "src/a.ts": `export const a = 1;` });
-    const store = new GraphStore(path.join(dir, ".agentos", "graph.db"));
+    const store = new GraphStore(path.join(dir, ".agentos", "graph.json"));
     store.update(dir);
     const second = store.update(dir);
     expect(second.changed).toBe(0);
@@ -133,7 +133,7 @@ describe("GraphStore (FR-5.x)", () => {
       "src/a.ts": `export const a = 1;`,
       "src/b.ts": `import { a } from "./a";`,
     });
-    const store = new GraphStore(path.join(dir, ".agentos", "graph.db"));
+    const store = new GraphStore(path.join(dir, ".agentos", "graph.json"));
     store.update(dir);
     rmSync(path.join(dir, "src", "b.ts"));
     store.update(dir);

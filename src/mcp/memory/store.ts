@@ -1,10 +1,8 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import { mkdirSync } from "node:fs";
+import { JsonStore } from "../../core/jsonstore.js";
 
 /**
  * FR-3.x: persistent project memory.
- * SQLite (WAL, crash-safe) at <project>/.agentos/memory.db
+ * Zero-dependency JSON store at <project>/.agentos/memory.json (atomic writes).
  * Facts are timestamped + source-tagged (FR-3.2) and exportable to markdown (FR-3.4).
  */
 
@@ -28,84 +26,84 @@ export interface FactInput {
 }
 
 export class MemoryStore {
-  private db: Database.Database;
+  private db: JsonStore;
+  private nextId: number;
 
   constructor(dbPath: string) {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS facts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        topic TEXT NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT NOT NULL,
-        source TEXT,
-        pinned INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(topic, key)
-      );
-      CREATE INDEX IF NOT EXISTS idx_facts_topic ON facts(topic);
-    `);
+    this.db = new JsonStore(dbPath);
+    const facts = this.db.table<Fact>("facts");
+    this.nextId = facts.reduce((max, f) => Math.max(max, f.id), 0) + 1;
   }
 
-  private upsert = () =>
-    this.db.prepare(`
-      INSERT INTO facts (topic, key, value, source, pinned)
-      VALUES (@topic, @key, @value, @source, @pinned)
-      ON CONFLICT(topic, key) DO UPDATE SET
-        value = excluded.value,
-        source = excluded.source,
-        pinned = excluded.pinned,
-        updated_at = datetime('now')
-    `);
-
-  private select = () =>
-    this.db.prepare(`SELECT * FROM facts WHERE id = ?`);
-
   store(input: FactInput): Fact {
-    const info = this.upsert().run({
+    const facts = this.db.table<Fact>("facts");
+    const now = new Date().toISOString();
+    const existing = facts.find((f) => f.topic === input.topic && f.key === input.key);
+    if (existing) {
+      existing.value = input.value;
+      existing.source = input.source ?? null;
+      existing.pinned = input.pinned ? 1 : 0;
+      existing.updated_at = now;
+      this.db.save();
+      return { ...existing };
+    }
+    const fact: Fact = {
+      id: this.nextId++,
       topic: input.topic,
       key: input.key,
       value: input.value,
       source: input.source ?? null,
       pinned: input.pinned ? 1 : 0,
-    });
-    return this.select().get(info.lastInsertRowid) as Fact;
+      created_at: now,
+      updated_at: now,
+    };
+    facts.push(fact);
+    this.db.save();
+    return { ...fact };
   }
 
   /** FR-3.5: recall by topic / key substring / free text in value */
   recall(query: { topic?: string; key?: string; text?: string; limit?: number } = {}): Fact[] {
-    const cond: string[] = [];
-    const params: Record<string, unknown> = { limit: query.limit ?? 20 };
-    if (query.topic) { cond.push("topic = @topic"); params.topic = query.topic; }
-    if (query.key) { cond.push("key LIKE @key"); params.key = `%${query.key}%`; }
-    if (query.text) { cond.push("value LIKE @text"); params.text = `%${query.text}%`; }
-    const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
-    return this.db
-      .prepare(`SELECT * FROM facts ${where} ORDER BY pinned DESC, updated_at DESC LIMIT @limit`)
-      .all(params) as Fact[];
+    const limit = query.limit ?? 20;
+    let facts = this.db.table<Fact>("facts");
+    if (query.topic) facts = facts.filter((f) => f.topic === query.topic);
+    if (query.key) {
+      const k = query.key.toLowerCase();
+      facts = facts.filter((f) => f.key.toLowerCase().includes(k));
+    }
+    if (query.text) {
+      const t = query.text.toLowerCase();
+      facts = facts.filter((f) => f.value.toLowerCase().includes(t));
+    }
+    return facts
+      .sort((a, b) => (b.pinned - a.pinned) || b.updated_at.localeCompare(a.updated_at))
+      .slice(0, limit)
+      .map((f) => ({ ...f }));
   }
 
   get(topic: string, key: string): Fact | undefined {
-    return this.db.prepare(`SELECT * FROM facts WHERE topic = ? AND key = ?`).get(topic, key) as Fact | undefined;
+    const f = this.db.table<Fact>("facts").find((x) => x.topic === topic && x.key === key);
+    return f ? { ...f } : undefined;
   }
 
   forget(topic: string, key: string): boolean {
-    return this.db.prepare(`DELETE FROM facts WHERE topic = ? AND key = ?`).run(topic, key).changes > 0;
+    const facts = this.db.table<Fact>("facts");
+    const i = facts.findIndex((f) => f.topic === topic && f.key === key);
+    if (i < 0) return false;
+    facts.splice(i, 1);
+    this.db.save();
+    return true;
   }
 
   topics(): string[] {
-    return (this.db.prepare(`SELECT DISTINCT topic FROM facts ORDER BY topic`).all() as { topic: string }[]).map((r) => r.topic);
+    return [...new Set(this.db.table<Fact>("facts").map((f) => f.topic))].sort();
   }
 
   /** FR-3.4: git-diffable markdown export */
   exportMarkdown(): string {
-    const facts = this.db
-      .prepare(`SELECT * FROM facts ORDER BY topic, key`)
-      .all() as Fact[];
+    const facts = this.db.table<Fact>("facts")
+      .slice()
+      .sort((a, b) => a.topic.localeCompare(b.topic) || a.key.localeCompare(b.key));
     const lines = ["# AgentOS Memory Export", ""];
     let currentTopic = "";
     for (const f of facts) {
@@ -121,9 +119,8 @@ export class MemoryStore {
   }
 
   stats(): { facts: number; topics: number } {
-    const facts = (this.db.prepare(`SELECT COUNT(*) AS c FROM facts`).get() as { c: number }).c;
-    const topics = (this.db.prepare(`SELECT COUNT(DISTINCT topic) AS c FROM facts`).get() as { c: number }).c;
-    return { facts, topics };
+    const facts = this.db.table<Fact>("facts");
+    return { facts: facts.length, topics: new Set(facts.map((f) => f.topic)).size };
   }
 
   close(): void {

@@ -9,7 +9,7 @@ let store: MemoryStore;
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "agentos-mem-"));
-  store = new MemoryStore(path.join(dir, "memory.db"));
+  store = new MemoryStore(path.join(dir, "memory.json"));
 });
 
 afterEach(() => {
@@ -64,7 +64,7 @@ describe("MemoryStore (FR-3.x)", () => {
   it("persists across store instances (new session = new agent session)", () => {
     store.store({ topic: "t", key: "k", value: "survives restart" });
     store.close();
-    const store2 = new MemoryStore(path.join(dir, "memory.db"));
+    const store2 = new MemoryStore(path.join(dir, "memory.json"));
     expect(store2.get("t", "k")?.value).toBe("survives restart");
     store2.close();
   });

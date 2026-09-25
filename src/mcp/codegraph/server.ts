@@ -15,7 +15,7 @@ function projectRoot(): string {
 }
 
 function dbPath(): string {
-  return path.join(projectRoot(), ".agentos", "graph.db");
+  return path.join(projectRoot(), ".agentos", "graph.json");
 }
 
 export function createCodegraphServer(root = projectRoot()): McpServer {

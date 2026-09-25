@@ -1,5 +1,5 @@
-import Database from "better-sqlite3";
-import { readFileSync, readdirSync, statSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { JsonStore } from "../../core/jsonstore.js";
 import path from "node:path";
 
 /**
@@ -118,91 +118,91 @@ export function scanProject(cwd: string): Map<string, number> {
 
 // ---------- graph store ----------
 
+interface FileRow { path: string; mtime: number }
+interface EdgeRow { src: string; dst: string; kind: string }
+
 export class GraphStore {
-  private db: Database.Database;
+  private db: JsonStore;
 
   constructor(dbPath: string) {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS files (
-        path TEXT PRIMARY KEY,
-        mtime REAL NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS edges (
-        src TEXT NOT NULL,
-        dst TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'import',
-        PRIMARY KEY (src, dst)
-      );
-      CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);
-    `);
+    this.db = new JsonStore(dbPath);
+  }
+
+  private files(): Map<string, number> {
+    return new Map(this.db.table<FileRow>("files").map((f) => [f.path, f.mtime]));
+  }
+
+  private edges(): EdgeRow[] {
+    return this.db.table<EdgeRow>("edges");
+  }
+
+  private setFiles(files: Map<string, number>): void {
+    this.db.table<FileRow>("files").splice(
+      0,
+      this.db.table<FileRow>("files").length,
+      ...[...files.entries()].map(([path, mtime]) => ({ path, mtime })),
+    );
+  }
+
+  private setEdges(edges: EdgeRow[]): void {
+    const t = this.db.table<EdgeRow>("edges");
+    t.splice(0, t.length, ...edges);
   }
 
   /** FR-5.4: incremental — only re-extract files whose mtime changed */
   update(cwd: string): { scanned: number; changed: number } {
     const onDisk = scanProject(cwd);
-    const known = new Map(
-      (this.db.prepare(`SELECT path, mtime FROM files`).all() as { path: string; mtime: number }[])
-        .map((r) => [r.path, r.mtime]),
-    );
+    const fileRows = this.files();
+    const edges = this.edges();
 
     const changed: string[] = [];
     for (const [p, mtime] of onDisk) {
-      if (known.get(p) !== mtime) changed.push(p);
+      if (fileRows.get(p) !== mtime) changed.push(p);
     }
-    const removed = [...known.keys()].filter((p) => !onDisk.has(p));
+    const removed = new Set([...fileRows.keys()].filter((p) => !onDisk.has(p)));
 
-    const delEdges = this.db.prepare(`DELETE FROM edges WHERE src = ?`);
-    const upsertFile = this.db.prepare(`INSERT INTO files (path, mtime) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime`);
-    const delFile = this.db.prepare(`DELETE FROM files WHERE path = ?`);
-    const insEdge = this.db.prepare(`INSERT OR IGNORE INTO edges (src, dst, kind) VALUES (?, ?, ?)`);
+    if (removed.size) {
+      this.setEdges(edges.filter((e) => !removed.has(e.src) && !removed.has(e.dst)));
+      for (const p of removed) fileRows.delete(p);
+    }
 
-    const tx = this.db.transaction(() => {
-      for (const p of removed) {
-        delEdges.run(p);
-        delFile.run(p);
+    const changedSet = new Set(changed);
+    const newEdges = this.edges().filter((e) => !changedSet.has(e.src));
+    for (const p of changed) {
+      fileRows.set(p, onDisk.get(p)!);
+      let content: string;
+      try { content = readFileSync(path.join(cwd, p), "utf8"); } catch { continue; }
+      for (const ref of extractImports(p, content)) {
+        const dst = resolveModule(cwd, p, ref.specifier);
+        if (dst && dst !== p) newEdges.push({ src: p, dst, kind: ref.kind });
       }
-      for (const p of changed) {
-        delEdges.run(p);
-        upsertFile.run(p, onDisk.get(p));
-        let content: string;
-        try { content = readFileSync(path.join(cwd, p), "utf8"); } catch { return; }
-        for (const ref of extractImports(p, content)) {
-          const dst = resolveModule(cwd, p, ref.specifier);
-          if (dst && dst !== p) insEdge.run(p, dst, ref.kind);
-        }
-      }
-    });
-    tx();
+    }
+    this.setEdges(newEdges);
+    this.setFiles(fileRows);
+    this.db.save();
     return { scanned: onDisk.size, changed: changed.length };
   }
 
   /** FR-5.3: who depends on this file (impact of changing it) */
   impact(file: string): string[] {
-    return (this.db.prepare(`SELECT src FROM edges WHERE dst = ? ORDER BY src`).all(file) as { src: string }[]).map((r) => r.src);
+    return [...new Set(this.edges().filter((e) => e.dst === file).map((e) => e.src))].sort();
   }
 
   /** What this file depends on */
   dependencies(file: string): string[] {
-    return (this.db.prepare(`SELECT dst FROM edges WHERE src = ? ORDER BY dst`).all(file) as { dst: string }[]).map((r) => r.dst);
+    return [...new Set(this.edges().filter((e) => e.src === file).map((e) => e.dst))].sort();
   }
 
   /** FR-5.6: files nobody imports */
   orphans(): string[] {
-    return (this.db.prepare(`
-      SELECT f.path FROM files f
-      LEFT JOIN edges e ON e.dst = f.path
-      WHERE e.dst IS NULL ORDER BY f.path
-    `).all() as { path: string }[]).map((r) => r.path);
+    const imported = new Set(this.edges().map((e) => e.dst));
+    return [...this.files().keys()].filter((p) => !imported.has(p)).sort();
   }
 
   /** FR-5.6: import cycles (DFS) */
   cycles(): string[][] {
-    const edges = this.db.prepare(`SELECT src, dst FROM edges`).all() as { src: string; dst: string }[];
     const adj = new Map<string, string[]>();
-    for (const e of edges) {
+    for (const e of this.edges()) {
       if (!adj.has(e.src)) adj.set(e.src, []);
       adj.get(e.src)!.push(e.dst);
     }
@@ -229,13 +229,13 @@ export class GraphStore {
   }
 
   stats(): { files: number; edges: number } {
-    const files = (this.db.prepare(`SELECT COUNT(*) c FROM files`).get() as { c: number }).c;
-    const edges = (this.db.prepare(`SELECT COUNT(*) c FROM edges`).get() as { c: number }).c;
-    return { files, edges };
+    return { files: this.files().size, edges: this.edges().length };
   }
 
   rebuild(cwd: string): { scanned: number; changed: number } {
-    this.db.exec(`DELETE FROM edges; DELETE FROM files;`);
+    this.setEdges([]);
+    this.setFiles(new Map());
+    this.db.save();
     return this.update(cwd);
   }
 

@@ -47,10 +47,10 @@ export function status(options: { cwd?: string } = {}): string {
   }
 
   // memory size
-  const memDb = path.join(cwd, ".agentos", "memory.db");
+  const memDb = path.join(cwd, ".agentos", "memory.json");
   if (existsSync(memDb)) {
     const size = statSync(memDb).size;
-    lines.push(`Memory:     ${(size / 1024).toFixed(1)} KB (.agentos/memory.db)`);
+    lines.push(`Memory:     ${(size / 1024).toFixed(1)} KB (.agentos/memory.json)`);
   } else {
     lines.push("Memory:     not initialized (starts on first MCP use)");
   }

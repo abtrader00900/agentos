@@ -13,9 +13,9 @@ const log = (msg: string, quiet?: boolean) => { if (!quiet) console.log(msg); };
 const GITIGNORE_ADDITIONS = [
   "",
   "# AgentOS",
-  ".agentos/memory.db",
-  ".agentos/memory.db-*",
-  ".agentos/graph.db*",
+  ".agentos/memory.json",
+  ".agentos/memory.json-*",
+  ".agentos/graph.json*",
   "agent.config.local.yaml",
   "",
 ];
@@ -35,7 +35,7 @@ export function install(options: InstallOptions = {}): void {
   // 2. .gitignore additions
   const giPath = path.join(cwd, ".gitignore");
   const gi = existsSync(giPath) ? readFileSync(giPath, "utf8") : "";
-  if (!gi.includes(".agentos/memory.db")) {
+  if (!gi.includes(".agentos/memory.json")) {
     writeFileSync(giPath, gi.replace(/\n*$/, "\n") + GITIGNORE_ADDITIONS.join("\n"));
     log("  ✓ .gitignore updated", options.quiet);
   }

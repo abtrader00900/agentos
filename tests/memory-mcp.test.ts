@@ -19,7 +19,7 @@ afterEach(() => {
 describe("memory MCP server (FR-3.x, e2e via InMemory transport)", () => {
   it("store → new session → recall (M1 acceptance criterion)", async () => {
     // Session 1: store
-    const server1 = createMemoryServer(path.join(dir, "memory.db"));
+    const server1 = createMemoryServer(path.join(dir, "memory.json"));
     const [c1s, s1c] = InMemoryTransport.createLinkedPair();
     const client1 = new Client({ name: "t", version: "0" });
     await Promise.all([client1.connect(c1s), server1.connect(s1c)]);
@@ -31,7 +31,7 @@ describe("memory MCP server (FR-3.x, e2e via InMemory transport)", () => {
     await client1.close();
 
     // Session 2: recall (agent restarted — memory must survive)
-    const server2 = createMemoryServer(path.join(dir, "memory.db"));
+    const server2 = createMemoryServer(path.join(dir, "memory.json"));
     const [c2s, s2c] = InMemoryTransport.createLinkedPair();
     const client2 = new Client({ name: "t", version: "0" });
     await Promise.all([client2.connect(c2s), server2.connect(s2c)]);
@@ -45,7 +45,7 @@ describe("memory MCP server (FR-3.x, e2e via InMemory transport)", () => {
   });
 
   it("exposes all required tools", async () => {
-    const server = createMemoryServer(path.join(dir, "memory.db"));
+    const server = createMemoryServer(path.join(dir, "memory.json"));
     const [cs, sc] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "t", version: "0" });
     await Promise.all([client.connect(cs), server.connect(sc)]);

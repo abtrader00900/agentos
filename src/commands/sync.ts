@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { generators } from "../generators/index.js";
@@ -37,12 +37,20 @@ export function sync(options: SyncOptions = {}): void {
   }
 
   const entries: ManifestEntry[] = [];
+  // FR-7.3: inject latest handoff into generated markdown configs so the
+  // target harness auto-receives pending context on next sync.
+  const handoffPath = path.join(cwd, "HANDOFF.md");
+  const handoff = existsSync(handoffPath) ? readFileSync(handoffPath, "utf8") : null;
+
   for (const h of targets) {
     for (const file of generators[h].generate(config)) {
+      const content = handoff && file.path.endsWith(".md")
+        ? file.content + "\n## Active Handoff (AgentOS)\n\n" + handoff
+        : file.content;
       const abs = path.join(cwd, file.path);
       mkdirSync(path.dirname(abs), { recursive: true });
-      writeFileSync(abs, file.content);
-      entries.push({ path: file.path, generatedHash: hashContent(file.content), writtenHash: hashContent(file.content) });
+      writeFileSync(abs, content);
+      entries.push({ path: file.path, generatedHash: hashContent(content), writtenHash: hashContent(content) });
       log(`  ✓ ${file.path}`, options.quiet);
     }
   }

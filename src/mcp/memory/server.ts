@@ -9,12 +9,12 @@ import { MemoryStore } from "./store.js";
  * MCP Memory Server (FR-3.x)
  * Zero network, zero API. stdio transport → works with Claude Code, Codex, Antigravity.
  *
- * Storage: <project>/.agentos/memory.db (resolved from cwd, or AGENTOS_PROJECT env)
+ * Storage: <project>/.agentos/memory.json (resolved from cwd, or AGENTOS_PROJECT env)
  */
 
 function resolveDbPath(): string {
   const project = process.env.AGENTOS_PROJECT ?? process.cwd();
-  return path.join(project, ".agentos", "memory.db");
+  return path.join(project, ".agentos", "memory.json");
 }
 
 export function createMemoryServer(dbPath = resolveDbPath()): McpServer {

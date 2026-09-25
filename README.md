@@ -10,7 +10,7 @@ Ek `agent.config.yaml` → Claude Code, Codex, Antigravity — teeno ke configs,
 
 | Aaj | AgentOS |
 |---|---|
-| Agents har session mein sab bhool jate hain | Persistent local memory (SQLite) |
+| Agents har session mein sab bhool jate hain | Persistent local memory (JSON, zero native deps) |
 | Har harness ka alag config | Ek YAML → teeno harnesses |
 | Search/memory ke liye API tokens | Deterministic local MCP tools |
 | Agent switch = context loss | Handoff protocol (Phase 4) |
@@ -67,12 +67,12 @@ mcpServers:
 ### MCP Tools
 
 **memory** — `memory_store` · `memory_recall` · `memory_get` · `memory_forget` · `memory_topics` · `memory_export` · `memory_stats`
-Storage: `<project>/.agentos/memory.db` — local SQLite, WAL mode, markdown exportable.
+Storage: `<project>/.agentos/memory.json` — local JSON store, atomic writes, markdown exportable.
 
 **supersearch** — `supersearch_text` (regex across project, .gitignore-aware, ripgrep when available) · `supersearch_symbol` (function/class/method definitions via ast-grep) · `supersearch_history` (pickaxe — which commit changed a string) · `supersearch_blame` (per-line authorship)
 
 **codegraph** — `codegraph_impact` (what breaks if I change this file — transitive) · `codegraph_deps` · `codegraph_orphans` (dead code candidates) · `codegraph_cycles` · `codegraph_rebuild` · `codegraph_stats`
-Deterministic import-graph (TS/JS, Python, PHP/Laravel, Go, Java/Kotlin), SQLite-backed, incremental mtime-based rebuilds.
+Deterministic import-graph (TS/JS, Python, PHP/Laravel, Go, Java/Kotlin), JSON-backed, incremental mtime-based rebuilds.
 
 ## Architecture
 
@@ -88,7 +88,7 @@ CLAUDE.md  AGENTS.md   .antigravity/
         ▼
    MCP servers (memory → supersearch → codegraph)
         ▼
-   .agentos/memory.db — shared, local, durable
+   .agentos/memory.json — shared, local, durable
 ```
 
 ## Config Layers (override: local > project > global)

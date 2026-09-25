@@ -5,6 +5,8 @@ import { install } from "./commands/install.js";
 import { sync } from "./commands/sync.js";
 import { status } from "./commands/status.js";
 import { skillList, skillInstall, skillTest } from "./commands/skill.js";
+import { handoff, handoffShow } from "./commands/handoff.js";
+import { doctor } from "./commands/doctor.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -102,6 +104,35 @@ skill
   .command("test")
   .description("Validate all skills (frontmatter, structure, tests)")
   .action(() => { try { skillTest(); } catch (e) { fail(e); } });
+
+program
+  .command("handoff")
+  .description("Export full agent context (task, decisions, memory, git) for another harness — FR-7")
+  .option("--to <harness>", "target harness: claude-code | codex | antigravity | any")
+  .option("--from <harness>", "source harness (auto-detected if omitted)")
+  .option("--task <text>", "REQUIRED: what was being worked on + current state")
+  .option("--files <list>", "comma-separated files in progress")
+  .option("--decisions <list>", "comma-separated pending decisions")
+  .option("--questions <list>", "comma-separated open questions")
+  .option("--notes <text>", "free-form notes")
+  .action((opts) => {
+    try { handoff(opts); } catch (e) { fail(e); }
+  });
+
+program
+  .command("handoff:show")
+  .description("Print the latest handoff bundle")
+  .action(() => { try { handoffShow(); } catch (e) { fail(e); } });
+
+program
+  .command("doctor")
+  .description("Health check: config, harnesses, drift, MCP, memory, skills, handoff")
+  .action(() => {
+    try {
+      const { ok } = doctor();
+      if (!ok) process.exit(1);
+    } catch (e) { fail(e); }
+  });
 
 function fail(e: unknown): never {
   console.error(`✗ ${(e as Error).message}`);
