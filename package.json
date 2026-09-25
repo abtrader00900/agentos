@@ -17,6 +17,7 @@
     "mcp:memory": "tsx src/mcp/memory/server.ts"
   },
   "dependencies": {
+    "@ast-grep/cli": "^0.45.3",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "better-sqlite3": "^11.10.0",
     "commander": "^12.1.0",

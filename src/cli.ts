@@ -4,6 +4,7 @@ import { init } from "./commands/init.js";
 import { install } from "./commands/install.js";
 import { sync } from "./commands/sync.js";
 import { status } from "./commands/status.js";
+import { skillList, skillInstall, skillTest } from "./commands/skill.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -84,6 +85,23 @@ mcp
     const server = createCodegraphServer();
     await server.connect(new StdioServerTransport());
   });
+
+const skill = program.command("skill").description("Manage AgentOS skills");
+
+skill
+  .command("list")
+  .description("List bundled + installed skills")
+  .action(() => { try { skillList(); } catch (e) { fail(e); } });
+
+skill
+  .command("install <name>")
+  .description("Install a bundled skill into this project")
+  .action((name: string) => { try { skillInstall(name); } catch (e) { fail(e); } });
+
+skill
+  .command("test")
+  .description("Validate all skills (frontmatter, structure, tests)")
+  .action(() => { try { skillTest(); } catch (e) { fail(e); } });
 
 function fail(e: unknown): never {
   console.error(`✗ ${(e as Error).message}`);
