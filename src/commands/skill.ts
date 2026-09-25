@@ -4,16 +4,30 @@ import { listSkills, testSkills, installSkill, bundledSkillsRoot } from "../core
 
 /** FR-2.6: agentos skill list / install / test */
 
-export function skillList(options: { cwd?: string } = {}): string {
+export interface SkillListItem {
+  name: string;
+  description: string;
+  installed: boolean;
+}
+
+export function skillListData(options: { cwd?: string } = {}): SkillListItem[] {
   const cwd = options.cwd ?? process.cwd();
   const bundled = listSkills(bundledSkillsRoot());
   const installedRoot = path.join(cwd, ".agentos", "skills");
   const installed = existsSync(installedRoot) ? new Set(listSkills(installedRoot).map((s) => s.name)) : new Set<string>();
+  return bundled.map((s) => ({ name: s.name, description: s.description, installed: installed.has(s.name) }));
+}
 
+export function skillList(options: { cwd?: string; json?: boolean } = {}): string {
+  const data = skillListData(options);
+  if (options.json) {
+    const out = JSON.stringify(data, null, 2);
+    console.log(out);
+    return out;
+  }
   const lines = ["Bundled skills:", ""];
-  for (const s of bundled) {
-    const mark = installed.has(s.name) ? "✓ installed" : " ";
-    lines.push(`  ${mark} ${s.name}`);
+  for (const s of data) {
+    lines.push(`  ${s.installed ? "✓ installed" : " "} ${s.name}`);
     lines.push(`      ${s.description.slice(0, 90)}`);
   }
   const out = lines.join("\n");

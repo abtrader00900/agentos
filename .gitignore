@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.log
 .agentos/
+editors/vscode/out/
+editors/vscode/node_modules/

@@ -1,0 +1,115 @@
+{
+  "name": "agentos",
+  "displayName": "AgentOS",
+  "description": "Local-first, multi-harness agent operating system — sync, doctor, skills and handoffs from VS Code. Zero API dependency.",
+  "version": "0.1.0",
+  "publisher": "abtrader00900",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abtrader00900/agentos.git",
+    "directory": "editors/vscode"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/agent.config.yaml",
+    "onCommand:agentos.sync",
+    "onCommand:agentos.doctor",
+    "onCommand:agentos.status",
+    "onCommand:agentos.handoff",
+    "onCommand:agentos.learn",
+    "onCommand:agentos.refreshSkills"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentos.sync",
+        "title": "AgentOS: Sync Harness Configs",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "agentos.doctor",
+        "title": "AgentOS: Run Doctor",
+        "icon": "$(stethoscope)"
+      },
+      {
+        "command": "agentos.status",
+        "title": "AgentOS: Show Status",
+        "icon": "$(info)"
+      },
+      {
+        "command": "agentos.handoff",
+        "title": "AgentOS: Create Handoff"
+      },
+      {
+        "command": "agentos.learn",
+        "title": "AgentOS: Learn from Git History"
+      },
+      {
+        "command": "agentos.refreshSkills",
+        "title": "AgentOS: Refresh Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agentos.installSkill",
+        "title": "AgentOS: Install Skill"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "agentosSkills",
+          "name": "AgentOS Skills",
+          "when": "agentos:hasConfig"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentos.refreshSkills",
+          "when": "view == agentosSkills",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentos.installSkill",
+          "when": "view == agentosSkills && viewItem == agentos.skill",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AgentOS",
+      "properties": {
+        "agentos.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the agentos CLI: an executable on PATH (e.g. 'agentos'), a repo checkout (uses dist/cli.js or tsx), or a direct path to cli.js."
+        },
+        "agentos.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run a lightweight doctor check (status bar) when workspace files are saved."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

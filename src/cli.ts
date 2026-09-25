@@ -59,8 +59,9 @@ program
 program
   .command("status")
   .description("Show project, harnesses, drift, and memory status")
-  .action(() => {
-    try { status(); } catch (e) { fail(e); }
+  .option("--json", "machine-readable JSON output (for editor integrations)")
+  .action((opts) => {
+    try { status({ json: opts.json }); } catch (e) { fail(e); }
   });
 
 const mcp = program.command("mcp").description("Run MCP servers (for harness registration)");
@@ -94,7 +95,8 @@ const skill = program.command("skill").description("Manage AgentOS skills");
 skill
   .command("list")
   .description("List bundled + installed skills")
-  .action(() => { try { skillList(); } catch (e) { fail(e); } });
+  .option("--json", "machine-readable JSON output (for editor integrations)")
+  .action((opts) => { try { skillList({ json: opts.json }); } catch (e) { fail(e); } });
 
 skill
   .command("install <name>")
@@ -128,8 +130,15 @@ program
 program
   .command("doctor")
   .description("Health check: config, harnesses, drift, MCP, memory, skills, handoff")
-  .action(() => {
+  .option("--json", "machine-readable JSON output (for editor integrations)")
+  .action((opts) => {
     try {
+      if (opts.json) {
+        const { checks, ok } = doctor({ quiet: true });
+        console.log(JSON.stringify({ ok, checks }, null, 2));
+        if (!ok) process.exit(1);
+        return;
+      }
       const { ok } = doctor();
       if (!ok) process.exit(1);
     } catch (e) { fail(e); }

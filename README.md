@@ -106,6 +106,19 @@ CLAUDE.md  AGENTS.md   .antigravity/
 - [x] Phase 3: skills framework + 10 core skills
 - [x] Phase 4: handoff protocol (RFC + bundle + auto-inject) + doctor
 - [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
+- [x] VS Code extension (`editors/vscode/`) — status-bar doctor, skills sidebar, handoff wizard, `--json` CLI output (Issue #2)
+
+## Editor Integrations
+
+### VS Code (`editors/vscode/`)
+
+Status-bar doctor (refreshed on save), skills sidebar with one-click install, sync/status/doctor commands, and a guided handoff wizard — all through the local CLI, zero API dependency.
+
+```bash
+cd editors/vscode && npm install && npm run compile   # F5 to debug
+```
+
+All CLI commands support `--json` for machine-readable output (`status`, `doctor`, `skill list`) — use it for your own editor/tooling integrations.
 
 ## Handoff Protocol
 
