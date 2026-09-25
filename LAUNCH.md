@@ -45,10 +45,10 @@ Cheap operations (search, recall, impact checks) currently get routed through ex
 
 v0.1.0 — the core is solid (96 tests, 5 harness targets, 3 MCP servers, 10 skills, handoff RFC). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
 
-Repo: <GITHUB_URL>
+Repo: https://github.com/abtrader00900/agentos
 
 ```bash
-git clone <GITHUB_URL> && cd agentos
+git clone https://github.com/abtrader00900/agentos && cd agentos
 npm install && npm test
 npx tsx src/cli.ts init     # in any project
 ```
