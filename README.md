@@ -110,6 +110,25 @@ CLAUDE.md  AGENTS.md   .antigravity/
 - [x] tree-sitter codegraph (Issue #4) — WASM parsing backend + lower-case PHP namespace resolution
 - [x] GitHub Actions CI — test matrix (Node 20/22) + extension compile
 
+## Community Skill Registry (Issue #3)
+
+Skills are just directories — `SKILL.md` + `test/`. Install from **any git source**, no API keys:
+
+```bash
+agentos skill install owner/repo        # GitHub shorthand
+agentos skill install https://gitlab.com/team/skills.git
+agentos skill search deploy             # bundled + registry search
+```
+
+Point `skillRegistry` at an index JSON to search a community registry:
+
+```yaml
+skillRegistry: https://raw.githubusercontent.com/abtrader00900/agentos/master/skills/registry.json
+```
+
+Index format: `{ "version": 1, "skills": [{ "name", "description", "repo", "path?" }] }`.
+Every install is validated (frontmatter, "Use when" trigger, contract test) before it lands in `.agentos/skills/`.
+
 ## Editor Integrations
 
 ### VS Code (`editors/vscode/`)

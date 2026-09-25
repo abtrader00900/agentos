@@ -4,7 +4,7 @@ import { init } from "./commands/init.js";
 import { install } from "./commands/install.js";
 import { sync } from "./commands/sync.js";
 import { status } from "./commands/status.js";
-import { skillList, skillInstall, skillTest } from "./commands/skill.js";
+import { skillList, skillInstall, skillSearch, skillTest } from "./commands/skill.js";
 import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
 import { learn } from "./commands/learn.js";
@@ -100,8 +100,13 @@ skill
 
 skill
   .command("install <name>")
-  .description("Install a bundled skill into this project")
+  .description("Install a skill: bundled name, owner/repo, or git URL")
   .action((name: string) => { try { skillInstall(name); } catch (e) { fail(e); } });
+
+skill
+  .command("search <query>")
+  .description("Search bundled skills + the configured community registry (Issue #3)")
+  .action(async (query: string) => { try { await skillSearch(query); } catch (e) { fail(e); } });
 
 skill
   .command("test")

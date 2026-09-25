@@ -43,6 +43,8 @@ export const agentConfigSchema = z.object({
   skills: z.array(skillRefSchema).default([]),
   /** MCP servers to register with harnesses */
   mcpServers: z.array(mcpServerRefSchema).default([]),
+  /** Community skill registry index (https URL, file:// path, or local path) */
+  skillRegistry: z.string().optional(),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;

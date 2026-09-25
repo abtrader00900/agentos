@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { listSkills, testSkills, installSkill, bundledSkillsRoot } from "../core/skills.js";
+import { installSkillsFromGit, looksLikeGitSource, searchSkills } from "../core/registry.js";
 
 /** FR-2.6: agentos skill list / install / test */
 
@@ -37,8 +38,29 @@ export function skillList(options: { cwd?: string; json?: boolean } = {}): strin
 
 export function skillInstall(name: string, options: { cwd?: string } = {}): void {
   const cwd = options.cwd ?? process.cwd();
+  if (looksLikeGitSource(name)) {
+    const installed = installSkillsFromGit(name, cwd);
+    for (const n of installed) console.log(`✓ Installed skill '${n}' → .agentos/skills/${n}`);
+    return;
+  }
   installSkill(bundledSkillsRoot(), cwd, name);
   console.log(`✓ Installed skill '${name}' → .agentos/skills/${name}`);
+}
+
+export async function skillSearch(query: string, options: { cwd?: string } = {}): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
+  const results = await searchSkills(query, cwd);
+  if (!results.length) {
+    console.log(`No skills matching '${query}'.`);
+    console.log("Contribute one: https://github.com/abtrader00900/agentos/tree/master/skills");
+    return;
+  }
+  for (const r of results) {
+    const tag = r.origin === "bundled" ? "bundled" : (r.repo ?? "registry");
+    console.log(`  ${r.name}
+      [${tag}] ${r.description.slice(0, 100)}`);
+  }
+  console.log(`\n${results.length} match(es). Install: agentos skill install <name> | <owner/repo> | <git-url>`);
 }
 
 export function skillTest(options: { cwd?: string } = {}): void {

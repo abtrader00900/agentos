@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "android-testing",
+      "description": "Android (Kotlin) test strategy \u2014 unit tests with JUnit5/Robolectric, coroutine test rules, and Compose UI tests with fake repositories. Use when writing, reviewing, or fixing tests for Android code involving ViewModels, coroutines/Flow, Room, or Compose screens.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/android-testing"
+    },
+    {
+      "name": "api-contract",
+      "description": "Laravel API consistency and versioning review. Use when adding or changing API endpoints, resources, or validation rules.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/api-contract"
+    },
+    {
+      "name": "code-review",
+      "description": "Structured code review pass with severity-ranked findings. Use when asked to review a diff, PR, or changeset before merge.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/code-review"
+    },
+    {
+      "name": "commit-message",
+      "description": "Conventional Commits messages from a diff. Use when asked to write or improve a commit message.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/commit-message"
+    },
+    {
+      "name": "db-migration-check",
+      "description": "Laravel migration safety review. Use when writing, reviewing, or running database migrations.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/db-migration-check"
+    },
+    {
+      "name": "doc-sync",
+      "description": "Keep project docs truthful after code changes. Use when a task changes behavior, setup steps, commands, or architecture.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/doc-sync"
+    },
+    {
+      "name": "pr-description",
+      "description": "PR description draft from a branch diff. Use when asked to write or improve a pull request description.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/pr-description"
+    },
+    {
+      "name": "refactor-safe",
+      "description": "Safe refactoring protocol using impact analysis and green tests. Use when restructuring existing code without changing behavior.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/refactor-safe"
+    },
+    {
+      "name": "security-scan",
+      "description": "Security checklist sweep for Laravel + React codebases. Use when reviewing changes touching auth, input, queries, files, or config.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/security-scan"
+    },
+    {
+      "name": "tdd-laravel",
+      "description": "Red-green-refactor TDD workflow for Laravel features. Use when implementing a new feature or fixing a bug in a Laravel project.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/tdd-laravel"
+    },
+    {
+      "name": "tdd-react",
+      "description": "Red-green-refactor TDD for React components and hooks with Vitest + Testing Library. Use when building or fixing React UI logic.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/tdd-react"
+    }
+  ]
+}
