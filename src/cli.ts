@@ -5,6 +5,8 @@ import { install } from "./commands/install.js";
 import { sync } from "./commands/sync.js";
 import { status } from "./commands/status.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
+import { createSupersearchServer } from "./mcp/supersearch/server.js";
+import { createCodegraphServer } from "./mcp/codegraph/server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ALL_HARNESSES } from "./core/schema.js";
 import type { HarnessName } from "./core/schema.js";
@@ -64,6 +66,22 @@ mcp
   .description("Run the memory MCP server over stdio")
   .action(async () => {
     const server = createMemoryServer();
+    await server.connect(new StdioServerTransport());
+  });
+
+mcp
+  .command("supersearch")
+  .description("Run the supersearch MCP server over stdio (text/symbol/git-history search)")
+  .action(async () => {
+    const server = createSupersearchServer();
+    await server.connect(new StdioServerTransport());
+  });
+
+mcp
+  .command("codegraph")
+  .description("Run the codegraph MCP server over stdio (dependency graph + impact analysis)")
+  .action(async () => {
+    const server = createCodegraphServer();
     await server.connect(new StdioServerTransport());
   });
 

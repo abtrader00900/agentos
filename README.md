@@ -64,11 +64,15 @@ mcpServers:
 | `agentos status` | Project, harnesses, drift, memory status |
 | `agentos mcp memory` | Memory MCP server (stdio — Claude Code/Codex/Antigravity) |
 
-### MCP Tools (memory)
+### MCP Tools
 
-`memory_store` · `memory_recall` · `memory_get` · `memory_forget` · `memory_topics` · `memory_export` · `memory_stats`
-
+**memory** — `memory_store` · `memory_recall` · `memory_get` · `memory_forget` · `memory_topics` · `memory_export` · `memory_stats`
 Storage: `<project>/.agentos/memory.db` — local SQLite, WAL mode, markdown exportable.
+
+**supersearch** — `supersearch_text` (regex across project, .gitignore-aware, ripgrep when available) · `supersearch_symbol` (function/class/method definitions via ast-grep) · `supersearch_history` (pickaxe — which commit changed a string) · `supersearch_blame` (per-line authorship)
+
+**codegraph** — `codegraph_impact` (what breaks if I change this file — transitive) · `codegraph_deps` · `codegraph_orphans` (dead code candidates) · `codegraph_cycles` · `codegraph_rebuild` · `codegraph_stats`
+Deterministic import-graph (TS/JS, Python, PHP/Laravel, Go, Java/Kotlin), SQLite-backed, incremental mtime-based rebuilds.
 
 ## Architecture
 
@@ -96,7 +100,7 @@ CLAUDE.md  AGENTS.md   .antigravity/
 ## Roadmap
 
 - [x] Phase 1: config schema, 3 harness generators, drift detection, memory MCP
-- [ ] Phase 2: supersearch + codegraph MCP servers
+- [x] Phase 2: supersearch (text/symbol/git) + codegraph (impact/orphans/cycles) MCP servers
 - [ ] Phase 3: skills framework + 10 core skills
 - [ ] Phase 4: handoff protocol + launch
 

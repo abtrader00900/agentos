@@ -34,6 +34,12 @@ mcpServers:
   - name: memory
     command: npx
     args: ["tsx", "/path/to/agentos/src/mcp/memory/server.ts"]
+  - name: supersearch
+    command: npx
+    args: ["tsx", "/path/to/agentos/src/mcp/supersearch/server.ts"]
+  - name: codegraph
+    command: npx
+    args: ["tsx", "/path/to/agentos/src/mcp/codegraph/server.ts"]
   # After `npm i -g agentos`, use instead:
   # - name: memory
   #   command: agentos
