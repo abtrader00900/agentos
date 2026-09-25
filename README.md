@@ -20,18 +20,16 @@ Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf —
 ## Quick Start
 
 ```bash
-npm install
-npm test            # full suite
+npm install -g @basit0090/agent-os
 
 # in any project:
 cd your-project
-/path/to/agentos/examples se config copy karo, ya:
-node /path/to/agentos/dist/cli.js init
-
-# dev mode:
-npx tsx /path/to/agentos/src/cli.ts install
-npx tsx /path/to/agentos/src/cli.ts status
+agentos init        # creates agent.config.yaml
+agentos install     # configs + MCP servers for all 5 harnesses
+agentos doctor      # health check
 ```
+
+From source: `npm install && npm test` (118 tests), dev CLI: `npx tsx src/cli.ts <cmd>`.
 
 ### agent.config.yaml
 
