@@ -22,7 +22,10 @@ export interface SkillValidation {
 }
 
 export function parseSkill(skillMd: string): { name?: string; description?: string; body: string } {
-  const m = skillMd.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  // Accept CRLF: skills authored on Windows, and community skills pulled from
+  // git by the registry, arrive with \r\n. An LF-only regex silently fails to
+  // match, so every such skill parsed as "no frontmatter" and failed validation.
+  const m = skillMd.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { body: skillMd };
   const fm = parseYaml(m[1]) as Record<string, unknown>;
   return {

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
@@ -35,10 +34,13 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   }
 
   // 2. harness configs present
+  // sync() generates for every harness in generators/index.ts, so check them all.
   const harnessFiles: Record<string, string> = {
     "claude-code": "CLAUDE.md",
     codex: "AGENTS.md",
     antigravity: ".antigravity/config.md",
+    cursor: ".cursor/rules/agentos.mdc",
+    windsurf: ".windsurf/rules/agentos.md",
   };
   for (const [h, f] of Object.entries(harnessFiles)) {
     if (existsSync(path.join(cwd, f))) {
@@ -60,8 +62,8 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   for (const s of config.mcpServers) {
     const cmd = s.command;
     const isLocalScript = s.args.some((a) => a.endsWith(".ts") || a.endsWith(".js"));
-    const onPath = isCommandOnPath(cmd);
-    if (cmd === "npx" || cmd === "node" || cmd === "agentos" || onPath || isLocalScript) {
+    const known = cmd === "npx" || cmd === "node" || cmd === "agentos";
+    if (known || isLocalScript || isCommandOnPath(cmd)) {
       add({ name: `mcp:${s.name}`, status: "pass", detail: `${cmd} ${s.args.join(" ")}` });
     } else {
       add({ name: `mcp:${s.name}`, status: "fail", detail: `command '${cmd}' not found on PATH`, fix: "Fix mcpServers in agent.config.yaml" });
@@ -115,9 +117,29 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   return report(checks, options);
 }
 
+/**
+ * Resolve a command on PATH *without running it*.
+ *
+ * doctor reads mcpServers straight out of agent.config.yaml, which is a
+ * committed, shared file -- probing with `cmd --version` meant whoever wrote
+ * that config got arbitrary code execution out of a health check. Scanning PATH
+ * also fixes Windows, where the old `which` fallback does not exist and
+ * executables are resolved through PATHEXT (.cmd shims for npx/npm).
+ */
 function isCommandOnPath(cmd: string): boolean {
-  if (spawnSync(cmd, ["--version"], { stdio: "ignore" }).status === 0) return true;
-  return spawnSync("which", [cmd], { stdio: "ignore" }).status === 0;
+  if (cmd.includes("/") || cmd.includes("\\")) return existsSync(cmd);
+
+  const exts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+      : [""];
+
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      if (existsSync(path.join(dir, cmd + ext))) return true;
+    }
+  }
+  return false;
 }
 
 function report(checks: Check[], options: { quiet?: boolean }): { checks: Check[]; ok: boolean } {
