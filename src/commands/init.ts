@@ -1,8 +1,15 @@
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+/**
+ * Published npm name. The generated config runs the MCP servers through
+ * `npx -y <PKG>`, so this must match package.json exactly -- "agentos" is an
+ * unrelated placeholder package owned by someone else on the public registry.
+ */
+const PKG = "@basit0090/agent-os";
+
 const TEMPLATE = `# AgentOS project config — single source of truth for all agent harnesses.
-# Docs: https://github.com/yourname/agentos
+# Docs: https://github.com/abtrader00900/agentos
 
 project:
   name: my-project
@@ -23,7 +30,13 @@ skills:
 mcpServers:
   - name: memory
     command: npx
-    args: ["-y", "agentos", "mcp", "memory"]
+    args: ["-y", "${PKG}", "mcp", "memory"]
+  - name: supersearch
+    command: npx
+    args: ["-y", "${PKG}", "mcp", "supersearch"]
+  - name: codegraph
+    command: npx
+    args: ["-y", "${PKG}", "mcp", "codegraph"]
 `;
 
 export function init(options: { cwd?: string; force?: boolean } = {}): void {
