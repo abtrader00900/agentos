@@ -301,3 +301,15 @@ describe("cli", () => {
     expect(out.trim()).toBe(version);
   });
 });
+
+describe("package.json", () => {
+  it("declares none of the scripts that make npm run a nested install for git dependencies", () => {
+    // pacote runs `npm install` inside the clone for any of these; under `npm install -g`
+    // that nested run inherits --global/--prefix and wrecks the tree being installed.
+    // dist/ is committed instead, so a git install needs no build step at all.
+    const pkg = createRequire(import.meta.url)("../package.json") as { scripts: Record<string, string> };
+    for (const s of ["preinstall", "install", "postinstall", "prepare", "prepack", "build"]) {
+      expect(pkg.scripts[s], `scripts.${s}`).toBeUndefined();
+    }
+  });
+});
