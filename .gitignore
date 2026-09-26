@@ -4,4 +4,3 @@ dist/
 .agentos/
 editors/vscode/out/
 editors/vscode/node_modules/
-.prepare/

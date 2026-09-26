@@ -66,8 +66,9 @@ function parseGitignore(cwd: string): ((rel: string) => boolean)[] {
 }
 
 let rgCached: boolean | undefined;
+/** ripgrep >= 13 (has --no-require-git); an older rg falls back to the builtin scanner */
 function rgAvailable(): boolean {
-  if (rgCached === undefined) rgCached = spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0;
+  if (rgCached === undefined) rgCached = spawnSync("rg", ["--no-require-git", "--version"], { stdio: "ignore" }).status === 0;
   return rgCached;
 }
 
