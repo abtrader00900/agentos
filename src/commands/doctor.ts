@@ -3,7 +3,7 @@ import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { detectDrift } from "../core/manifest.js";
 import { HARNESS_MARKER } from "../generators/index.js";
-import { testSkills, bundledSkillsRoot, listSkills } from "../core/skills.js";
+import { testSkills, bundledSkillsRoot } from "../core/skills.js";
 import { MemoryStore } from "../mcp/memory/store.js";
 import { PKG } from "./init.js";
 
