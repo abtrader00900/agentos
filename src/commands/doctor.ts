@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { detectDrift } from "../core/manifest.js";
+import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot, listSkills } from "../core/skills.js";
 import { MemoryStore } from "../mcp/memory/store.js";
 
@@ -35,13 +36,7 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
 
   // 2. harness configs present
   // sync() generates for every harness in generators/index.ts, so check them all.
-  const harnessFiles: Record<string, string> = {
-    "claude-code": "CLAUDE.md",
-    codex: "AGENTS.md",
-    antigravity: ".antigravity/config.md",
-    cursor: ".cursor/rules/agentos.mdc",
-    windsurf: ".windsurf/rules/agentos.md",
-  };
+  const harnessFiles: Record<string, string> = HARNESS_MARKER;
   for (const [h, f] of Object.entries(harnessFiles)) {
     if (existsSync(path.join(cwd, f))) {
       add({ name: `harness:${h}`, status: "pass", detail: f });
@@ -51,7 +46,7 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   }
 
   // 3. drift
-  const drift = detectDrift(cwd, new Map());
+  const drift = detectDrift(cwd);
   if (drift.drifted.length) {
     add({ name: "drift", status: "warn", detail: `hand-edited: ${drift.drifted.join(", ")}`, fix: "Move edits into agent.config.yaml, then: agentos sync --force" });
   } else {

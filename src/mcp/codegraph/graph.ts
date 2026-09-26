@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * FR-5.x: file-level dependency graph.
- * Deterministic import extraction (no model), SQLite storage,
+ * Deterministic import extraction (no model), JSON storage,
  * incremental rebuild via mtime tracking (FR-5.4/5.5).
  *
  * Import extraction: tree-sitter (WASM) when available (Issue #4),
@@ -40,7 +40,16 @@ export interface ImportRef {
   kind: "import" | "require";
 }
 
-const RESOLVE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".php", ".go", ".java", ".kt"];
+const JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+const RESOLVE_EXTS = [...JS_EXTS, ".py", ".php", ".go", ".java", ".kt"];
+
+/** Extensions a specifier may resolve to, by the importer's language. */
+function extsFor(importerExt: string): string[] {
+  if (JS_EXTS.includes(importerExt)) return JS_EXTS;
+  if (importerExt === ".java" || importerExt === ".kt") return [".java", ".kt"];
+  if (RESOLVE_EXTS.includes(importerExt)) return [importerExt];
+  return RESOLVE_EXTS;
+}
 
 export function extractImports(filePath: string, content: string): ImportRef[] {
   const ext = path.extname(filePath);
@@ -72,40 +81,113 @@ export function extractImports(filePath: string, content: string): ImportRef[] {
 
 // ---------- module resolution ----------
 
-export function resolveModule(cwd: string, importerRel: string, specifier: string): string | null {
+/** readdir results for one resolution pass (update() hands the same map to every call). */
+export type DirCache = Map<string, Set<string>>;
+
+function listDir(dir: string, cache?: DirCache): Set<string> {
+  let names = cache?.get(dir);
+  if (!names) {
+    try { names = new Set(readdirSync(dir)); } catch { names = new Set(); }
+    cache?.set(dir, names);
+  }
+  return names;
+}
+
+/**
+ * existsSync is case-insensitive on Windows and default macOS volumes, so
+ * "App/Models/X.php" reports found when only "app/Models/X.php" exists — and
+ * the wrong-case edge never matches the real file key. Require the on-disk spelling.
+ */
+function existsExact(cwd: string, abs: string, cache?: DirCache): boolean {
+  if (!existsSync(abs)) return false;
+  const rel = path.relative(cwd, abs);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return true; // outside the project: nothing to compare against
+  let dir = cwd;
+  for (const seg of rel.split(path.sep)) {
+    if (!listDir(dir, cache).has(seg)) return false;
+    dir = path.join(dir, seg);
+  }
+  return true;
+}
+
+function isDir(p: string): boolean {
+  try { return statSync(p).isDirectory(); } catch { return false; }
+}
+
+const JAVA_ROOTS = ["", "src", "src/main/java", "src/main/kotlin", "app/src/main/java", "app/src/main/kotlin"];
+
+export function resolveModule(cwd: string, importerRel: string, specifier: string, cache?: DirCache): string | null {
   const importerDir = path.dirname(path.join(cwd, importerRel));
+  const lang = path.extname(importerRel);
+  const exts = extsFor(lang);
   const rel = (p: string) => path.relative(cwd, p).replace(/\\/g, "/");
+  const tryAt = (base: string) => resolveAsFileOrDir(cwd, base, exts, rel, cache);
 
   // relative imports
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
-    const base = path.resolve(importerDir, specifier);
-    return resolveAsFileOrDir(base, rel);
+    return tryAt(path.resolve(importerDir, specifier));
   }
 
-  // absolute-from-root style (e.g. "/app/Models/User" in Laravel, "@/lib/x" aliases)
-  const cleaned = specifier.replace(/^@[/]/, "");
-  const fromRoot = resolveAsFileOrDir(path.join(cwd, cleaned), rel);
-  if (fromRoot) return fromRoot;
+  // Python relative: "from .x import y" / "from .. import z" — each extra dot walks up one package
+  if (lang === ".py") {
+    const m = specifier.match(/^(\.+)(.*)$/);
+    if (m) {
+      let base = importerDir;
+      for (let i = 1; i < m[1].length; i++) base = path.dirname(base);
+      return tryAt(m[2] ? path.join(base, ...m[2].split(".")) : base);
+    }
+  }
 
-  // PHP namespace style: App\Models\User → app/Models/User.php
+  // dotted packages: Python "a.b.c", Java/Kotlin "com.x.Foo" ("com.x.Foo.CONST" → drop the member)
+  if ([".py", ".java", ".kt"].includes(lang) && specifier.includes(".") && !specifier.includes("/")) {
+    const parts = specifier.split(".");
+    const roots = lang === ".py" ? ["", "src"] : JAVA_ROOTS;
+    for (const cand of [parts, parts.slice(0, -1)]) {
+      if (!cand.length) continue;
+      for (const root of roots) {
+        const r = tryAt(path.join(cwd, root, ...cand));
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
+  // absolute-from-root style ("/app/Models/User" in Laravel, "@/lib/x" and "~/lib/x" aliases → root or src/)
+  const cleaned = specifier.replace(/^[@~]\//, "");
+  for (const root of ["", "src"]) {
+    const r = tryAt(path.join(cwd, root, cleaned));
+    if (r) return r;
+  }
+
+  // PHP namespace style: App\Models\User → App/Models/User.php, then PSR-4 lower-case app/
   if (/^([A-Za-z_][\w]*\\)+[A-Za-z_][\w]*$/.test(specifier)) {
     const phpPath = specifier.replace(/\\/g, "/");
-    const fromApp = resolveAsFileOrDir(path.join(cwd, phpPath), rel);
-    if (fromApp) return fromApp;
-    const lowerApp = resolveAsFileOrDir(path.join(cwd, phpPath.charAt(0).toLowerCase() + phpPath.slice(1)), rel);
-    if (lowerApp) return lowerApp;
+    return tryAt(path.join(cwd, phpPath)) ?? tryAt(path.join(cwd, phpPath.charAt(0).toLowerCase() + phpPath.slice(1)));
   }
 
   return null; // external package or unresolved alias
 }
 
-function resolveAsFileOrDir(base: string, rel: (p: string) => string): string | null {
-  for (const ext of RESOLVE_EXTS) {
-    if (existsSync(base + ext)) return rel(base + ext);
+const TS_FOR_JS: Record<string, string[]> = { ".js": [".ts", ".tsx"], ".mjs": [".mts"], ".cjs": [".cts"] };
+
+function resolveAsFileOrDir(cwd: string, base: string, exts: string[], rel: (p: string) => string, cache?: DirCache): string | null {
+  const ok = (p: string) => existsExact(cwd, p, cache);
+  const ext = path.extname(base);
+  if (ext && ok(base) && !isDir(base)) return rel(base);
+  // ESM TypeScript writes `import "./x.js"` for x.ts
+  if (TS_FOR_JS[ext]) {
+    const stem = base.slice(0, -ext.length);
+    for (const e of TS_FOR_JS[ext]) if (ok(stem + e)) return rel(stem + e);
   }
-  if (existsSync(base) && statSync(base).isDirectory()) {
-    for (const ext of RESOLVE_EXTS) {
-      if (existsSync(path.join(base, "index" + ext))) return rel(path.join(base, "index" + ext));
+  for (const e of exts) {
+    if (ok(base + e)) return rel(base + e);
+  }
+  if (ok(base) && isDir(base)) {
+    const indexes = exts.includes(".py")
+      ? ["__init__.py"]
+      : exts.filter((e) => JS_EXTS.includes(e)).map((e) => "index" + e);
+    for (const name of indexes) {
+      if (ok(path.join(base, name))) return rel(path.join(base, name));
     }
   }
   return null;
@@ -141,7 +223,9 @@ export function scanProject(cwd: string): Map<string, number> {
 // ---------- graph store ----------
 
 interface FileRow { path: string; mtime: number }
-interface EdgeRow { src: string; dst: string; kind: string }
+interface EdgeRow { src: string; dst: string; kind: string; spec?: string }
+/** An import that did not resolve when its file was scanned — retried when files appear (FR-5.4). */
+interface PendingRow { src: string; spec: string; kind: string }
 
 export class GraphStore {
   private db: JsonStore;
@@ -158,6 +242,10 @@ export class GraphStore {
     return this.db.table<EdgeRow>("edges");
   }
 
+  private pending(): PendingRow[] {
+    return this.db.table<PendingRow>("pending");
+  }
+
   private setFiles(files: Map<string, number>): void {
     this.db.table<FileRow>("files").splice(
       0,
@@ -171,35 +259,65 @@ export class GraphStore {
     t.splice(0, t.length, ...edges);
   }
 
+  private setPending(rows: PendingRow[]): void {
+    const t = this.db.table<PendingRow>("pending");
+    t.splice(0, t.length, ...rows);
+  }
+
   /** FR-5.4: incremental — only re-extract files whose mtime changed */
   update(cwd: string): { scanned: number; changed: number } {
+    const cache: DirCache = new Map();
     const onDisk = scanProject(cwd);
     const fileRows = this.files();
-    const edges = this.edges();
+    let edges = this.edges().slice();
+    let pending = this.pending().slice();
 
     const changed: string[] = [];
+    const added: string[] = [];
     for (const [p, mtime] of onDisk) {
       if (fileRows.get(p) !== mtime) changed.push(p);
+      if (!fileRows.has(p)) added.push(p);
     }
     const removed = new Set([...fileRows.keys()].filter((p) => !onDisk.has(p)));
 
     if (removed.size) {
-      this.setEdges(edges.filter((e) => !removed.has(e.src) && !removed.has(e.dst)));
+      // edges into a removed file go back to pending so a rename/restore re-links them
+      for (const e of edges) {
+        if (removed.has(e.dst) && !removed.has(e.src) && e.spec) pending.push({ src: e.src, spec: e.spec, kind: e.kind });
+      }
+      edges = edges.filter((e) => !removed.has(e.src) && !removed.has(e.dst));
+      pending = pending.filter((p) => !removed.has(p.src));
       for (const p of removed) fileRows.delete(p);
     }
 
     const changedSet = new Set(changed);
-    const newEdges = this.edges().filter((e) => !changedSet.has(e.src));
+    edges = edges.filter((e) => !changedSet.has(e.src));
+    pending = pending.filter((p) => !changedSet.has(p.src));
+
+    const link = (src: string, ref: ImportRef) => {
+      const dst = resolveModule(cwd, src, ref.specifier, cache);
+      if (dst && dst !== src) edges.push({ src, dst, kind: ref.kind, spec: ref.specifier });
+      else if (!dst) pending.push({ src, spec: ref.specifier, kind: ref.kind });
+    };
+
     for (const p of changed) {
       fileRows.set(p, onDisk.get(p)!);
       let content: string;
       try { content = readFileSync(path.join(cwd, p), "utf8"); } catch { continue; }
-      for (const ref of extractImportsAuto(p, content)) {
-        const dst = resolveModule(cwd, p, ref.specifier);
-        if (dst && dst !== p) newEdges.push({ src: p, dst, kind: ref.kind });
-      }
+      for (const ref of extractImportsAuto(p, content)) link(p, ref);
     }
-    this.setEdges(newEdges);
+
+    // a file that appeared may be what an earlier-scanned import was pointing at
+    // ponytail: retries every pending specifier of unchanged files (externals included);
+    // index pending by basename if this ever shows up in a profile
+    if (added.length) {
+      const retry = pending.filter((p) => !changedSet.has(p.src));
+      pending = pending.filter((p) => changedSet.has(p.src));
+      for (const r of retry) link(r.src, { specifier: r.spec, kind: r.kind as ImportRef["kind"] });
+    }
+
+    this.setEdges(edges);
+    this.setPending(pending);
     this.setFiles(fileRows);
     this.db.save();
     return { scanned: onDisk.size, changed: changed.length };
@@ -256,6 +374,7 @@ export class GraphStore {
 
   rebuild(cwd: string): { scanned: number; changed: number } {
     this.setEdges([]);
+    this.setPending([]);
     this.setFiles(new Map());
     this.db.save();
     return this.update(cwd);

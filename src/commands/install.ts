@@ -1,11 +1,15 @@
-import { existsSync, mkdirSync, writeFileSync, cpSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
+import { bundledSkillsRoot, installSkill } from "../core/skills.js";
+import { installSkillsFromDir, installSkillsFromGit } from "../core/registry.js";
 import { sync } from "./sync.js";
 
 export interface InstallOptions {
   cwd?: string;
   quiet?: boolean;
+  /** passed through to sync: overwrite hand-edited / pre-existing harness files (backed up as .bak) */
+  force?: boolean;
 }
 
 const log = (msg: string, quiet?: boolean) => { if (!quiet) console.log(msg); };
@@ -13,15 +17,14 @@ const log = (msg: string, quiet?: boolean) => { if (!quiet) console.log(msg); };
 const GITIGNORE_ADDITIONS = [
   "",
   "# AgentOS",
-  ".agentos/memory.json",
-  ".agentos/memory.json-*",
+  ".agentos/memory.json*",
   ".agentos/graph.json*",
   "agent.config.local.yaml",
   "",
 ];
 
 /**
- * FR-2.1: setup project — configs via sync, .agentos/ dirs, .gitignore, core skills.
+ * FR-2.1: setup project — configs via sync, .agentos/ dirs, .gitignore, skills.
  */
 export function install(options: InstallOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
@@ -40,22 +43,29 @@ export function install(options: InstallOptions = {}): void {
     log("  ✓ .gitignore updated", options.quiet);
   }
 
-  // 3. copy bundled skills into .agentos/skills
-  const bundledSkillsDir = path.resolve(import.meta.dirname, "../../skills");
-  if (existsSync(bundledSkillsDir)) {
-    for (const skillName of config.skills.map((s) => s.name)) {
-      const src = path.join(bundledSkillsDir, skillName);
-      if (existsSync(src)) {
-        cpSync(src, path.join(cwd, ".agentos/skills", skillName), { recursive: true });
-        log(`  ✓ skill installed: ${skillName}`, options.quiet);
-      } else if (!config.skills.find((s) => s.name === skillName)?.source) {
-        log(`  ⚠ bundled skill not found: ${skillName}`, options.quiet);
+  // 3. skills: bundled by name, or from `source` (local path, git URL, owner/repo[#dir])
+  for (const s of config.skills) {
+    try {
+      if (s.source) {
+        const local = path.resolve(cwd, s.source);
+        const names = existsSync(local)
+          ? installSkillsFromDir(local, cwd, s.source)
+          : installSkillsFromGit(s.source, cwd);
+        for (const n of names) log(`  ✓ skill installed: ${n} (${s.source})`, options.quiet);
+      } else if (existsSync(path.join(bundledSkillsRoot(), s.name))) {
+        installSkill(bundledSkillsRoot(), cwd, s.name);
+        log(`  ✓ skill installed: ${s.name}`, options.quiet);
+      } else {
+        log(`  ⚠ skill not found: ${s.name} (not bundled — add a "source", or run: agentos skill search ${s.name})`, options.quiet);
       }
+    } catch (e) {
+      // a failing skill (offline clone, bad SKILL.md) must not block config generation
+      log(`  ⚠ skill ${s.name}: ${(e as Error).message.split("\n")[0]}`, options.quiet);
     }
   }
 
   // 4. generate configs for all harnesses
-  sync({ cwd, quiet: options.quiet });
+  sync({ cwd, quiet: options.quiet, force: options.force });
 
-  log(`\nDone. Open Claude Code / Codex / Antigravity — configs + MCP are ready.`, options.quiet);
+  log(`\nDone. Open Claude Code / Codex / Antigravity / Cursor / Windsurf — configs + MCP are ready.`, options.quiet);
 }

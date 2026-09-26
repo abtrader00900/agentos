@@ -11,6 +11,11 @@ export const windsurfGenerator: HarnessGenerator = {
   generate(config: AgentConfig): GeneratedFile[] {
     const rules = rulesForHarness(config, "windsurf");
     const lines: string[] = [
+      "---",
+      "trigger: always_on",
+      `description: AgentOS rules — ${config.project.name}`,
+      "---",
+      "",
       `# ${config.project.name}`,
       "",
       config.project.description ?? "",

@@ -2,12 +2,23 @@ import type { AgentConfig } from "../core/schema.js";
 import { rulesForHarness } from "../core/schema.js";
 import type { GeneratedFile, HarnessGenerator } from "./types.js";
 
-/** .antigravity/ config for Antigravity (FR-1.4) */
+/**
+ * Antigravity (FR-1.4).
+ * Rules: .agents/rules/*.md — frontmatter is required and `trigger: always_on`
+ * puts the rule in every turn (https://antigravity.google/docs/rules).
+ * MCP:   .agents/mcp_config.json, same { mcpServers } shape as Claude Code
+ *        (https://antigravity.google/docs/mcp).
+ */
 export const antigravityGenerator: HarnessGenerator = {
   harness: "antigravity",
   generate(config: AgentConfig): GeneratedFile[] {
     const rules = rulesForHarness(config, "antigravity");
     const lines: string[] = [
+      "---",
+      "trigger: always_on",
+      `description: AgentOS rules — ${config.project.name}`,
+      "---",
+      "",
       `# ${config.project.name}`,
       "",
       config.project.description ?? "",
@@ -36,8 +47,8 @@ export const antigravityGenerator: HarnessGenerator = {
     };
 
     return [
-      { path: ".antigravity/config.md", content: lines.join("\n") },
-      { path: ".antigravity/mcp.json", content: JSON.stringify(mcp, null, 2) + "\n" },
+      { path: ".agents/rules/agentos.md", content: lines.join("\n") },
+      { path: ".agents/mcp_config.json", content: JSON.stringify(mcp, null, 2) + "\n" },
     ];
   },
 };

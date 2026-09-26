@@ -27,12 +27,9 @@ export interface FactInput {
 
 export class MemoryStore {
   private db: JsonStore;
-  private nextId: number;
 
   constructor(dbPath: string) {
     this.db = new JsonStore(dbPath);
-    const facts = this.db.table<Fact>("facts");
-    this.nextId = facts.reduce((max, f) => Math.max(max, f.id), 0) + 1;
   }
 
   store(input: FactInput): Fact {
@@ -48,7 +45,7 @@ export class MemoryStore {
       return { ...existing };
     }
     const fact: Fact = {
-      id: this.nextId++,
+      id: facts.reduce((max, f) => Math.max(max, f.id), 0) + 1, // per write: another process may have added facts
       topic: input.topic,
       key: input.key,
       value: input.value,

@@ -38,19 +38,35 @@ export function astGrepBinary(): string | null {
   return cachedBinary;
 }
 
-// per-language definition patterns for ast-grep
-const PATTERNS: { kind: SymbolMatch["kind"]; langs: string[]; pattern: string }[] = [
-  { kind: "function", langs: ["ts", "tsx", "js", "jsx", "mjs", "cjs"], pattern: "function $NAME($$$)" },
-  { kind: "method", langs: ["ts", "tsx", "js", "jsx"], pattern: "$NAME($$$) { $$$ }" },
-  { kind: "class", langs: ["ts", "tsx", "js", "jsx", "py", "php", "java", "kt"], pattern: "class $NAME { $$$ }" },
-  { kind: "interface", langs: ["ts", "tsx"], pattern: "interface $NAME { $$$ }" },
-  { kind: "function", langs: ["py"], pattern: "def $NAME($$$):" },
-  { kind: "class", langs: ["py"], pattern: "class $NAME($$$):" },
-  { kind: "function", langs: ["php"], pattern: "function $NAME($$$) { $$$ }" },
-  { kind: "function", langs: ["go"], pattern: "func $NAME($$$) { $$$ }" },
-  { kind: "struct", langs: ["go"], pattern: "type $NAME struct { $$$ }" },
-  { kind: "function", langs: ["java", "kt"], pattern: "fun $NAME($$$) { $$$ }" },
-  { kind: "class", langs: ["java"], pattern: "class $NAME { $$$ }" },
+/**
+ * One ast-grep rule per (language, definition node). Matching on the node
+ * *kind* (not a textual pattern) means `if (x) { … }` can never come back as a
+ * method, and the name is read from the node's `name` field.
+ */
+const byField = (kind: string) => `kind: ${kind}\n  has: { field: name, pattern: $NAME }`;
+// grammars without a `name` field: the identifier that is a direct child
+const byChild = (kind: string, child: string) => `kind: ${kind}\n  has: { kind: ${child}, pattern: $NAME, stopBy: neighbor }`;
+
+const RULES: { lang: string; kind: SymbolMatch["kind"]; rule: string }[] = [
+  ...["TypeScript", "Tsx", "JavaScript"].flatMap((lang) => [
+    { lang, kind: "function" as const, rule: byField("function_declaration") },
+    { lang, kind: "method" as const, rule: byField("method_definition") },
+    { lang, kind: "class" as const, rule: byField("class_declaration") },
+    ...(lang === "JavaScript" ? [] : [{ lang, kind: "interface" as const, rule: byField("interface_declaration") }]),
+  ]),
+  { lang: "Python", kind: "function", rule: byField("function_definition") },
+  { lang: "Python", kind: "class", rule: byField("class_definition") },
+  { lang: "Php", kind: "function", rule: byField("function_definition") },
+  { lang: "Php", kind: "method", rule: byField("method_declaration") },
+  { lang: "Php", kind: "class", rule: byField("class_declaration") },
+  { lang: "Go", kind: "function", rule: byField("function_declaration") },
+  { lang: "Go", kind: "method", rule: byField("method_declaration") },
+  { lang: "Go", kind: "struct", rule: `kind: type_spec\n  all:\n    - has: { field: name, pattern: $NAME }\n    - has: { field: type, kind: struct_type }` },
+  { lang: "Java", kind: "method", rule: byField("method_declaration") },
+  { lang: "Java", kind: "class", rule: byField("class_declaration") },
+  { lang: "Java", kind: "interface", rule: byField("interface_declaration") },
+  { lang: "Kotlin", kind: "function", rule: byChild("function_declaration", "simple_identifier") },
+  { lang: "Kotlin", kind: "class", rule: byChild("class_declaration", "type_identifier") },
 ];
 
 export interface SymbolSearchOptions {
@@ -64,58 +80,59 @@ export interface SymbolSearchOptions {
 export function searchSymbols(opts: SymbolSearchOptions): SymbolMatch[] {
   const binary = astGrepBinary();
   if (!binary) throw new Error("ast-grep binary not found. Run: npm install @ast-grep/cli");
-  const results: SymbolMatch[] = [];
   const max = opts.maxResults ?? 50;
   const nameFilter = opts.name ? new RegExp(opts.name, "i") : null;
 
-  for (const p of PATTERNS) {
-    if (results.length >= max) break;
-    if (opts.kind && p.kind !== opts.kind) continue;
-    const args = ["run", "--pattern", p.pattern, "--json=compact"];
-    if (opts.file) args.push(path.resolve(opts.cwd, opts.file));
-    const r = spawnSync(binary, args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    if (r.status !== 0 || !r.stdout) continue;
-    let items: unknown[];
-    try {
-      items = JSON.parse(r.stdout);
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(items)) continue;
-    for (const raw of items) {
-      if (results.length >= max) break;
-      const item = raw as {
-        text?: string;
-        file?: string;
-        range?: { start?: { line?: number } };
-        metaVariables?: { single?: Record<string, { text?: string }> };
-      };
-      const meta = item.metaVariables?.single?.NAME?.text ?? extractName(item.text ?? "");
-      if (!meta) continue;
-      if (nameFilter && !nameFilter.test(meta)) continue;
-      const rawFile = item.file ?? "";
-      // ast-grep returns absolute paths when given an absolute path, relative otherwise
-      const relFile = rawFile
-        ? (path.isAbsolute(rawFile)
-            ? path.relative(opts.cwd, rawFile)
-            : rawFile).replace(/\\/g, "/")
-        : (opts.file ?? "");
-      if (opts.file && relFile !== opts.file.replace(/\\/g, "/")) continue;
-      results.push({
-        file: relFile,
-        line: (item.range?.start?.line ?? 0) + 1,
-        kind: p.kind,
-        name: meta,
-        signature: (item.text ?? "").split("\n")[0].slice(0, 200),
-      });
-    }
-  }
-  return dedupe(results).slice(0, max);
-}
+  const rules = RULES.filter((r) => !opts.kind || r.kind === opts.kind);
+  const kindOf = new Map(rules.map((r, i) => [`r${i}`, r.kind]));
+  const yaml = rules
+    .map((r, i) => `id: r${i}\nlanguage: ${r.lang}\nrule:\n  ${r.rule}`)
+    .join("\n---\n");
 
-function extractName(text: string): string | null {
-  const m = text.match(/(?:function|class|interface|def|func|type|fun)\s+([A-Za-z_$][\w$]*)/);
-  return m ? m[1] : null;
+  // one scan for every rule: ast-grep walks the tree once, respecting .gitignore
+  const args = ["scan", "--inline-rules", yaml, "--json=compact"];
+  if (opts.file) args.push(path.resolve(opts.cwd, opts.file));
+  const r = spawnSync(binary, args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (!r.stdout && r.status !== 0) throw new Error(`ast-grep failed: ${(r.stderr ?? "").trim() || `exit ${r.status}`}`);
+
+  let items: unknown[];
+  try {
+    items = JSON.parse(r.stdout || "[]");
+  } catch {
+    throw new Error("ast-grep returned unreadable output");
+  }
+  if (!Array.isArray(items)) return [];
+
+  const results: SymbolMatch[] = [];
+  for (const raw of items) {
+    const item = raw as {
+      ruleId?: string;
+      text?: string;
+      file?: string;
+      range?: { start?: { line?: number } };
+      metaVariables?: { single?: Record<string, { text?: string }> };
+    };
+    const kind = kindOf.get(item.ruleId ?? "");
+    const name = item.metaVariables?.single?.NAME?.text;
+    if (!kind || !name) continue;
+    if (nameFilter && !nameFilter.test(name)) continue;
+    const rawFile = item.file ?? "";
+    // ast-grep returns absolute paths when given an absolute path, relative otherwise
+    const relFile = rawFile
+      ? (path.isAbsolute(rawFile) ? path.relative(opts.cwd, rawFile) : rawFile).replace(/\\/g, "/")
+      : (opts.file ?? "");
+    if (opts.file && relFile !== opts.file.replace(/\\/g, "/")) continue;
+    results.push({
+      file: relFile,
+      line: (item.range?.start?.line ?? 0) + 1,
+      kind,
+      name,
+      signature: (item.text ?? "").split("\n")[0].slice(0, 200),
+    });
+  }
+  return dedupe(results)
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
+    .slice(0, max);
 }
 
 function dedupe(matches: SymbolMatch[]): SymbolMatch[] {

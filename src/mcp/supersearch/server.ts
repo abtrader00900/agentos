@@ -22,7 +22,7 @@ export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? pro
       pattern: z.string().describe("Regex to search for"),
       glob: z.string().optional().describe("e.g. '*.ts' or 'app/**'"),
       caseSensitive: z.boolean().optional().default(false),
-      maxResults: z.number().optional().default(50),
+      maxResults: z.number().int().min(1).max(5000).optional().default(50),
     },
     async ({ pattern, glob, caseSensitive, maxResults }) => {
       try {
@@ -47,7 +47,7 @@ export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? pro
       name: z.string().optional().describe("Symbol name or substring"),
       kind: z.enum(["function", "class", "method", "interface", "struct"]).optional(),
       file: z.string().optional().describe("Restrict to one file path"),
-      maxResults: z.number().optional().default(30),
+      maxResults: z.number().int().min(1).max(5000).optional().default(30),
     },
     async ({ name, kind, file, maxResults }) => {
       try {
@@ -70,7 +70,7 @@ export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? pro
     "Find commits that changed a string (pickaxe search) — 'when was this introduced/removed?'.",
     {
       query: z.string().describe("String to search in commit diffs"),
-      maxResults: z.number().optional().default(20),
+      maxResults: z.number().int().min(1).max(5000).optional().default(20),
     },
     async ({ query, maxResults }) => {
       if (!isGitRepo(cwd)) {
@@ -92,7 +92,7 @@ export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? pro
     "Per-line authorship of a file — who last touched each line and when.",
     {
       file: z.string().describe("File path relative to project root"),
-      maxLines: z.number().optional().default(200),
+      maxLines: z.number().int().min(1).max(5000).optional().default(200),
     },
     async ({ file, maxLines }) => {
       if (!isGitRepo(cwd)) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { init } from "./commands/init.js";
 import { install } from "./commands/install.js";
@@ -15,12 +16,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ALL_HARNESSES } from "./core/schema.js";
 import type { HarnessName } from "./core/schema.js";
 
+// package.json is the only place the version lives (works from src/ via tsx and from dist/)
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
+
 const program = new Command();
 
 program
   .name("agentos")
   .description("Local-first, multi-harness agent operating system. Zero API dependency.")
-  .version("0.1.0");
+  .version(version);
 
 program
   .command("init")
@@ -33,15 +37,16 @@ program
 program
   .command("install")
   .description("Set up project: configs, .agentos/ dirs, skills, .gitignore")
-  .action(() => {
-    try { install(); } catch (e) { fail(e); }
+  .option("--force", "overwrite hand-edited or pre-existing harness files (previous version kept as <file>.bak)")
+  .action((opts) => {
+    try { install({ force: opts.force }); } catch (e) { fail(e); }
   });
 
 program
   .command("sync")
   .description("Regenerate all harness configs from agent.config.yaml")
   .option("--only <harnesses>", `comma-separated: ${ALL_HARNESSES.join(", ")}`)
-  .option("--force", "overwrite hand-edited (drifted) files")
+  .option("--force", "overwrite hand-edited (drifted) or pre-existing files (previous version kept as <file>.bak)")
   .action((opts) => {
     try {
       const only = opts.only
@@ -100,8 +105,8 @@ skill
 
 skill
   .command("install <name>")
-  .description("Install a skill: bundled name, owner/repo, or git URL")
-  .action((name: string) => { try { skillInstall(name); } catch (e) { fail(e); } });
+  .description("Install a skill: bundled name, registry name, owner/repo[#dir], or git URL")
+  .action(async (name: string) => { try { await skillInstall(name); } catch (e) { fail(e); } });
 
 skill
   .command("search <query>")
@@ -116,7 +121,7 @@ skill
 program
   .command("handoff")
   .description("Export full agent context (task, decisions, memory, git) for another harness — FR-7")
-  .option("--to <harness>", "target harness: claude-code | codex | antigravity | any")
+  .option("--to <harness>", `target harness: ${ALL_HARNESSES.join(" | ")} | any`)
   .option("--from <harness>", "source harness (auto-detected if omitted)")
   .option("--task <text>", "REQUIRED: what was being worked on + current state")
   .option("--files <list>", "comma-separated files in progress")
