@@ -16,7 +16,7 @@ describe("skill: tdd-laravel", () => {
 
   it("has valid frontmatter with name + description", () => {
     const raw = readFileSync(skillPath, "utf8");
-    expect(raw).toMatch(/^---\n/);
+    expect(raw).toMatch(/^---\r?\n/);
     const fm = raw.split("---")[1];
     expect(fm).toMatch(/name:\s*tdd-laravel/);
     expect(fm).toMatch(/description:\s*\S/);
