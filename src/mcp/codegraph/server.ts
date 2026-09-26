@@ -4,15 +4,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import path from "node:path";
 import { GraphStore, ensureGraphEngine } from "./graph.js";
+import { projectRoot } from "../../core/project.js";
 
 /**
  * MCP Codegraph Server (FR-5.x)
  * Dependency graph + change impact analysis — deterministic, local, no model.
  */
 
-function projectRoot(): string {
-  return process.env.AGENTOS_PROJECT ?? process.cwd();
-}
+/** graph keys are project-relative with forward slashes; agents on Windows pass "src\a.ts" or "./src/a.ts" */
+const norm = (f: string) => f.replace(/\\/g, "/").replace(/^\.\//, "");
 
 export function createCodegraphServer(root = projectRoot()): McpServer {
   const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
@@ -32,7 +32,8 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "codegraph_impact",
     "FR-5.3: If I change this file, what breaks? Returns every file that (transitively) depends on it.",
     { file: z.string().describe("Path relative to project root") },
-    async ({ file }) => {
+    async ({ file: rawFile }) => {
+      const file = norm(rawFile);
       await refresh();
       const direct = store.impact(file);
       if (!direct.length) return fmt([], `Nothing imports "${file}". No impact.`);
@@ -61,7 +62,8 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "codegraph_deps",
     "What does this file import/depend on?",
     { file: z.string() },
-    async ({ file }) => {
+    async ({ file: rawFile }) => {
+      const file = norm(rawFile);
       await refresh();
       return fmt(store.dependencies(file), `"${file}" has no resolved internal dependencies.`);
     },

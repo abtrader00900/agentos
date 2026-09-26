@@ -5,6 +5,7 @@ import { detectDrift } from "../core/manifest.js";
 import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot, listSkills } from "../core/skills.js";
 import { MemoryStore } from "../mcp/memory/store.js";
+import { PKG } from "./init.js";
 
 /**
  * FR-2.4: doctor — health checks with actionable fixes.
@@ -58,7 +59,11 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
     const cmd = s.command;
     const isLocalScript = s.args.some((a) => a.endsWith(".ts") || a.endsWith(".js"));
     const known = cmd === "npx" || cmd === "node" || cmd === "agentos";
-    if (known || isLocalScript || isCommandOnPath(cmd)) {
+    // `npx agentos` runs a stranger's placeholder package — the published name is @basit0090/agent-os
+    const npxPkg = cmd === "npx" ? s.args.find((a) => !a.startsWith("-")) : undefined;
+    if (npxPkg && /^(agentos|agent-os)(@|$)/.test(npxPkg)) {
+      add({ name: `mcp:${s.name}`, status: "fail", detail: `npx package '${npxPkg}' is not AgentOS`, fix: `Use "${PKG}" in the args (agentos init --force writes the current template)` });
+    } else if (known || isLocalScript || isCommandOnPath(cmd)) {
       add({ name: `mcp:${s.name}`, status: "pass", detail: `${cmd} ${s.args.join(" ")}` });
     } else {
       add({ name: `mcp:${s.name}`, status: "fail", detail: `command '${cmd}' not found on PATH`, fix: "Fix mcpServers in agent.config.yaml" });
@@ -88,13 +93,18 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   } else {
     add({ name: "skills", status: "pass", detail: `${skills.length} skills valid` });
   }
+  // installed skills include community ones — validate them, not just the bundled set
   const installedRoot = path.join(cwd, ".agentos", "skills");
   if (existsSync(installedRoot)) {
-    const missing = config.skills.filter((s) => !listSkills(installedRoot).some((i) => i.name === s.name));
-    if (missing.length) {
+    const installed = testSkills(installedRoot);
+    const broken = installed.filter((s) => !s.ok);
+    const missing = config.skills.filter((s) => !installed.some((i) => i.skill === s.name));
+    if (broken.length) {
+      add({ name: "skills:installed", status: "fail", detail: broken.map((s) => `${s.skill}: ${s.issues.join("; ")}`).join(" | "), fix: "Re-install it: agentos skill install <name>, or delete .agentos/skills/<name>" });
+    } else if (missing.length) {
       add({ name: "skills:installed", status: "warn", detail: `declared but not installed: ${missing.map((s) => s.name).join(", ")}`, fix: "Run: agentos install" });
     } else {
-      add({ name: "skills:installed", status: "pass", detail: `${config.skills.length} installed` });
+      add({ name: "skills:installed", status: "pass", detail: `${installed.length} installed, all valid` });
     }
   }
 

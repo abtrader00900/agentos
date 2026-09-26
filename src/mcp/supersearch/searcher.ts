@@ -77,7 +77,7 @@ const normalizePath = (f: string) => f.replace(/\\/g, "/").replace(/^\.\//, "");
 function searchWithRg(opts: TextSearchOptions): SearchMatch[] {
   const max = opts.maxResults ?? 100;
   const args = [
-    "--line-number", "--no-heading", "--color=never",
+    "--line-number", "--no-heading", "--color=never", "--no-require-git",
     "--max-count", String(max), // per file; the total is capped below
     ...(opts.caseSensitive ? [] : ["--ignore-case"]),
     ...(opts.glob ? ["--glob", opts.glob] : []),

@@ -19,6 +19,8 @@ import { applyLearnedRules } from "../src/commands/learn.js";
 import { installSkillsFromGit } from "../src/core/registry.js";
 import { skillInstall } from "../src/commands/skill.js";
 import { detectHarness } from "../src/commands/handoff.js";
+import { doctor } from "../src/commands/doctor.js";
+import { projectRoot } from "../src/core/project.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = "project:\n  name: regtest\nstack: [typescript]\n";
@@ -224,6 +226,32 @@ describe("install + sync safety", () => {
   it("detectHarness knows all five harness marker files", () => {
     write({ ".cursor/rules/agentos.mdc": "x" });
     expect(detectHarness(dir)).toBe("cursor");
+  });
+});
+
+describe("project root + doctor", () => {
+  it("projectRoot walks up to the directory holding agent.config.yaml (harnesses may start MCP servers in a subdir)", () => {
+    write({ "agent.config.yaml": CONFIG, "src/deep/x.ts": "" });
+    expect(projectRoot(path.join(dir, "src", "deep"))).toBe(dir);
+    const bare = mkdtempSync(path.join(tmpdir(), "agentos-bare-"));
+    try {
+      expect(projectRoot(bare)).toBe(path.resolve(bare));
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("doctor flags an MCP entry that runs the wrong npm package", () => {
+    write({ "agent.config.yaml": CONFIG + 'mcpServers:\n  - name: memory\n    command: npx\n    args: ["-y", "agentos", "mcp", "memory"]\n' });
+    const { checks, ok } = doctor({ cwd: dir, quiet: true });
+    expect(ok).toBe(false);
+    expect(checks.find((c) => c.name === "mcp:memory")?.status).toBe("fail");
+  });
+
+  it("doctor validates installed community skills, not only the bundled set", () => {
+    write({ "agent.config.yaml": CONFIG, ".agentos/skills/bad-skill/SKILL.md": "# no frontmatter\n" });
+    const { checks } = doctor({ cwd: dir, quiet: true });
+    expect(checks.find((c) => c.name === "skills:installed")?.status).toBe("fail");
   });
 });
 

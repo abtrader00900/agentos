@@ -6,13 +6,14 @@ import path from "node:path";
 import { searchText } from "./searcher.js";
 import { searchSymbols } from "./symbols.js";
 import { searchHistory, blameFile, isGitRepo } from "./gitsearch.js";
+import { projectRoot } from "../../core/project.js";
 
 /**
  * MCP Supersearch Server (FR-4.x)
  * Text (ripgrep/builtin), symbols (ast-grep), git history — all local.
  */
 
-export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? process.cwd()): McpServer {
+export function createSupersearchServer(cwd = projectRoot()): McpServer {
   const server = new McpServer({ name: "agentos-supersearch", version: "0.1.0" });
 
   server.tool(
@@ -98,7 +99,7 @@ export function createSupersearchServer(cwd = process.env.AGENTOS_PROJECT ?? pro
       if (!isGitRepo(cwd)) {
         return { content: [{ type: "text", text: "Not a git repository." }], isError: true };
       }
-      const lines = blameFile(cwd, file, maxLines);
+      const lines = blameFile(cwd, file.replace(/\\/g, "/"), maxLines); // agents on Windows pass "src\a.ts"
       if (!lines.length) return { content: [{ type: "text", text: "No blame info." }] };
       return {
         content: [{

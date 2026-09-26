@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import path from "node:path";
 import { MemoryStore } from "./store.js";
+import { projectRoot } from "../../core/project.js";
 
 /**
  * MCP Memory Server (FR-3.x)
@@ -13,7 +14,7 @@ import { MemoryStore } from "./store.js";
  */
 
 function resolveDbPath(): string {
-  const project = process.env.AGENTOS_PROJECT ?? process.cwd();
+  const project = projectRoot();
   return path.join(project, ".agentos", "memory.json");
 }
 
