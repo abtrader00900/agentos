@@ -4,22 +4,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import path from "node:path";
 import { GraphStore, ensureGraphEngine } from "./graph.js";
+import { projectRoot } from "../../core/project.js";
 
 /**
  * MCP Codegraph Server (FR-5.x)
  * Dependency graph + change impact analysis — deterministic, local, no model.
  */
 
-function projectRoot(): string {
-  return process.env.AGENTOS_PROJECT ?? process.cwd();
-}
-
-function dbPath(): string {
-  return path.join(projectRoot(), ".agentos", "graph.json");
-}
+/** graph keys are project-relative with forward slashes; agents on Windows pass "src\a.ts" or "./src/a.ts" */
+const norm = (f: string) => f.replace(/\\/g, "/").replace(/^\.\//, "");
 
 export function createCodegraphServer(root = projectRoot()): McpServer {
-  const store = new GraphStore(dbPath());
+  const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
 
   const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
 
@@ -27,13 +23,18 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     files.length ? { content: [{ type: "text" as const, text: files.join("\n") }] }
                  : { content: [{ type: "text" as const, text: empty }] };
 
+  const refresh = async () => {
+    await ensureGraphEngine();
+    store.update(root);
+  };
+
   server.tool(
     "codegraph_impact",
     "FR-5.3: If I change this file, what breaks? Returns every file that (transitively) depends on it.",
     { file: z.string().describe("Path relative to project root") },
-    async ({ file }) => {
-      await ensureGraphEngine();
-      store.update(root);
+    async ({ file: rawFile }) => {
+      const file = norm(rawFile);
+      await refresh();
       const direct = store.impact(file);
       if (!direct.length) return fmt([], `Nothing imports "${file}". No impact.`);
       // transitive closure (bounded)
@@ -61,7 +62,11 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "codegraph_deps",
     "What does this file import/depend on?",
     { file: z.string() },
-    async ({ file }) => fmt(store.dependencies(file), `"${file}" has no resolved internal dependencies.`),
+    async ({ file: rawFile }) => {
+      const file = norm(rawFile);
+      await refresh();
+      return fmt(store.dependencies(file), `"${file}" has no resolved internal dependencies.`);
+    },
   );
 
   server.tool(
@@ -69,8 +74,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "Files nobody imports — dead code candidates (FR-5.6).",
     {},
     async () => {
-      await ensureGraphEngine();
-      store.update(root);
+      await refresh();
       return fmt(store.orphans(), "No orphan files.");
     },
   );
@@ -80,8 +84,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
     "Import cycles in the project (FR-5.6).",
     {},
     async () => {
-      await ensureGraphEngine();
-      store.update(root);
+      await refresh();
       const cycles = store.cycles();
       return fmt(
         cycles.map((c) => c.join(" → ")),

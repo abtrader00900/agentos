@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
 import { agentConfigSchema, type AgentConfig } from "./schema.js";
@@ -60,7 +61,8 @@ function mergeLayer(base: Record<string, unknown>, layer: Record<string, unknown
   return out;
 }
 
-export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): LoadedConfig {
+// HOME is unset on Windows (USERPROFILE is the equivalent); homedir() covers every platform.
+export function loadConfig(cwd = process.cwd(), home = homedir()): LoadedConfig {
   const globalFile = path.join(home, ".agentos", "agent.config.yaml");
   const projectFile = path.join(cwd, "agent.config.yaml");
   const localFile = path.join(cwd, "agent.config.local.yaml");
@@ -86,7 +88,7 @@ export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): 
   if (sources.length === 0) {
     throw new Error(
       `No agent.config.yaml found. Searched:\n  ${layers.join("\n  ")}\n\n` +
-        `Run "agentos init" or create one. See examples/agent.config.yaml.`,
+        `Run "agentos init" to create one.`,
     );
   }
 

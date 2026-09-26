@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { listSkills, testSkills, installSkill, bundledSkillsRoot } from "../core/skills.js";
-import { installSkillsFromGit, looksLikeGitSource, searchSkills } from "../core/registry.js";
+import { installSkillsFromDir, installSkillsFromGit, looksLikeGitSource, searchSkills, resolveRegistryEntry } from "../core/registry.js";
 
 /** FR-2.6: agentos skill list / install / test */
 
@@ -36,15 +36,38 @@ export function skillList(options: { cwd?: string; json?: boolean } = {}): strin
   return out;
 }
 
-export function skillInstall(name: string, options: { cwd?: string } = {}): void {
+export async function skillInstall(name: string, options: { cwd?: string } = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+  // an explicit path that exists on disk is a local skill directory, not something to clone
+  const local = path.resolve(cwd, name);
+  if ((name.includes("/") || name.includes("\\")) && existsSync(local)) {
+    for (const n of installSkillsFromDir(local, cwd, name)) console.log(`✓ Installed skill '${n}' → .agentos/skills/${n}`);
+    return;
+  }
   if (looksLikeGitSource(name)) {
     const installed = installSkillsFromGit(name, cwd);
     for (const n of installed) console.log(`✓ Installed skill '${n}' → .agentos/skills/${n}`);
     return;
   }
-  installSkill(bundledSkillsRoot(), cwd, name);
-  console.log(`✓ Installed skill '${name}' → .agentos/skills/${name}`);
+  if (existsSync(path.join(bundledSkillsRoot(), name))) {
+    installSkill(bundledSkillsRoot(), cwd, name);
+    console.log(`✓ Installed skill '${name}' → .agentos/skills/${name}`);
+    return;
+  }
+  // not bundled: resolve through the configured registry (repo + path)
+  const entry = await resolveRegistryEntry(name, cwd);
+  if (entry?.repo) {
+    const source = entry.path ? `${entry.repo}#${entry.path}` : entry.repo;
+    const installed = installSkillsFromGit(source, cwd);
+    for (const n of installed) console.log(`✓ Installed skill '${n}' from ${entry.repo} → .agentos/skills/${n}`);
+    return;
+  }
+  throw new Error(
+    entry
+      ? `Skill '${name}' is in the registry but its entry has no "repo" to install from.`
+      : `Skill '${name}' is not bundled and not in the configured registry.\n` +
+        `Try: agentos skill search ${name}  |  agentos skill install <owner/repo[#dir]> | <git-url>`,
+  );
 }
 
 export async function skillSearch(query: string, options: { cwd?: string } = {}): Promise<void> {
@@ -56,11 +79,11 @@ export async function skillSearch(query: string, options: { cwd?: string } = {})
     return;
   }
   for (const r of results) {
-    const tag = r.origin === "bundled" ? "bundled" : (r.repo ?? "registry");
+    const tag = r.origin === "bundled" ? "bundled" : `${r.repo ?? "registry"}${r.path ? "#" + r.path : ""}`;
     console.log(`  ${r.name}
       [${tag}] ${r.description.slice(0, 100)}`);
   }
-  console.log(`\n${results.length} match(es). Install: agentos skill install <name> | <owner/repo> | <git-url>`);
+  console.log(`\n${results.length} match(es). Install: agentos skill install <name> | <owner/repo[#dir]> | <git-url>`);
 }
 
 export function skillTest(options: { cwd?: string } = {}): void {

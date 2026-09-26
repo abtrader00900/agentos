@@ -56,10 +56,9 @@ export function exportHandoff(cwd: string, input: HandoffInput): HandoffBundle {
   let memory: HandoffBundle["memory"] = [];
   if (existsSync(memDb)) {
     const store = new MemoryStore(memDb);
-    memory = store.recall({ limit: 200 }).map((f) => ({
+    memory = store.recall({ limit: Number.MAX_SAFE_INTEGER }).map((f) => ({
       topic: f.topic, key: f.key, value: f.value, pinned: !!f.pinned,
     }));
-    store.close();
   }
 
   return {

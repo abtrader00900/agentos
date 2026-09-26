@@ -36,6 +36,18 @@ function isBinary(buf: Buffer): boolean {
   return false;
 }
 
+/** glob → regex source: `**` spans directories, `*` and `?` stay inside one path segment */
+function globToRegex(glob: string): string {
+  return glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "\u0000")
+    .replace(/\*\*/g, "\u0001")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/\u0000/g, "(?:.*/)?")
+    .replace(/\u0001/g, ".*");
+}
+
 function parseGitignore(cwd: string): ((rel: string) => boolean)[] {
   const gi = path.join(cwd, ".gitignore");
   if (!existsSync(gi)) return [];
@@ -44,44 +56,54 @@ function parseGitignore(cwd: string): ((rel: string) => boolean)[] {
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#") && !l.startsWith("!"))
     .map((l) => {
-      const dirOnly = l.endsWith("/");
-      const clean = l.replace(/^\//, "").replace(/\/$/, "");
-      const rx = new RegExp(
-        "^" + clean.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*") + (dirOnly ? "(/|$)" : "$"),
-      );
+      // gitignore: a pattern with a slash is anchored to the root, one without matches at any
+      // depth ("*.log" also ignores sub/x.log); either way the match covers everything below it
+      const clean = l.replace(/\/$/, "");
+      const anchored = clean.includes("/");
+      const rx = new RegExp((anchored ? "^" : "(?:^|/)") + globToRegex(clean.replace(/^\//, "")) + "(?:/|$)");
       return (rel: string) => rx.test(rel);
     });
 }
 
+let rgCached: boolean | undefined;
+/** ripgrep >= 13 (has --no-require-git); an older rg falls back to the builtin scanner */
 function rgAvailable(): boolean {
-  const r = spawnSync("rg", ["--version"], { stdio: "ignore" });
-  return r.status === 0;
+  if (rgCached === undefined) rgCached = spawnSync("rg", ["--no-require-git", "--version"], { stdio: "ignore" }).status === 0;
+  return rgCached;
 }
 
+/** rg prints "./a/b.ts" (".\a\b.ts" on Windows); the builtin prints "a/b.ts" — make them identical */
+const normalizePath = (f: string) => f.replace(/\\/g, "/").replace(/^\.\//, "");
+
 function searchWithRg(opts: TextSearchOptions): SearchMatch[] {
+  const max = opts.maxResults ?? 100;
   const args = [
-    "--line-number", "--no-heading", "--color=never",
-    "--max-count", String(opts.maxResults ?? 100),
+    "--line-number", "--no-heading", "--color=never", "--no-require-git",
+    "--max-count", String(max), // per file; the total is capped below
     ...(opts.caseSensitive ? [] : ["--ignore-case"]),
     ...(opts.glob ? ["--glob", opts.glob] : []),
     "--", opts.pattern, ".",
   ];
   const r = spawnSync("rg", args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
-  if (r.status !== 0 && !r.stdout) return [];
-  return r.stdout
+  // exit 1 = no matches; 2 = bad regex / IO error, which the caller must see
+  if (r.status === 2) throw new Error(`ripgrep: ${(r.stderr ?? "").trim() || "search failed"}`);
+  return (r.stdout ?? "")
     .split("\n")
     .filter(Boolean)
     .map((l) => {
-      const m = l.match(/^([^:]+):(\d+):(.*)$/);
-      if (!m) return null;
-      return { file: m[1], line: parseInt(m[2], 10), text: m[3] };
+      const m = l.match(/^(.+?):(\d+):(.*)$/);
+      return m ? { file: normalizePath(m[1]), line: parseInt(m[2], 10), text: m[3] } : null;
     })
-    .filter((x): x is SearchMatch => x !== null);
+    .filter((x): x is SearchMatch => x !== null)
+    .slice(0, max);
 }
 
-function searchBuiltin(opts: TextSearchOptions): SearchMatch[] {
+export function searchTextBuiltin(opts: TextSearchOptions): SearchMatch[] {
   const ignores = parseGitignore(opts.cwd);
   const rx = new RegExp(opts.pattern, opts.caseSensitive ? "" : "i");
+  // "*.ts" matches a file name; "app/**" matches the path relative to the project
+  const globRx = opts.glob ? new RegExp("^" + globToRegex(opts.glob) + "$") : null;
+  const globMatches = (rel: string) => !globRx || globRx.test(opts.glob!.includes("/") ? rel : path.basename(rel));
   const results: SearchMatch[] = [];
   const max = opts.maxResults ?? 100;
 
@@ -100,7 +122,7 @@ function searchBuiltin(opts: TextSearchOptions): SearchMatch[] {
         walk(path.join(dir, e.name), r);
       } else if (e.isFile()) {
         if (ignores.some((f) => f(r))) continue;
-        if (opts.glob && !globMatch(opts.glob, e.name)) continue;
+        if (!globMatches(r)) continue;
         let buf: Buffer;
         try {
           if (statSync(path.join(dir, e.name)).size > MAX_FILE_BYTES) continue;
@@ -119,11 +141,6 @@ function searchBuiltin(opts: TextSearchOptions): SearchMatch[] {
   return results;
 }
 
-function globMatch(glob: string, name: string): boolean {
-  const rx = new RegExp("^" + glob.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
-  return rx.test(name);
-}
-
 export function searchText(opts: TextSearchOptions): SearchMatch[] {
-  return rgAvailable() ? searchWithRg(opts) : searchBuiltin(opts);
+  return rgAvailable() ? searchWithRg(opts) : searchTextBuiltin(opts);
 }

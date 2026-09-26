@@ -4,7 +4,7 @@
 
 Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf — 5 harnesses ke configs, MCP tools, aur shared memory. API ka kharcha zero, har project mein same brain.
 
-> Status: **v0.1.0 — all 4 milestones + Phase 5 shipped** (96 tests green). See `RFC/` for the handoff protocol spec.
+> Status: **v0.1.0 — all 4 milestones + Phase 5 shipped**, CI green on Linux + Windows. See `RFC/` for the handoff protocol spec.
 
 ![AgentOS demo: install → handoff → doctor](docs/images/demo.gif)
 
@@ -13,7 +13,7 @@ Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf —
 | Aaj | AgentOS |
 |---|---|
 | Agents har session mein sab bhool jate hain | Persistent local memory (JSON, zero native deps) |
-| Har harness ka alag config | Ek YAML → teeno harnesses |
+| Har harness ka alag config | Ek YAML → paanch harnesses |
 | Search/memory ke liye API tokens | Deterministic local MCP tools |
 | Agent switch = context loss | Handoff protocol (Phase 4) |
 
@@ -29,7 +29,9 @@ agentos install     # configs + MCP servers for all 5 harnesses
 agentos doctor      # health check
 ```
 
-From source: `npm install && npm test` (118 tests), dev CLI: `npx tsx src/cli.ts <cmd>`.
+From source: `npm install && npm test`, dev CLI: `npx tsx src/cli.ts <cmd>`.
+
+Adopting agentos in a project that already has a `CLAUDE.md` / `AGENTS.md`? `install` refuses to overwrite them — move their content into `agent.config.yaml`, then `agentos install --force` (the originals are kept as `<file>.bak`).
 
 ### agent.config.yaml
 
@@ -46,10 +48,16 @@ rules:
     text: "Avoid `any` in TypeScript."
 skills:
   - name: tdd-laravel
-mcpServers:
+mcpServers:                            # what `agentos init` generates
   - name: memory
     command: npx
-    args: ["tsx", "/abs/path/to/agentos/src/mcp/memory/server.ts"]
+    args: ["-y", "@basit0090/agent-os", "mcp", "memory"]
+  - name: supersearch
+    command: npx
+    args: ["-y", "@basit0090/agent-os", "mcp", "supersearch"]
+  - name: codegraph
+    command: npx
+    args: ["-y", "@basit0090/agent-os", "mcp", "codegraph"]
 ```
 
 ### Commands
@@ -59,10 +67,14 @@ mcpServers:
 | `agentos init` | `agent.config.yaml` template banata hai |
 | `agentos install` | Configs + `.agentos/` + skills + `.gitignore` setup |
 | `agentos sync` | Sab harness configs regenerate (drift par ruk jata hai) |
-| `agentos sync --force` | Drift ignore karke overwrite |
-| `agentos sync --only codex` | Sirf ek harness sync |
-| `agentos status` | Project, harnesses, drift, memory status |
-| `agentos mcp memory` | Memory MCP server (stdio — Claude Code/Codex/Antigravity) |
+| `agentos sync --force` | Drifted / pehle se maujood files overwrite (purani copy `<file>.bak`) |
+| `agentos sync --only codex` | Sirf ek harness sync (baqi ka drift tracking barqarar) |
+| `agentos status [--json]` | Project, harnesses, drift, memory status |
+| `agentos doctor [--json]` | Health check — config, harness files, drift, MCP commands, memory, skills, handoff |
+| `agentos skill list \| install \| search \| test` | Skills — bundled, registry, `owner/repo[#dir]`, git URL, ya local path |
+| `agentos handoff --to <harness> --task "..."` | Context bundle export (task, decisions, memory, git) |
+| `agentos learn [--apply]` | Git history se rule suggestions |
+| `agentos mcp memory \| supersearch \| codegraph` | MCP servers (stdio — har harness ke liye) |
 
 ### MCP Tools
 
@@ -79,17 +91,29 @@ Deterministic import-graph (TS/JS, Python, PHP/Laravel, Go, Java/Kotlin), JSON-b
 ```
 agent.config.yaml (single source of truth)
         │
-   ┌────┴─────┬──────────────┐
-   ▼          ▼              ▼
-CLAUDE.md  AGENTS.md   .antigravity/
-.mcp.json  config.toml  mcp.json
-   │          │              │
-   └────┬─────┴──────────────┘
-        ▼
+   ┌────┼──────────┬─────────────┬──────────┬──────────┐
+   ▼    ▼          ▼             ▼          ▼          ▼
+CLAUDE.md      AGENTS.md    Antigravity   .cursor/   .windsurf/
+.mcp.json   .codex/config.toml  rules+mcp   rules/     rules/
+   │           │               │            │          │
+   └───────────┴───────┬───────┴────────────┴──────────┘
+                       ▼
    MCP servers (memory → supersearch → codegraph)
-        ▼
-   .agentos/memory.json — shared, local, durable
+                       ▼
+   .agentos/memory.json — shared, local, durable (safe with several harnesses open at once)
 ```
+
+## Harness Notes
+
+| Harness | Generated | Note |
+|---|---|---|
+| Claude Code | `CLAUDE.md`, `.mcp.json` | Project-scoped MCP servers; Claude asks once before enabling them. |
+| Codex | `AGENTS.md`, `.codex/config.toml` | Codex only reads a project's `.codex/config.toml` when the project is **trusted** (answer the trust prompt, or set `trust_level = "trusted"` for it in `~/.codex/config.toml`). |
+| Antigravity | `.agents/rules/agentos.md`, `.agents/mcp_config.json` | Rule has `trigger: always_on` frontmatter, as Antigravity requires. It also reads `AGENTS.md`. |
+| Cursor | `.cursor/rules/agentos.mdc` | `alwaysApply: true`. |
+| Windsurf | `.windsurf/rules/agentos.md` | `trigger: always_on` frontmatter (without it a rule is manual-only). |
+
+The MCP servers find the project from their working directory; if a harness starts them elsewhere, set `AGENTOS_PROJECT=/abs/path` in the server's `env`.
 
 ## Config Layers (override: local > project > global)
 
@@ -106,16 +130,28 @@ CLAUDE.md  AGENTS.md   .antigravity/
 - [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
 - [x] VS Code extension (`editors/vscode/`) — status-bar doctor, skills sidebar, handoff wizard, `--json` CLI output (Issue #2)
 - [x] tree-sitter codegraph (Issue #4) — WASM parsing backend + lower-case PHP namespace resolution
-- [x] GitHub Actions CI — test matrix (Node 20/22) + extension compile
+- [x] GitHub Actions CI — Linux + Windows test matrix (Node 20/22), global-install and git-install smoke tests, extension compile
 
 ## Community Skill Registry (Issue #3)
 
 Skills are just directories — `SKILL.md` + `test/`. Install from **any git source**, no API keys:
 
 ```bash
-agentos skill install owner/repo        # GitHub shorthand
+agentos skill install owner/repo             # GitHub shorthand — every SKILL.md in the repo (up to 3 levels deep)
+agentos skill install owner/repo#skills/foo  # one directory inside the repo
 agentos skill install https://gitlab.com/team/skills.git
-agentos skill search deploy             # bundled + registry search
+agentos skill install ./my-skills/foo        # a local directory
+agentos skill install android-testing        # a registry name → resolved to repo + path
+agentos skill search deploy                  # bundled + registry search
+```
+
+Or declare them in `agent.config.yaml` and let `agentos install` fetch them:
+
+```yaml
+skills:
+  - name: tdd-laravel                          # bundled
+  - name: deploy-checklist
+    source: team/agent-skills#skills/deploy-checklist
 ```
 
 Point `skillRegistry` at an index JSON to search a community registry:

@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown } from "../core/handoff.js";
+import { HARNESS_MARKER } from "../generators/index.js";
 
 /** FR-2.5 / FR-7.x: agentos handoff */
 
@@ -56,11 +57,7 @@ export function handoffShow(options: { cwd?: string } = {}): void {
 
 export function detectHarness(cwd: string): string {
   // best-effort: which harness config was touched most recently
-  const candidates: [string, string][] = [
-    ["claude-code", "CLAUDE.md"],
-    ["codex", "AGENTS.md"],
-    ["antigravity", ".antigravity/config.md"],
-  ];
+  const candidates = Object.entries(HARNESS_MARKER);
   let best: [string, number] = ["unknown", 0];
   for (const [name, file] of candidates) {
     const p = path.join(cwd, file);

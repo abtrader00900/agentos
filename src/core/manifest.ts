@@ -57,7 +57,7 @@ export interface DriftResult {
   ok: string[];
 }
 
-export function detectDrift(cwd: string, generated: Map<string, string>): DriftResult {
+export function detectDrift(cwd: string): DriftResult {
   const manifest = readManifest(cwd);
   const result: DriftResult = { drifted: [], missing: [], ok: [] };
   if (!manifest) return result;

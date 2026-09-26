@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, existsSync, cpSync, rmSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 /**
@@ -95,5 +96,6 @@ export function installSkill(bundledRoot: string, projectDir: string, name: stri
 }
 
 export function bundledSkillsRoot(): string {
-  return path.resolve(import.meta.dirname, "../../skills");
+  // works from src/ (tsx) and dist/ alike; import.meta.dirname would need Node >= 20.11
+  return fileURLToPath(new URL("../../skills", import.meta.url));
 }

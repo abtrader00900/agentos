@@ -26,7 +26,7 @@ One `agent.config.yaml` in your repo generates the config for **5 harnesses** �
 - **Shared long-term memory** (`memory` MCP server). Agents store and recall project facts in a local JSON store. Session ends, memory stays. Next session starts where you left off.
 - **Deterministic search, zero tokens** (`supersearch` MCP server): regex text search (ripgrep-powered), symbol search via ast-grep, and git archaeology — pickaxe + per-line blame.
 - **Change impact analysis** (`codegraph` MCP server): "if I change this file, what breaks?" — transitive dependents, orphans, import cycles. Your agent stops guessing.
-- **10 battle-tested skills** (tdd-laravel, tdd-react, code-review, security-scan, db-migration-check, refactor-safe, …) with a validation framework. Same skill runs on every harness.
+- **11 battle-tested skills** (tdd-laravel, tdd-react, code-review, security-scan, db-migration-check, refactor-safe, …) with a validation framework. Same skill runs on every harness.
 - **Handoff protocol (open RFC).** `agentos handoff --to codex --task "..."` exports task state + decisions + memory snapshot + git state; the receiving agent auto-receives it via its config. Written as a versioned spec so non-AgentOS tools can adopt it.
 - **`agentos learn`** — mines your git history and suggests config rules (files that always change together, hot spots). It gets smarter the more you use it.
 - **`agentos doctor`** — a 12-point health check with actionable fixes.
@@ -43,14 +43,17 @@ Cheap operations (search, recall, impact checks) currently get routed through ex
 
 ### Status
 
-v0.1.0 — the core is solid (96 tests, 5 harness targets, 3 MCP servers, 10 skills, handoff RFC). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
+v0.1.0 — the core is solid (5 harness targets, 3 MCP servers, 11 skills, handoff RFC, CI on Linux + Windows). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
 
 Repo: https://github.com/abtrader00900/agentos
 
 ```bash
+npm install -g @basit0090/agent-os
+cd your-project && agentos init && agentos install && agentos doctor
+
+# or from source:
 git clone https://github.com/abtrader00900/agentos && cd agentos
 npm install && npm test
-npx tsx src/cli.ts init     # in any project
 ```
 
 What would make you actually use this? What would make you *not*? Brutal feedback welcome.

@@ -63,7 +63,7 @@ consume: after the receiving agent picks up the work, delete HANDOFF.md
 
 ## 5. Harness Integration
 
-AgentOS config generators (CLAUDE.md, AGENTS.md, .antigravity/config.md) append the current `HANDOFF.md` content when the file exists. Non-AgentOS harnesses can adopt the protocol by reading `.agentos/handoffs/*/bundle.json` — no AgentOS dependency required.
+AgentOS config generators (CLAUDE.md, AGENTS.md, .agents/rules/agentos.md) append the current `HANDOFF.md` content when the file exists. Non-AgentOS harnesses can adopt the protocol by reading `.agentos/handoffs/*/bundle.json` — no AgentOS dependency required.
 
 ## 6. Compatibility Rules
 

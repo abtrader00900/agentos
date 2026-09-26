@@ -24,6 +24,9 @@ export interface LearnResult {
   commitCount: number;
 }
 
+/** Commits touching more files than this are bulk moves/vendor drops: noise for co-change, and O(n²) pairs. */
+const MAX_FILES_PER_COMMIT = 50;
+
 const GIT_ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "agentos", GIT_AUTHOR_EMAIL: "agentos@local",
@@ -63,6 +66,7 @@ export function learnFromHistory(cwd: string): LearnResult {
   const fileCounts = new Map<string, number>();
   for (const files of sets) {
     const uniq = [...new Set(files)].sort();
+    if (uniq.length > MAX_FILES_PER_COMMIT) continue;
     for (const f of uniq) fileCounts.set(f, (fileCounts.get(f) ?? 0) + 1);
     for (let i = 0; i < uniq.length; i++) {
       for (let j = i + 1; j < uniq.length; j++) {
@@ -117,7 +121,6 @@ export function applyLearnedRules(cwd: string, rules: LearnedRule[]): number {
   if (!fresh.length) return 0;
 
   doc.rules = [...existing, ...fresh];
-  doc.project = (doc.project as Record<string, unknown>) ?? { name: "local-overrides" };
   writeFileSync(localPath, stringifyYaml(doc));
   return fresh.length;
 }

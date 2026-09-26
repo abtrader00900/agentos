@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import path from "node:path";
+import { GraphStore, ensureGraphEngine } from "./graph.js";
+import { projectRoot } from "../../core/project.js";
+/**
+ * MCP Codegraph Server (FR-5.x)
+ * Dependency graph + change impact analysis — deterministic, local, no model.
+ */
+/** graph keys are project-relative with forward slashes; agents on Windows pass "src\a.ts" or "./src/a.ts" */
+const norm = (f) => f.replace(/\\/g, "/").replace(/^\.\//, "");
+export function createCodegraphServer(root = projectRoot()) {
+    const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
+    const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
+    const fmt = (files, empty) => files.length ? { content: [{ type: "text", text: files.join("\n") }] }
+        : { content: [{ type: "text", text: empty }] };
+    const refresh = async () => {
+        await ensureGraphEngine();
+        store.update(root);
+    };
+    server.tool("codegraph_impact", "FR-5.3: If I change this file, what breaks? Returns every file that (transitively) depends on it.", { file: z.string().describe("Path relative to project root") }, async ({ file: rawFile }) => {
+        const file = norm(rawFile);
+        await refresh();
+        const direct = store.impact(file);
+        if (!direct.length)
+            return fmt([], `Nothing imports "${file}". No impact.`);
+        // transitive closure (bounded)
+        const seen = new Set([file]);
+        const queue = [file];
+        while (queue.length) {
+            const cur = queue.shift();
+            for (const dep of store.impact(cur)) {
+                if (!seen.has(dep)) {
+                    seen.add(dep);
+                    queue.push(dep);
+                }
+            }
+        }
+        seen.delete(file);
+        const text = [
+            `Direct dependents (${direct.length}):`,
+            ...direct,
+            ``,
+            `Full transitive impact (${seen.size} files):`,
+            ...[...seen].sort(),
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+    });
+    server.tool("codegraph_deps", "What does this file import/depend on?", { file: z.string() }, async ({ file: rawFile }) => {
+        const file = norm(rawFile);
+        await refresh();
+        return fmt(store.dependencies(file), `"${file}" has no resolved internal dependencies.`);
+    });
+    server.tool("codegraph_orphans", "Files nobody imports — dead code candidates (FR-5.6).", {}, async () => {
+        await refresh();
+        return fmt(store.orphans(), "No orphan files.");
+    });
+    server.tool("codegraph_cycles", "Import cycles in the project (FR-5.6).", {}, async () => {
+        await refresh();
+        const cycles = store.cycles();
+        return fmt(cycles.map((c) => c.join(" → ")), "No import cycles found.");
+    });
+    server.tool("codegraph_rebuild", "Force full graph rebuild (normally incremental updates happen automatically).", {}, async () => {
+        await ensureGraphEngine();
+        const r = store.rebuild(root);
+        return { content: [{ type: "text", text: `Rebuilt: ${r.scanned} files scanned, ${r.changed} processed.` }] };
+    });
+    server.tool("codegraph_stats", "Graph size stats.", {}, async () => {
+        const s = store.stats();
+        return { content: [{ type: "text", text: `${s.files} files, ${s.edges} dependency edges (engine: ${s.engine}).` }] };
+    });
+    return server;
+}
+const isMain = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+if (isMain) {
+    const server = createCodegraphServer();
+    await server.connect(new StdioServerTransport());
+}
+//# sourceMappingURL=server.js.map

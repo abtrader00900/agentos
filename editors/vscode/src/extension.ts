@@ -5,12 +5,15 @@
  */
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 let output: vscode.OutputChannel;
 let statusBar: vscode.StatusBarItem;
 let checkTimer: NodeJS.Timeout | undefined;
+
+const HARNESSES = ["claude-code", "codex", "antigravity", "cursor", "windsurf"];
+const PACKAGE = "@basit0090/agent-os";
 
 interface CliResult {
   code: number;
@@ -114,22 +117,64 @@ function workspaceRoot(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
 }
 
-/** Resolve how to invoke the CLI. Returns [command, argsPrefix]. */
-export function resolveCli(): { cmd: string; prefix: string[] } {
+interface CliInvocation {
+  cmd: string;
+  prefix: string[];
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The extension host is Electron: running a script through process.execPath
+ * needs ELECTRON_RUN_AS_NODE, otherwise VS Code opens a new window instead.
+ */
+const asNode = (script: string): CliInvocation => ({
+  cmd: process.execPath,
+  prefix: [script],
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+});
+
+/** Resolve how to invoke the CLI. */
+export function resolveCli(): CliInvocation {
   const p = config().get<string>("cliPath", "").trim();
-  if (!p) return { cmd: "agentos", prefix: [] };
+  if (!p) {
+    // Global install. On Windows the PATH entry is agentos.cmd, which spawn()
+    // refuses to run without a shell — so run the script behind the shim.
+    const script = globalCliScript();
+    return script ? asNode(script) : { cmd: "agentos", prefix: [] };
+  }
 
   // direct file
-  if (existsSync(p) && !isDir(p)) return { cmd: process.execPath, prefix: [p] };
+  if (existsSync(p) && !isDir(p)) return asNode(p);
 
   // repo checkout: prefer dist/cli.js, fall back to tsx
   const dist = path.join(p, "dist", "cli.js");
-  if (existsSync(dist)) return { cmd: process.execPath, prefix: [dist] };
+  if (existsSync(dist)) return asNode(dist);
   const src = path.join(p, "src", "cli.ts");
-  if (existsSync(src)) return { cmd: "npx", prefix: ["--no-install", "tsx", src] };
+  const tsx = path.join(p, "node_modules", "tsx", "dist", "cli.mjs");
+  if (existsSync(src) && existsSync(tsx)) return { ...asNode(tsx), prefix: [tsx, src] };
 
   // bare name → must be on PATH
   return { cmd: p, prefix: [] };
+}
+
+/** dist/cli.js of a globally installed agentos, found through the `agentos` shim on PATH. */
+function globalCliScript(): string | null {
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    for (const name of ["agentos", "agentos.cmd"]) {
+      const shim = path.join(dir, name);
+      if (!existsSync(shim)) continue;
+      // Windows: <prefix>\node_modules\<pkg>; Unix: the shim is a symlink into <prefix>/lib/node_modules
+      const sibling = path.join(dir, "node_modules", PACKAGE, "dist", "cli.js");
+      if (existsSync(sibling)) return sibling;
+      try {
+        const real = realpathSync(shim);
+        if (real.endsWith(".js")) return real;
+      } catch {
+        /* not a symlink */
+      }
+    }
+  }
+  return null;
 }
 
 function isDir(p: string): boolean {
@@ -141,9 +186,9 @@ function isDir(p: string): boolean {
 }
 
 function runCli(args: string[], cwd: string): Promise<CliResult> {
-  const { cmd, prefix } = resolveCli();
+  const { cmd, prefix, env } = resolveCli();
   return new Promise((resolve) => {
-    const child = spawn(cmd, [...prefix, ...args], { cwd, shell: false });
+    const child = spawn(cmd, [...prefix, ...args], { cwd, shell: false, env });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
@@ -202,7 +247,7 @@ async function showDoctor(cwd: string): Promise<void> {
   output.show(true);
   if (r.code === -1) {
     output.appendLine("agentos CLI not found.");
-    output.appendLine("Fix: set `agentos.cliPath` in Settings, or install globally: npm install -g <path-to-agentos>.");
+    output.appendLine(`Fix: set \`agentos.cliPath\` in Settings, or install globally: npm install -g ${PACKAGE}`);
     return;
   }
   try {
@@ -277,7 +322,7 @@ async function installSkill(name: string, cwd: string): Promise<void> {
 
 async function handoffWizard(cwd: string): Promise<void> {
   const to = await vscode.window.showQuickPick(
-    ["claude-code", "codex", "antigravity", "any"],
+    [...HARNESSES, "any"],
     { placeHolder: "Hand off to which harness?" }
   );
   if (!to) return;
