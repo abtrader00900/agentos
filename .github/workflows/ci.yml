@@ -7,10 +7,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: [20, 22]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,11 +21,62 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
-      - run: npm test
+      - name: tests (builtin text search — no ripgrep on PATH)
+        run: npm test
+      - name: tests again with ripgrep on PATH (supersearch prefers it)
+        if: matrix.node == 22
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then choco install ripgrep -y --no-progress; else sudo apt-get install -y ripgrep; fi
+          rg --version
+          npm test
+      - name: committed dist/ is current (git installs use it directly — no build step)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        shell: bash
+        run: |
+          rm -rf dist
+          npm run compile
+          # git diff misses NEW and deleted outputs; status sees them
+          test -z "$(git status --porcelain -- dist)" || { git status --porcelain -- dist; exit 1; }
       - name: CLI smoke test
         run: |
           node node_modules/tsx/dist/cli.mjs src/cli.ts --version
           node node_modules/tsx/dist/cli.mjs src/cli.ts skill test
+
+  # What a user actually runs: the packed tarball and a git URL, installed globally
+  # into a throwaway prefix, then init → install → doctor in an empty project.
+  install-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: pack + global install
+        shell: bash
+        run: |
+          npm pack
+          npm install -g --prefix "$RUNNER_TEMP/prefix" ./basit0090-agent-os-*.tgz
+      - name: git URL install (no build step may run here — dist/ is committed)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in Windows) REPO="git+file:///$(pwd -W)";; *) REPO="git+file://$PWD";; esac
+          npm install -g --prefix "$RUNNER_TEMP/prefix-git" "$REPO"
+      - name: init → install → doctor in an empty project
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in Windows) BIN="$RUNNER_TEMP/prefix/agentos.cmd";; *) BIN="$RUNNER_TEMP/prefix/bin/agentos";; esac
+          mkdir "$RUNNER_TEMP/proj" && cd "$RUNNER_TEMP/proj"
+          "$BIN" --version
+          "$BIN" init
+          "$BIN" install
+          "$BIN" doctor
+          "$BIN" status --json
 
   vscode-ext:
     runs-on: ubuntu-latest
