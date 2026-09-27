@@ -8,12 +8,13 @@ import { searchText } from "./searcher.js";
 import { searchSymbols } from "./symbols.js";
 import { searchHistory, blameFile, isGitRepo } from "./gitsearch.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 /**
  * MCP Supersearch Server (FR-4.x)
  * Text (ripgrep/builtin), symbols (ast-grep), git history — all local.
  */
 export function createSupersearchServer(cwd = projectRoot()) {
-    const server = new McpServer({ name: "agentos-supersearch", version: "0.1.0" });
+    const server = new McpServer({ name: "agentos-supersearch", version: VERSION });
     server.tool("supersearch_text", "Search file contents by regex across the project. Honors .gitignore, skips binaries. Faster and free compared to asking the LLM to read files.", {
         pattern: z.string().describe("Regex to search for"),
         glob: z.string().optional().describe("e.g. '*.ts' or 'app/**'"),

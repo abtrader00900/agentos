@@ -43,7 +43,7 @@ Cheap operations (search, recall, impact checks) currently get routed through ex
 
 ### Status
 
-v0.1.0 — the core is solid (5 harness targets, 3 MCP servers, 11 skills, handoff RFC, CI on Linux + Windows). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
+v0.2.0 — the core is solid (5 harness targets, 3 MCP servers, 11 skills, handoff RFC, CI on Linux + Windows). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
 
 Repo: https://github.com/abtrader00900/agentos
 

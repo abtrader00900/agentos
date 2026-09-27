@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createRequire } from "node:module";
 import { Command } from "commander";
 import { init } from "./commands/init.js";
 import { install } from "./commands/install.js";
@@ -14,13 +13,12 @@ import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ALL_HARNESSES } from "./core/schema.js";
-// package.json is the only place the version lives (works from src/ via tsx and from dist/)
-const { version } = createRequire(import.meta.url)("../package.json");
+import { VERSION } from "./version.js";
 const program = new Command();
 program
     .name("agentos")
     .description("Local-first, multi-harness agent operating system. Zero API dependency.")
-    .version(version);
+    .version(VERSION);
 program
     .command("init")
     .description("Create agent.config.yaml in the current project")

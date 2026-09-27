@@ -8,6 +8,7 @@ import { searchText } from "./searcher.js";
 import { searchSymbols } from "./symbols.js";
 import { searchHistory, blameFile, isGitRepo } from "./gitsearch.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 
 /**
  * MCP Supersearch Server (FR-4.x)
@@ -15,7 +16,7 @@ import { projectRoot } from "../../core/project.js";
  */
 
 export function createSupersearchServer(cwd = projectRoot()): McpServer {
-  const server = new McpServer({ name: "agentos-supersearch", version: "0.1.0" });
+  const server = new McpServer({ name: "agentos-supersearch", version: VERSION });
 
   server.tool(
     "supersearch_text",

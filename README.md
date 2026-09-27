@@ -4,7 +4,7 @@
 
 Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf — 5 harnesses ke configs, MCP tools, aur shared memory. API ka kharcha zero, har project mein same brain.
 
-> Status: **v0.1.0 — all 4 milestones + Phase 5 shipped**, CI green on Linux + Windows. See `RFC/` for the handoff protocol spec.
+> Status: **v0.2.0** — all 4 milestones + Phase 5 shipped, two full audit rounds (see CHANGELOG.md), CI green on Linux + Windows. See `RFC/` for the handoff protocol spec.
 
 ![AgentOS demo: install → handoff → doctor](docs/images/demo.gif)
 
