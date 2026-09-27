@@ -15,3 +15,12 @@ export const generators: Record<HarnessName, HarnessGenerator> = {
 };
 
 export type { GeneratedFile, HarnessGenerator } from "./types.js";
+
+/** The file each harness reads first — what status/doctor/handoff look for. */
+export const HARNESS_MARKER: Record<HarnessName, string> = {
+  "claude-code": "CLAUDE.md",
+  codex: "AGENTS.md",
+  antigravity: ".agents/rules/agentos.md",
+  cursor: ".cursor/rules/agentos.mdc",
+  windsurf: ".windsurf/rules/agentos.md",
+};

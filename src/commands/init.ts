@@ -6,7 +6,7 @@ import path from "node:path";
  * `npx -y <PKG>`, so this must match package.json exactly -- "agentos" is an
  * unrelated placeholder package owned by someone else on the public registry.
  */
-const PKG = "@basit0090/agent-os";
+export const PKG = "@basit0090/agent-os";
 
 const TEMPLATE = `# AgentOS project config — single source of truth for all agent harnesses.
 # Docs: https://github.com/abtrader00900/agentos

@@ -21,6 +21,8 @@ const GRAMMAR_BY_EXT: Record<string, string> = {
   ".jsx": "javascript",
   ".mjs": "javascript",
   ".cjs": "javascript",
+  ".mts": "typescript",
+  ".cts": "typescript",
   ".py": "python",
   ".php": "php",
   ".go": "go",
@@ -120,14 +122,19 @@ function nodeSpecifiers(n: SyntaxNode): Spec[] | null {
       const out: Spec[] = [];
       const s = firstStringChild(n);
       if (s) out.push([stripQuotes(s), "import"]);            // TS/JS source
+      // TS: import x = require("./y")
+      const req = n.namedChildren.find((c) => c.type === "import_require_clause");
+      const reqStr = req && descendants(req, (c) => c.type.includes("string"))[0];
+      if (reqStr) out.push([stripQuotes(reqStr.text), "require"]);
       for (const d of descendants(n, (c) => c.type === "dotted_name")) {
         out.push([d.text, "import"]);                          // Python: import a.b, import a.b as c
       }
       return out.length ? out : null;
     }
     case "export_statement": {
-      const s = firstStringChild(n);                           // re-export: export { x } from "./y"
-      return s ? [[stripQuotes(s), "import"]] : null;
+      // only a re-export has a source (export { x } from "./y"); `export default "text"` has none
+      const src = n.childForFieldName("source");
+      return src ? [[stripQuotes(src.text), "import"]] : null;
     }
     case "call_expression": {
       const fn = n.namedChildren[0]?.text;
@@ -148,12 +155,28 @@ function nodeSpecifiers(n: SyntaxNode): Spec[] | null {
         const spec = rel && !rel.text.endsWith(dotted.text) ? rel.text + dotted.text : (rel?.text ?? dotted.text);
         return [[spec, "import"]];
       }
-      return rel ? [[rel.text, "import"]] : null;
+      if (!rel) return null;
+      // `from . import models, views` imports the sibling MODULES — emit ".models", ".views";
+      // resolution falls back to the package when a name is a symbol, not a module
+      // (in `views as v` the alias is an identifier, so only the imported names are dotted_name)
+      const names = descendants(n, (c) => c.type === "dotted_name" && c.startIndex > cutoff)
+        .sort((a, b) => a.startIndex - b.startIndex);
+      return names.length ? names.map((d): Spec => [rel.text + d.text, "import"]) : [[rel.text, "import"]];
     }
 
     // --- PHP ---
     case "namespace_use_declaration": {
       const out: Spec[] = [];
+      // group use: use App\Models\{User, Post as P};
+      const group = n.namedChildren.find((c) => c.type === "namespace_use_group");
+      if (group) {
+        const prefix = n.namedChildren.find((c) => c.type === "namespace_name")?.text ?? "";
+        for (const clause of descendants(group, (c) => c.type === "namespace_use_group_clause")) {
+          const name = clause.namedChildren.find((c) => c.type === "namespace_name" || c.type === "name");
+          if (name) out.push([prefix ? `${prefix}\\${name.text}` : name.text, "import"]);
+        }
+        return out.length ? out : null;
+      }
       const clauses = descendants(n, (c) => c.type === "namespace_use_clause");
       for (const clause of clauses) {
         const qn = descendants(clause, (c) => c.type === "qualified_name")[0];
@@ -170,7 +193,8 @@ function nodeSpecifiers(n: SyntaxNode): Spec[] | null {
     case "require_once_expression":
     case "include_expression":
     case "include_once_expression": {
-      const s = firstStringChild(n);
+      // include "x.php" and include("x.php") — the string sits inside a parenthesized_expression
+      const s = firstStringChild(n) ?? descendants(n, (c) => c.type.includes("string"))[0]?.text;
       return s ? [[stripQuotes(s), "require"]] : null;
     }
 

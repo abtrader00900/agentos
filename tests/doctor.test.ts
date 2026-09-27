@@ -35,6 +35,7 @@ describe("doctor (FR-2.4)", () => {
 
   it("passes after install; warns on hand-edited config (drift)", () => {
     writeFileSync(path.join(dir, "agent.config.yaml"), configYaml);
+    writeFileSync(path.join(dir, "server.ts"), "// the MCP server script the config points at\n");
     install({ cwd: dir, quiet: true });
     const first = doctor({ cwd: dir, quiet: true });
     expect(first.ok).toBe(true);

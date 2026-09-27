@@ -38,7 +38,7 @@ afterEach(() => {
 describe("sync (FR-1.2/1.3/1.4)", () => {
   it("generates all harness configs", () => {
     sync({ cwd: dir, quiet: true });
-    for (const f of ["CLAUDE.md", "AGENTS.md", ".antigravity/config.md"]) {
+    for (const f of ["CLAUDE.md", "AGENTS.md", ".agents/rules/agentos.md"]) {
       expect(existsSync(path.join(dir, f))).toBe(true);
     }
   });

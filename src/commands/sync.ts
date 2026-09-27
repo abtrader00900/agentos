@@ -1,61 +1,153 @@
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { generators } from "../generators/index.js";
-import { writeManifest, hashContent, readManifest, detectDrift, type ManifestEntry } from "../core/manifest.js";
+import { writeManifest, hashContent, readManifest, detectDrift, normalizeEol, type ManifestEntry } from "../core/manifest.js";
 import type { HarnessName } from "../core/schema.js";
 
 export interface SyncOptions {
   cwd?: string;
   /** Only sync these harnesses */
   only?: HarnessName[];
-  /** Overwrite drifted (hand-edited) files without prompting */
+  /** Overwrite drifted (hand-edited) and pre-existing files; the previous version is kept as <file>.bak */
   force?: boolean;
   quiet?: boolean;
 }
 
 const log = (msg: string, quiet?: boolean) => { if (!quiet) console.log(msg); };
 
+/**
+ * The handoff is appended to every rule file, and rule files have budgets
+ * (Windsurf: 12,000 chars per workspace rule; Antigravity: 24 KB). HANDOFF.md
+ * keeps the full text — the rule files get a bounded excerpt that points to it.
+ */
+const MAX_INJECTED_HANDOFF = 6000;
+/** documented per-file limits of the harnesses that have one */
+const FILE_LIMITS: Record<string, number> = {
+  ".windsurf/rules/agentos.md": 12_000,
+  ".agents/rules/agentos.md": 24_000,
+};
+
+function handoffExcerpt(handoff: string): string {
+  if (handoff.length <= MAX_INJECTED_HANDOFF) return handoff;
+  const cut = handoff.lastIndexOf("\n", MAX_INJECTED_HANDOFF);
+  return handoff.slice(0, cut > 0 ? cut : MAX_INJECTED_HANDOFF) +
+    "\n\n_…truncated — read HANDOFF.md at the project root for the full handoff._\n";
+}
+
+/** <file>.bak, or <file>.bak.1, .bak.2 … — a second forced sync must not destroy the first backup */
+function backupPath(abs: string): string {
+  if (!existsSync(abs + ".bak")) return abs + ".bak";
+  for (let i = 1; ; i++) if (!existsSync(`${abs}.bak.${i}`)) return `${abs}.bak.${i}`;
+}
+
 export function sync(options: SyncOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
-  const { config, sources } = loadConfig(cwd);
-
-  // drift check before overwrite (FR-1.6)
+  const { config, sources, hasProject, localMcpEnv } = loadConfig(cwd);
+  // the global layer alone must not turn any directory into a project full of generated files
+  if (!hasProject) {
+    throw new Error(`No agent.config.yaml in ${cwd} — run "agentos init" here first (the global ~/.agentos config only supplies defaults).`);
+  }
   const targets = options.only ?? (Object.keys(generators) as HarnessName[]);
-  const planned = new Map<string, string>();
-  for (const h of targets) {
-    for (const f of generators[h].generate(config)) planned.set(f.path, f.content);
-  }
-  const drift = detectDrift(cwd, planned);
-  const willOverwrite = drift.drifted;
-  if (willOverwrite.length && !options.force) {
-    throw new Error(
-      `Drift detected in:\n  ${willOverwrite.join("\n  ")}\n\n` +
-        `These files were edited by hand after the last sync.\n` +
-        `Re-run with --force to overwrite, or move your edits into agent.config.yaml.`,
-    );
-  }
 
-  const entries: ManifestEntry[] = [];
-  // FR-7.3: inject latest handoff into generated markdown configs so the
-  // target harness auto-receives pending context on next sync.
+  // FR-7.3: inject the latest handoff into generated markdown configs (.md and
+  // Cursor's .mdc) so the target harness auto-receives pending context.
   const handoffPath = path.join(cwd, "HANDOFF.md");
-  const handoff = existsSync(handoffPath) ? readFileSync(handoffPath, "utf8") : null;
+  const handoff = existsSync(handoffPath) ? handoffExcerpt(normalizeEol(readFileSync(handoffPath, "utf8"))) : null;
 
+  const planned: { path: string; content: string }[] = [];
   for (const h of targets) {
     for (const file of generators[h].generate(config)) {
-      const content = handoff && file.path.endsWith(".md")
-        ? file.content + "\n## Active Handoff (AgentOS)\n\n" + handoff
-        : file.content;
-      const abs = path.join(cwd, file.path);
-      mkdirSync(path.dirname(abs), { recursive: true });
-      writeFileSync(abs, content);
-      entries.push({ path: file.path, generatedHash: hashContent(content), writtenHash: hashContent(content) });
-      log(`  ✓ ${file.path}`, options.quiet);
+      planned.push({
+        path: file.path,
+        content: handoff && /\.mdc?$/.test(file.path)
+          ? file.content + "\n## Active Handoff (AgentOS)\n\n" + handoff
+          : file.content,
+      });
     }
   }
-  writeManifest(cwd, entries);
-  log(`Synced ${entries.length} files from ${sources.length} config source(s).`, options.quiet);
+
+  // FR-1.6: never silently destroy someone's work.
+  //   drifted   = a file we generated earlier that was hand-edited since
+  //   unmanaged = a file we never generated that already exists with other content
+  //               (the hand-written CLAUDE.md of a project adopting agentos)
+  const manifest = readManifest(cwd);
+  const managed = new Set((manifest?.files ?? []).map((f) => f.path));
+  const plannedPaths = new Set(planned.map((f) => f.path));
+  const drifted = detectDrift(cwd).drifted.filter((p) => plannedPaths.has(p));
+  const unmanaged = planned
+    .filter((f) => !managed.has(f.path))
+    .filter((f) => {
+      const abs = path.join(cwd, f.path);
+      return existsSync(abs) && normalizeEol(readFileSync(abs, "utf8")) !== f.content;
+    })
+    .map((f) => f.path);
+
+  if (!options.force) {
+    if (drifted.length) {
+      throw new Error(
+        `Drift detected in:\n  ${drifted.join("\n  ")}\n\n` +
+          `These files were edited by hand after the last sync.\n` +
+          `Re-run with --force to overwrite (the current version is kept as <file>.bak), or move your edits into agent.config.yaml.`,
+      );
+    }
+    if (unmanaged.length) {
+      throw new Error(
+        `Existing files would be overwritten:\n  ${unmanaged.join("\n  ")}\n\n` +
+          `They were not generated by agentos. Move their content into agent.config.yaml (rules, description),\n` +
+          `then re-run with --force — the originals are kept as <file>.bak.`,
+      );
+    }
+  }
+
+  // keep manifest entries for harnesses not part of this run (sync --only)
+  const entries = new Map<string, ManifestEntry>((manifest?.files ?? []).map((f) => [f.path, f]));
+  const backup = new Set([...drifted, ...unmanaged]);
+  for (const file of planned) {
+    const abs = path.join(cwd, file.path);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    let note = "";
+    if (backup.has(file.path)) {
+      const bak = backupPath(abs);
+      copyFileSync(abs, bak);
+      note = `  (previous version → ${path.relative(cwd, bak).replace(/\\/g, "/")})`;
+    }
+    writeFileSync(abs, file.content);
+    const hash = hashContent(file.content);
+    entries.set(file.path, { path: file.path, generatedHash: hash, writtenHash: hash });
+    log(`  ✓ ${file.path}${note}`, options.quiet);
+    const limit = FILE_LIMITS[file.path];
+    if (limit && file.content.length > limit) {
+      log(`  ⚠ ${file.path} is ${file.content.length} chars — the harness reads at most ${limit}; shorten rules or the handoff`, options.quiet);
+    }
+  }
+  // A target that moved (Antigravity's config path did) leaves its old file behind:
+  // on a full sync, remove files we generated earlier that no generator produces
+  // any more — but only if they are still exactly what we wrote. readManifest has
+  // already dropped entries that point outside the project.
+  if (!options.only) {
+    for (const [p, entry] of [...entries]) {
+      if (plannedPaths.has(p)) continue;
+      const abs = path.join(cwd, p);
+      const isFile = existsSync(abs) && statSync(abs).isFile();
+      if (isFile && hashContent(readFileSync(abs, "utf8")) === entry.generatedHash) {
+        rmSync(abs);
+        log(`  − ${p}  (no longer generated)`, options.quiet);
+      } else if (existsSync(abs)) {
+        log(`  ⚠ ${p} is no longer generated but was edited by hand — left in place`, options.quiet);
+      }
+      entries.delete(p);
+    }
+  }
+  writeManifest(cwd, [...entries.values()]);
+  if (localMcpEnv.length) {
+    log(
+      `  ⚠ env for ${localMcpEnv.join(", ")} comes from agent.config.local.yaml but is written into .mcp.json, ` +
+        `.codex/config.toml and the other MCP files — don't commit secrets; prefer variables the harness reads from your shell.`,
+      options.quiet,
+    );
+  }
+  log(`Synced ${planned.length} files from ${sources.length} config source(s).`, options.quiet);
 }
 
 export { detectDrift, readManifest };

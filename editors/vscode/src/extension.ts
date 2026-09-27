@@ -5,12 +5,15 @@
  */
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 let output: vscode.OutputChannel;
 let statusBar: vscode.StatusBarItem;
 let checkTimer: NodeJS.Timeout | undefined;
+
+const HARNESSES = ["claude-code", "codex", "antigravity", "cursor", "windsurf"];
+const PACKAGE = "@basit0090/agent-os";
 
 interface CliResult {
   code: number;
@@ -37,21 +40,35 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBar.command = "agentos.doctor";
   context.subscriptions.push(output, statusBar);
 
-  const cwd = () => workspaceRoot();
+  // Without an open folder there is no project: the extension host's cwd is VS Code's
+  // install directory, and commands would write HANDOFF.md/.agentos/ into it.
+  const inRoot = (fn: (root: string) => unknown) => () => {
+    const root = workspaceRoot();
+    if (!root) {
+      void vscode.window.showWarningMessage("AgentOS: open a project folder first.");
+      return;
+    }
+    return fn(root);
+  };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("agentos.sync", () => runCliToOutput(["sync"], cwd(), "Sync")),
-    vscode.commands.registerCommand("agentos.doctor", () => showDoctor(cwd())),
-    vscode.commands.registerCommand("agentos.status", () => runCliToOutput(["status"], cwd(), "Status")),
-    vscode.commands.registerCommand("agentos.learn", () => runCliToOutput(["learn"], cwd(), "Learn")),
-    vscode.commands.registerCommand("agentos.handoff", () => handoffWizard(cwd())),
+    vscode.commands.registerCommand("agentos.sync", inRoot((root) => runCliToOutput(["sync"], root, "Sync"))),
+    vscode.commands.registerCommand("agentos.doctor", inRoot((root) => showDoctor(root))),
+    vscode.commands.registerCommand("agentos.status", inRoot((root) => runCliToOutput(["status"], root, "Status"))),
+    vscode.commands.registerCommand("agentos.learn", inRoot((root) => runCliToOutput(["learn"], root, "Learn"))),
+    vscode.commands.registerCommand("agentos.handoff", inRoot((root) => handoffWizard(root))),
     vscode.commands.registerCommand("agentos.refreshSkills", () =>
       vscode.commands.executeCommand("agentosSkills.refresh")
     ),
     vscode.commands.registerCommand("agentos.installSkill", async (item?: SkillNode) => {
-      if (item?.skill) return installSkill(item.skill.name, cwd());
+      const root = workspaceRoot();
+      if (!root) {
+        void vscode.window.showWarningMessage("AgentOS: open a project folder first.");
+        return;
+      }
+      if (item?.skill) return installSkill(item.skill.name, root);
       // called from command palette — pick from available skills
-      const r = await runCli(["skill", "list", "--json"], cwd());
+      const r = await runCli(["skill", "list", "--json"], root);
       if (r.code !== 0) return;
       try {
         const skills = (JSON.parse(r.stdout) as SkillItem[]).filter((sk) => !sk.installed);
@@ -59,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
           skills.map((sk) => ({ label: sk.name, description: sk.description })),
           { placeHolder: "Install which skill?" }
         );
-        if (pick) await installSkill(pick.label, cwd());
+        if (pick) await installSkill(pick.label, root);
       } catch {
         /* CLI missing */
       }
@@ -67,24 +84,26 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // skills tree
-  const provider = new SkillsProvider(cwd);
+  const provider = new SkillsProvider(workspaceRoot);
   vscode.window.registerTreeDataProvider("agentosSkills", provider);
   context.subscriptions.push(
     vscode.commands.registerCommand("agentosSkills.refresh", () => provider.refresh())
   );
 
   // hasConfig context key → shows the tree only in agentos projects
-  syncContextKeys(cwd());
-  if (vscode.workspace.workspaceFolders) {
-    void refreshStatusBar(cwd());
-  }
+  syncContextKeys(workspaceRoot());
+  void refreshStatusBar(workspaceRoot());
 
   // lightweight re-check on save (debounced)
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(() => {
       if (!config().get<boolean>("checkOnSave", true)) return;
       if (checkTimer) clearTimeout(checkTimer);
-      checkTimer = setTimeout(() => void refreshStatusBar(cwd()), 1500);
+      checkTimer = setTimeout(() => {
+        // the saved file may be a new agent.config.yaml
+        syncContextKeys(workspaceRoot());
+        void refreshStatusBar(workspaceRoot());
+      }, 1500);
     })
   );
 
@@ -92,8 +111,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("agentos")) {
-        syncContextKeys(cwd());
-        void refreshStatusBar(cwd());
+        syncContextKeys(workspaceRoot());
+        void refreshStatusBar(workspaceRoot());
         provider.refresh();
       }
     })
@@ -110,26 +129,93 @@ function config(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration("agentos");
 }
 
-function workspaceRoot(): string {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+function workspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-/** Resolve how to invoke the CLI. Returns [command, argsPrefix]. */
-export function resolveCli(): { cmd: string; prefix: string[] } {
+const hasConfig = (root: string | undefined): root is string =>
+  !!root && existsSync(path.join(root, "agent.config.yaml"));
+
+interface CliInvocation {
+  cmd: string;
+  prefix: string[];
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The extension host is Electron: running a script through process.execPath
+ * needs ELECTRON_RUN_AS_NODE, otherwise VS Code opens a new window instead.
+ */
+const asNode = (script: string): CliInvocation => ({
+  cmd: process.execPath,
+  prefix: [script],
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+});
+
+/** Resolve how to invoke the CLI. */
+export function resolveCli(): CliInvocation {
   const p = config().get<string>("cliPath", "").trim();
-  if (!p) return { cmd: "agentos", prefix: [] };
+  if (!p) {
+    // Global install. On Windows the PATH entry is agentos.cmd, which spawn()
+    // refuses to run without a shell — so run the script behind the shim.
+    const script = globalCliScript();
+    return script ? asNode(script) : { cmd: "agentos", prefix: [] };
+  }
 
   // direct file
-  if (existsSync(p) && !isDir(p)) return { cmd: process.execPath, prefix: [p] };
+  if (existsSync(p) && !isDir(p)) return asNode(p);
 
   // repo checkout: prefer dist/cli.js, fall back to tsx
   const dist = path.join(p, "dist", "cli.js");
-  if (existsSync(dist)) return { cmd: process.execPath, prefix: [dist] };
+  if (existsSync(dist)) return asNode(dist);
   const src = path.join(p, "src", "cli.ts");
-  if (existsSync(src)) return { cmd: "npx", prefix: ["--no-install", "tsx", src] };
+  const tsx = path.join(p, "node_modules", "tsx", "dist", "cli.mjs");
+  if (existsSync(src) && existsSync(tsx)) return { ...asNode(tsx), prefix: [tsx, src] };
 
-  // bare name → must be on PATH
-  return { cmd: p, prefix: [] };
+  // bare name → must be on PATH (on Windows, run the script behind its .cmd shim)
+  const behind = globalCliScript(p);
+  return behind ? asNode(behind) : { cmd: p, prefix: [] };
+}
+
+/**
+ * The JS entry point behind a CLI shim on PATH (npm, pnpm and yarn global installs).
+ * Windows shims are .cmd files spawn() cannot run without a shell (and a shell would
+ * re-parse user text such as the handoff task), so the script they wrap is run directly.
+ */
+function globalCliScript(name = "agentos"): string | null {
+  const exts = process.platform === "win32" ? ["", ".cmd", ".bat"] : [""];
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter).map((d) => d.replace(/^"|"$/g, "")).filter(Boolean)) {
+    for (const ext of exts) {
+      const shim = path.join(dir, name + ext);
+      if (!existsSync(shim) || isDir(shim)) continue;
+      if (name === "agentos") {
+        // npm on Windows: <prefix>\node_modules\<pkg>
+        const sibling = path.join(dir, "node_modules", PACKAGE, "dist", "cli.js");
+        if (existsSync(sibling)) return sibling;
+      }
+      if (/\.(cmd|bat)$/i.test(shim)) {
+        // npm/pnpm/yarn .cmd shims end in: "%_prog%" "%dp0%\..\path\to\cli.js" %*
+        try {
+          const m = readFileSync(shim, "utf8").match(/"%~?dp0%?\\?([^"%]+?\.[cm]?js)"/i);
+          if (m) {
+            const target = path.resolve(dir, m[1]);
+            if (existsSync(target)) return target;
+          }
+        } catch {
+          /* unreadable shim */
+        }
+        continue;
+      }
+      try {
+        // Unix: the shim is usually a symlink into lib/node_modules
+        const real = realpathSync(shim);
+        if (/\.[cm]?js$/.test(real)) return real;
+      } catch {
+        /* not a symlink */
+      }
+    }
+  }
+  return null;
 }
 
 function isDir(p: string): boolean {
@@ -141,13 +227,20 @@ function isDir(p: string): boolean {
 }
 
 function runCli(args: string[], cwd: string): Promise<CliResult> {
-  const { cmd, prefix } = resolveCli();
+  const { cmd, prefix, env } = resolveCli();
   return new Promise((resolve) => {
-    const child = spawn(cmd, [...prefix, ...args], { cwd, shell: false });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, [...prefix, ...args], { cwd, shell: false, env });
+    } catch (err) {
+      // spawn throws synchronously for e.g. EINVAL (a .cmd without a shell on Windows)
+      resolve({ code: -1, stdout: "", stderr: String(err) });
+      return;
+    }
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
     child.on("error", (err) => resolve({ code: -1, stdout, stderr: String(err) }));
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
@@ -169,7 +262,12 @@ async function runCliToOutput(args: string[], cwd: string, label: string): Promi
 
 // ---------- Doctor / status bar ----------
 
-async function refreshStatusBar(cwd: string): Promise<void> {
+async function refreshStatusBar(cwd: string | undefined): Promise<void> {
+  // only agentos projects get a status: elsewhere doctor would report "no config" as a red failure
+  if (!hasConfig(cwd)) {
+    statusBar.hide();
+    return;
+  }
   const r = await runCli(["doctor", "--json"], cwd);
   if (r.code === -1) {
     // CLI not found — stay silent (avoid nagging non-agentos workspaces)
@@ -202,7 +300,7 @@ async function showDoctor(cwd: string): Promise<void> {
   output.show(true);
   if (r.code === -1) {
     output.appendLine("agentos CLI not found.");
-    output.appendLine("Fix: set `agentos.cliPath` in Settings, or install globally: npm install -g <path-to-agentos>.");
+    output.appendLine(`Fix: set \`agentos.cliPath\` in Settings, or install globally: npm install -g ${PACKAGE}`);
     return;
   }
   try {
@@ -235,7 +333,8 @@ class SkillNode extends vscode.TreeItem {
     this.description = skill.installed ? "installed" : "";
     this.tooltip = skill.description;
     this.iconPath = new vscode.ThemeIcon(skill.installed ? "pass-filled" : "circle-outline");
-    this.contextValue = "agentos.skill";
+    // the inline Install action is bound to "agentos.skill" only: reinstalling would wipe local edits
+    this.contextValue = skill.installed ? "agentos.skill.installed" : "agentos.skill";
     this.command = skill.installed
       ? undefined
       : { command: "agentos.installSkill", title: "Install", arguments: [this] };
@@ -246,7 +345,7 @@ class SkillsProvider implements vscode.TreeDataProvider<SkillNode> {
   private emitter = new vscode.EventEmitter<SkillNode | undefined | void>();
   readonly onDidChangeTreeData = this.emitter.event;
 
-  constructor(private cwd: () => string) {}
+  constructor(private cwd: () => string | undefined) {}
 
   refresh(): void {
     this.emitter.fire();
@@ -257,7 +356,9 @@ class SkillsProvider implements vscode.TreeDataProvider<SkillNode> {
   }
 
   async getChildren(): Promise<SkillNode[]> {
-    const r = await runCli(["skill", "list", "--json"], this.cwd());
+    const root = this.cwd();
+    if (!root) return [];
+    const r = await runCli(["skill", "list", "--json"], root);
     if (r.code !== 0) return [];
     try {
       const skills = JSON.parse(r.stdout) as SkillItem[];
@@ -277,7 +378,7 @@ async function installSkill(name: string, cwd: string): Promise<void> {
 
 async function handoffWizard(cwd: string): Promise<void> {
   const to = await vscode.window.showQuickPick(
-    ["claude-code", "codex", "antigravity", "any"],
+    [...HARNESSES, "any"],
     { placeHolder: "Hand off to which harness?" }
   );
   if (!to) return;
@@ -304,7 +405,6 @@ async function handoffWizard(cwd: string): Promise<void> {
 
 // ---------- context keys ----------
 
-async function syncContextKeys(cwd: string): Promise<void> {
-  const has = existsSync(path.join(cwd, "agent.config.yaml"));
-  await vscode.commands.executeCommand("setContext", "agentos:hasConfig", has);
+async function syncContextKeys(cwd: string | undefined): Promise<void> {
+  await vscode.commands.executeCommand("setContext", "agentos:hasConfig", hasConfig(cwd));
 }

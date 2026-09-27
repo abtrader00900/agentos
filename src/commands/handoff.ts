@@ -1,6 +1,6 @@
-import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown } from "../core/handoff.js";
+import { ALL_HARNESSES } from "../core/schema.js";
 
 /** FR-2.5 / FR-7.x: agentos handoff */
 
@@ -19,9 +19,16 @@ function splitList(s?: string): string[] {
   return s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
 }
 
+const VALID: string[] = [...ALL_HARNESSES, "any"];
+
 export function handoff(options: HandoffOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
 
+  for (const [flag, value] of [["--to", options.to], ["--from", options.from]] as const) {
+    if (value !== undefined && !VALID.includes(value)) {
+      throw new Error(`Unknown harness "${value}" for ${flag}. Valid: ${VALID.join(", ")}`);
+    }
+  }
   if (!options.task) {
     throw new Error(
       "Task description required.\n" +
@@ -35,7 +42,7 @@ export function handoff(options: HandoffOptions = {}): void {
     pendingDecisions: splitList(options.decisions),
     openQuestions: splitList(options.questions),
     notes: options.notes,
-    fromHarness: options.from ?? detectHarness(cwd),
+    fromHarness: options.from ?? detectHarness(),
     toHarness: options.to ?? "any",
   });
 
@@ -54,19 +61,13 @@ export function handoffShow(options: { cwd?: string } = {}): void {
   console.log(bundleToMarkdown(bundle));
 }
 
-export function detectHarness(cwd: string): string {
-  // best-effort: which harness config was touched most recently
-  const candidates: [string, string][] = [
-    ["claude-code", "CLAUDE.md"],
-    ["codex", "AGENTS.md"],
-    ["antigravity", ".antigravity/config.md"],
-  ];
-  let best: [string, number] = ["unknown", 0];
-  for (const [name, file] of candidates) {
-    const p = path.join(cwd, file);
-    if (!existsSync(p)) continue;
-    const mtime = statSync(p).mtimeMs;
-    if (mtime > best[1]) best = [name, mtime];
-  }
-  return best[0];
+/**
+ * Which harness is running this command, from the environment it gives its shell.
+ * (The old "newest marker file" guess always answered whichever file sync wrote last.)
+ */
+export function detectHarness(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.CLAUDECODE) return "claude-code";
+  if (env.CODEX_SANDBOX || env.CODEX_SANDBOX_NETWORK_DISABLED) return "codex";
+  if (env.CURSOR_TRACE_ID) return "cursor";
+  return "unknown";
 }

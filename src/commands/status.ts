@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { detectDrift, readManifest } from "../core/manifest.js";
+import { HARNESS_MARKER } from "../generators/index.js";
 
 /**
  * FR-2.3: status — harnesses detected, drift, memory size.
@@ -42,20 +43,14 @@ export function statusData(options: { cwd?: string } = {}): StatusData {
     data.configError = (e as Error).message.split("\n")[0];
   }
 
-  const harnessFiles: Record<string, string> = {
-    "claude-code": "CLAUDE.md",
-    codex: "AGENTS.md",
-    antigravity: ".antigravity/config.md",
-    cursor: ".cursor/rules/agentos.mdc",
-    windsurf: ".windsurf/rules/agentos.md",
-  };
+  const harnessFiles: Record<string, string> = HARNESS_MARKER;
   for (const [name, file] of Object.entries(harnessFiles)) {
     data.harnesses.push({ name, file, present: existsSync(path.join(cwd, file)) });
   }
 
   const manifest = readManifest(cwd);
   if (manifest) {
-    data.drift = { available: true, drifted: detectDrift(cwd, new Map()).drifted };
+    data.drift = { available: true, drifted: detectDrift(cwd).drifted };
   }
 
   const memDb = path.join(cwd, ".agentos", "memory.json");

@@ -3,7 +3,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { MemoryStore } from "./store.js";
+import { projectRoot } from "../../core/project.js";
 
 /**
  * MCP Memory Server (FR-3.x)
@@ -13,7 +15,7 @@ import { MemoryStore } from "./store.js";
  */
 
 function resolveDbPath(): string {
-  const project = process.env.AGENTOS_PROJECT ?? process.cwd();
+  const project = projectRoot();
   return path.join(project, ".agentos", "memory.json");
 }
 
@@ -33,7 +35,7 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
       key: z.string().describe("Short identifier, e.g. 'auth-flow'"),
       value: z.string().describe("The fact content"),
       source: z.string().optional().describe("Where this came from (file path, commit)"),
-      pinned: z.boolean().optional().describe("Pinned facts never auto-expire"),
+      pinned: z.boolean().optional().describe("Pinned facts sort first in recall and are marked in exports and handoffs"),
     },
     async ({ topic, key, value, source, pinned }) => {
       const fact = store.store({ topic, key, value, source, pinned });
@@ -48,7 +50,7 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
       topic: z.string().optional(),
       key: z.string().optional(),
       text: z.string().optional(),
-      limit: z.number().optional().default(20),
+      limit: z.number().int().min(1).max(500).optional().default(20),
     },
     async (query) => {
       const facts = store.recall(query);
@@ -111,7 +113,8 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
 }
 
 // Run directly → stdio transport
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+// pathToFileURL percent-encodes "#", "%" and spaces exactly like import.meta.url does
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   const server = createMemoryServer();
   await server.connect(new StdioServerTransport());

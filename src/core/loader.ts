@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
 import { agentConfigSchema, type AgentConfig } from "./schema.js";
@@ -15,6 +16,10 @@ export interface LoadedConfig {
   config: AgentConfig;
   sources: string[];
   missing: string[];
+  /** <cwd>/agent.config.yaml exists — sync/install refuse to generate files without one */
+  hasProject: boolean;
+  /** mcpServers whose env comes from the personal, gitignored layer (it lands in committed files) */
+  localMcpEnv: string[];
 }
 
 function loadLayer(file: string): { raw?: unknown; error?: string } {
@@ -26,12 +31,17 @@ function loadLayer(file: string): { raw?: unknown; error?: string } {
   }
 }
 
+const keyed = (item: unknown) =>
+  !!item && typeof item === "object" && !Array.isArray(item) &&
+  ((item as Record<string, unknown>).id !== undefined || (item as Record<string, unknown>).name !== undefined);
+
 function mergeLayer(base: Record<string, unknown>, layer: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(layer)) {
     const existing = out[key];
-    if (Array.isArray(existing) && Array.isArray(value)) {
-      // merge arrays by id/name so overrides replace instead of duplicate
+    if (Array.isArray(existing) && Array.isArray(value) && [...existing, ...value].every(keyed)) {
+      // merge arrays of rules/skills/servers by id/name so overrides replace instead of duplicate;
+      // plain lists (stack: [vue]) fall through and replace the lower layer's list wholesale
       const map = new Map<string | number, unknown>();
       existing.forEach((item, i) => {
         const id =
@@ -60,7 +70,8 @@ function mergeLayer(base: Record<string, unknown>, layer: Record<string, unknown
   return out;
 }
 
-export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): LoadedConfig {
+// HOME is unset on Windows (USERPROFILE is the equivalent); homedir() covers every platform.
+export function loadConfig(cwd = process.cwd(), home = homedir()): LoadedConfig {
   const globalFile = path.join(home, ".agentos", "agent.config.yaml");
   const projectFile = path.join(cwd, "agent.config.yaml");
   const localFile = path.join(cwd, "agent.config.local.yaml");
@@ -69,6 +80,7 @@ export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): 
   const missing: string[] = [];
   let merged: Record<string, unknown> = {};
   const sources: string[] = [];
+  let localMcpEnv: string[] = [];
 
   for (const file of layers) {
     const { raw, error } = loadLayer(file);
@@ -79,14 +91,23 @@ export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): 
       missing.push(file);
       continue;
     }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(`Invalid config in ${file}: the top level must be a mapping (project:, rules:, …), not a ${Array.isArray(raw) ? "list" : typeof raw}`);
+    }
     sources.push(file);
+    if (file === localFile) {
+      const servers = (raw as { mcpServers?: unknown }).mcpServers;
+      localMcpEnv = Array.isArray(servers)
+        ? servers.filter((s) => s && typeof s === "object" && (s as { env?: unknown }).env).map((s) => String((s as { name?: unknown }).name))
+        : [];
+    }
     merged = mergeLayer(merged, raw as Record<string, unknown>);
   }
 
   if (sources.length === 0) {
+    // first line stands alone: status/doctor show only that line
     throw new Error(
-      `No agent.config.yaml found. Searched:\n  ${layers.join("\n  ")}\n\n` +
-        `Run "agentos init" or create one. See examples/agent.config.yaml.`,
+      `No agent.config.yaml found in ${cwd} — run "agentos init". Searched:\n  ${layers.join("\n  ")}`,
     );
   }
 
@@ -98,5 +119,5 @@ export function loadConfig(cwd = process.cwd(), home = process.env.HOME ?? ""): 
     throw new Error(`agent.config.yaml validation failed:\n${issues}`);
   }
 
-  return { config: parsed.data, sources, missing };
+  return { config: parsed.data, sources, missing, hasProject: sources.includes(projectFile), localMcpEnv };
 }

@@ -63,7 +63,7 @@ consume: after the receiving agent picks up the work, delete HANDOFF.md
 
 ## 5. Harness Integration
 
-AgentOS config generators (CLAUDE.md, AGENTS.md, .antigravity/config.md) append the current `HANDOFF.md` content when the file exists. Non-AgentOS harnesses can adopt the protocol by reading `.agentos/handoffs/*/bundle.json` — no AgentOS dependency required.
+AgentOS config generators (CLAUDE.md, AGENTS.md, .agents/rules/agentos.md, .cursor/rules/agentos.mdc, .windsurf/rules/agentos.md) append the current `HANDOFF.md` content when the file exists — capped at 6,000 characters with a pointer to the full file, because rule files have size budgets (Windsurf: 12,000 characters). `HANDOFF.md` lists pinned memory facts plus the 30 most recent; `bundle.json` carries all of them. Non-AgentOS harnesses can adopt the protocol by reading `.agentos/handoffs/*/bundle.json` — no AgentOS dependency required.
 
 ## 6. Compatibility Rules
 

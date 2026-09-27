@@ -2,7 +2,7 @@
  * Issue #3: community skill registry — git-based, zero API keys.
  *
  * Two parts:
- *  1. install from ANY git source: `agentos skill install owner/repo` or a full git URL.
+ *  1. install from ANY git source: `agentos skill install owner/repo[#sub/dir]` or a full git URL.
  *  2. search: a registry index JSON (remote https or local file) listed in
  *     agent.config.yaml as `skillRegistry`, merged with bundled skills.
  *
@@ -10,74 +10,127 @@
  *   { "version": 1, "skills": [{ "name", "description", "repo", "path?" }] }
  */
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { listSkills, validateSkillDir, bundledSkillsRoot } from "./skills.js";
+import { fileURLToPath } from "node:url";
+import { listSkills, validateSkillDir, bundledSkillsRoot, copySkill, parseSkill } from "./skills.js";
 import { loadConfig } from "./loader.js";
 
 // ---------- git install ----------
 
-function expandGitSource(source: string): string {
-  // "owner/repo" shorthand → github
-  if (/^[\w.-]+\/[\w.-]+$/.test(source)) return `https://github.com/${source}.git`;
-  return source;
+/** A path on this machine (./x, ../x, /x, ~/x, C:\x) — never something to clone from GitHub. */
+export function looksLikeLocalPath(source: string): boolean {
+  return /^(\.{1,2}([\\/]|$)|[\\/]|~[\\/]|[A-Za-z]:[\\/])/.test(source);
 }
 
-function findSkillDirs(root: string): string[] {
-  const out: string[] = [];
+/** "owner/repo" → GitHub; an optional "#sub/dir" selects a directory inside the clone. */
+function parseGitSource(source: string): { url: string; sub?: string } {
+  const hash = source.lastIndexOf("#");
+  const base = hash > 0 ? source.slice(0, hash) : source;
+  const sub = hash > 0 ? source.slice(hash + 1).replace(/^\/+|\/+$/g, "") : "";
+  // skill sources come from shared config files and remote registry indexes:
+  // "--upload-pack=…" or "-c …" would be read by git as options
+  if (base.startsWith("-")) throw new Error(`Refusing skill source "${source}": it looks like a command-line option`);
+  const url = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/.test(base) ? `https://github.com/${base}.git` : base;
+  return sub ? { url, sub } : { url };
+}
+
+const MAX_SKILL_DEPTH = 3;
+
+/**
+ * Every directory holding a SKILL.md up to MAX_SKILL_DEPTH below root — covers
+ * skills/<name>/ and .claude/skills/<name>/ layouts.
+ */
+function findSkillDirs(root: string, depth = 0): string[] {
   if (existsSync(path.join(root, "SKILL.md"))) return [root];
-  for (const entry of readdirSync(root)) {
+  if (depth >= MAX_SKILL_DEPTH) return [];
+  const out: string[] = [];
+  let entries: string[];
+  try { entries = readdirSync(root); } catch { return out; }
+  for (const entry of entries.sort()) {
+    if (entry === ".git" || entry === "node_modules") continue;
     const p = path.join(root, entry);
     try {
-      if (statSync(p).isDirectory() && !entry.startsWith(".") && existsSync(path.join(p, "SKILL.md"))) {
-        out.push(p);
-      }
+      if (statSync(p).isDirectory()) out.push(...findSkillDirs(p, depth + 1));
     } catch { /* skip unreadable */ }
   }
   return out;
 }
 
 /**
- * Clone a git source and install every valid skill from it into the project.
- * Returns the installed skill names.
+ * The name a skill directory installs under: its directory name — except when the
+ * source IS the skill (a single-skill repo cloned into a random temp dir), where
+ * the frontmatter name is the only meaningful one.
  */
-export function installSkillsFromGit(source: string, projectDir: string): string[] {
-  const url = expandGitSource(source);
+function skillNameFor(dir: string, root: string): string {
+  if (path.resolve(dir) === path.resolve(root)) {
+    try {
+      const name = parseSkill(readFileSync(path.join(dir, "SKILL.md"), "utf8")).name;
+      if (name && /^[\w.-]+$/.test(name) && name !== "." && name !== "..") return name;
+    } catch { /* fall back to the directory name */ }
+  }
+  return path.basename(dir);
+}
+
+/**
+ * Validate and copy every skill directory found under `root` into the project.
+ * Returns the installed skill names. `label` is what error messages call the source;
+ * `only` installs just the skill of that name.
+ */
+export function installSkillsFromDir(root: string, projectDir: string, label = root, only?: string): string[] {
+  let skillDirs = findSkillDirs(root);
+  if (!skillDirs.length) {
+    throw new Error(`No skills (SKILL.md) found in ${label}`);
+  }
+  if (only) {
+    skillDirs = skillDirs.filter((d) => skillNameFor(d, root) === only);
+    if (!skillDirs.length) throw new Error(`Skill '${only}' not found in ${label}`);
+  }
+  const dstRoot = path.join(projectDir, ".agentos", "skills");
+  const installed: string[] = [];
+  const rejected: string[] = [];
+  for (const dir of skillDirs) {
+    const name = skillNameFor(dir, root);
+    const check = validateSkillDir(dir, { name });
+    if (!check.ok) {
+      rejected.push(`${name}: ${check.issues.join(", ")}`);
+      continue;
+    }
+    copySkill(dir, path.join(dstRoot, name));
+    installed.push(name);
+  }
+  if (!installed.length) {
+    throw new Error(`All skills in ${label} failed validation:\n  - ${rejected.join("\n  - ")}`);
+  }
+  return installed;
+}
+
+/**
+ * Clone a git source and install every valid skill from it into the project
+ * (or just `only`). Returns the installed skill names.
+ */
+export function installSkillsFromGit(source: string, projectDir: string, only?: string): string[] {
+  const { url, sub } = parseGitSource(source);
+  // a local repo path is a fine clone source; a missing one must not fall through to anything else
+  if (looksLikeLocalPath(url) && !existsSync(url)) throw new Error(`No such skill directory or repository: ${source}`);
   const tmp = mkdtempSync(path.join(tmpdir(), "agentos-skill-"));
   try {
-    execFileSync("git", ["clone", "--depth", "1", url, tmp], { stdio: ["ignore", "ignore", "pipe"] });
-    const skillDirs = findSkillDirs(tmp);
-    if (!skillDirs.length) {
-      throw new Error(`No skills (SKILL.md) found in ${url}`);
-    }
-    const dstRoot = path.join(projectDir, ".agentos", "skills");
-    const installed: string[] = [];
-    const rejected: string[] = [];
-    for (const dir of skillDirs) {
-      const check = validateSkillDir(dir);
-      if (!check.ok) {
-        rejected.push(`${path.basename(dir)}: ${check.issues.join(", ")}`);
-        continue;
-      }
-      const name = path.basename(dir);
-      const dst = path.join(dstRoot, name);
-      rmSync(dst, { recursive: true, force: true });
-      cpSync(dir, dst, { recursive: true });
-      installed.push(name);
-    }
-    if (!installed.length) {
-      throw new Error(`All skills in ${url} failed validation:\n  - ${rejected.join("\n  - ")}`);
-    }
-    return installed;
+    // "--" ends option parsing; ext:: would run an arbitrary command as the "transport"
+    execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", url, tmp], { stdio: ["ignore", "ignore", "pipe"] });
+    const root = sub ? path.resolve(tmp, sub) : tmp;
+    if (sub && !root.startsWith(tmp + path.sep)) throw new Error(`Invalid path "${sub}" in ${source}`);
+    if (sub && !(existsSync(root) && statSync(root).isDirectory())) throw new Error(`No directory "${sub}" in ${url}`);
+    return installSkillsFromDir(root, projectDir, `${url}${sub ? `#${sub}` : ""}`, only);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
 
 export function looksLikeGitSource(name: string): boolean {
-  return name.includes("://") || name.includes("/") || name.endsWith(".git");
+  return name.includes("://") || name.includes("/") || name.endsWith(".git") || /^[A-Za-z]:\\/.test(name);
 }
 
 // ---------- registry index ----------
@@ -95,45 +148,89 @@ export interface RegistryIndex {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 15_000;
+const MAX_INDEX_BYTES = 5 * 1024 * 1024;
 
 function cacheFile(): string {
   return path.join(homedir(), ".agentos", "registry-cache.json");
 }
 
-function fetchHttps(url: string): Promise<string> {
+function fetchUrl(url: string, redirects = 3): Promise<string> {
   return new Promise((resolve, reject) => {
-    httpsGet(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+    const get = new URL(url).protocol === "http:" ? httpGet : httpsGet;
+    const req = get(url, { headers: { "user-agent": "agentos" } }, (res) => {
+      const status = res.statusCode ?? 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
         res.resume();
+        if (redirects <= 0) { reject(new Error(`Too many redirects from ${url}`)); return; }
+        const next = new URL(res.headers.location, url);
+        if (new URL(url).protocol === "https:" && next.protocol !== "https:") {
+          reject(new Error(`Refusing redirect from ${url} to insecure ${next.href}`));
+          return;
+        }
+        resolve(fetchUrl(next.href, redirects - 1));
+        return;
+      }
+      if (status !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${status} from ${url}`));
         return;
       }
       let body = "";
-      res.on("data", (d) => (body += d));
+      res.setEncoding("utf8");
+      res.on("data", (d: string) => {
+        body += d;
+        if (body.length > MAX_INDEX_BYTES) req.destroy(new Error(`Registry index at ${url} exceeds ${MAX_INDEX_BYTES} bytes`));
+      });
       res.on("end", () => resolve(body));
-    }).on("error", reject);
+    });
+    req.on("error", reject);
+    req.setTimeout(FETCH_TIMEOUT_MS, () => req.destroy(new Error(`Timed out after ${FETCH_TIMEOUT_MS / 1000}s fetching ${url}`)));
   });
 }
 
-/** Load the index: local path / file:// direct read, https with 5-min disk cache. */
+/** Remote data is untrusted: keep only well-formed entries so one bad row cannot crash search. */
+function normalizeIndex(raw: unknown, from: string): RegistryIndex {
+  const idx = raw as { version?: unknown; skills?: unknown } | null;
+  if (!idx || typeof idx !== "object" || !Array.isArray(idx.skills)) {
+    throw new Error(`Invalid registry index at ${from}: expected { "version": 1, "skills": [...] }`);
+  }
+  const skills: RegistryEntry[] = [];
+  for (const e of idx.skills as unknown[]) {
+    const o = e as Partial<Record<keyof RegistryEntry, unknown>> | null;
+    if (!o || typeof o !== "object" || typeof o.name !== "string" || !o.name) continue;
+    skills.push({
+      name: o.name,
+      description: typeof o.description === "string" ? o.description : "",
+      // a repo string is handed to git clone: drop anything shaped like an option
+      repo: typeof o.repo === "string" && !o.repo.startsWith("-") ? o.repo : undefined,
+      path: typeof o.path === "string" ? o.path : undefined,
+    });
+  }
+  return { version: typeof idx.version === "number" ? idx.version : 1, skills };
+}
+
+/** Load the index: local path / file:// direct read, http(s) with a 5-min disk cache. */
 export async function loadRegistryIndex(registryUrl: string): Promise<RegistryIndex> {
   if (registryUrl.startsWith("file://")) {
-    return JSON.parse(readFileSync(registryUrl.slice("file://".length), "utf8")) as RegistryIndex;
+    const p = fileURLToPath(registryUrl);
+    return normalizeIndex(JSON.parse(readFileSync(p, "utf8")), p);
   }
   if (!registryUrl.includes("://")) {
-    return JSON.parse(readFileSync(registryUrl, "utf8")) as RegistryIndex;
+    return normalizeIndex(JSON.parse(readFileSync(registryUrl, "utf8")), registryUrl);
   }
 
   const cache = cacheFile();
   try {
-    const cached = JSON.parse(readFileSync(cache, "utf8")) as { at: number; index: RegistryIndex };
-    if (Date.now() - cached.at < CACHE_TTL_MS) return cached.index;
+    const cached = JSON.parse(readFileSync(cache, "utf8")) as { at: number; url?: string; index: RegistryIndex };
+    if (cached.url === registryUrl && Date.now() - cached.at < CACHE_TTL_MS) return cached.index;
   } catch { /* no/invalid cache */ }
 
-  const body = await fetchHttps(registryUrl);
-  const index = JSON.parse(body) as RegistryIndex;
+  const body = await fetchUrl(registryUrl);
+  const index = normalizeIndex(JSON.parse(body), registryUrl);
   try {
-    writeFileSync(cache, JSON.stringify({ at: Date.now(), index }));
+    mkdirSync(path.dirname(cache), { recursive: true });
+    writeFileSync(cache, JSON.stringify({ at: Date.now(), url: registryUrl, index }));
   } catch { /* cache write is best-effort */ }
   return index;
 }
@@ -160,8 +257,11 @@ export async function searchSkills(query: string, cwd: string): Promise<SearchRe
   if (registryUrl) {
     try {
       const index = await loadRegistryIndex(registryUrl);
-      for (const e of index.skills ?? []) {
-        if (e.name.toLowerCase().includes(q) || (e.description ?? "").toLowerCase().includes(q)) {
+      // the official index mirrors the bundled skills — list each skill once, bundled first
+      const bundled = new Set(listSkills(bundledSkillsRoot()).map((s) => s.name));
+      for (const e of index.skills) {
+        if (bundled.has(e.name)) continue;
+        if (e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q)) {
           results.push({ ...e, origin: "registry" });
         }
       }
@@ -171,4 +271,17 @@ export async function searchSkills(query: string, cwd: string): Promise<SearchRe
   }
 
   return results;
+}
+
+/** Look a skill name up in the configured registry (`skill install <name>` for a non-bundled skill). */
+export async function resolveRegistryEntry(name: string, cwd: string): Promise<RegistryEntry | null> {
+  let registryUrl: string | undefined;
+  try {
+    registryUrl = loadConfig(cwd).config.skillRegistry;
+  } catch {
+    return null;
+  }
+  if (!registryUrl) return null;
+  const index = await loadRegistryIndex(registryUrl);
+  return index.skills.find((e) => e.name === name) ?? null;
 }
