@@ -223,9 +223,11 @@ describe("install + sync safety", () => {
     expect(config.rules.map((r) => r.id)).toContain("learned-x");
   });
 
-  it("detectHarness knows all five harness marker files", () => {
-    write({ ".cursor/rules/agentos.mdc": "x" });
-    expect(detectHarness(dir)).toBe("cursor");
+  it("detectHarness reads the running harness from its environment, not from file mtimes", () => {
+    expect(detectHarness({ CLAUDECODE: "1" })).toBe("claude-code");
+    expect(detectHarness({ CODEX_SANDBOX: "seatbelt" })).toBe("codex");
+    expect(detectHarness({ CURSOR_TRACE_ID: "x" })).toBe("cursor");
+    expect(detectHarness({})).toBe("unknown");
   });
 });
 

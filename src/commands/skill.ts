@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { listSkills, testSkills, installSkill, bundledSkillsRoot } from "../core/skills.js";
-import { installSkillsFromDir, installSkillsFromGit, looksLikeGitSource, searchSkills, resolveRegistryEntry } from "../core/registry.js";
+import { installSkillsFromDir, installSkillsFromGit, looksLikeGitSource, looksLikeLocalPath, searchSkills, resolveRegistryEntry } from "../core/registry.js";
 
 /** FR-2.6: agentos skill list / install / test */
 
@@ -38,9 +38,10 @@ export function skillList(options: { cwd?: string; json?: boolean } = {}): strin
 
 export async function skillInstall(name: string, options: { cwd?: string } = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
-  // an explicit path that exists on disk is a local skill directory, not something to clone
+  // an explicit path is a local skill directory, never something to clone
   const local = path.resolve(cwd, name);
-  if ((name.includes("/") || name.includes("\\")) && existsSync(local)) {
+  if (looksLikeLocalPath(name) || ((name.includes("/") || name.includes("\\")) && existsSync(local))) {
+    if (!existsSync(local)) throw new Error(`No such skill directory: ${name}`);
     for (const n of installSkillsFromDir(local, cwd, name)) console.log(`✓ Installed skill '${n}' → .agentos/skills/${n}`);
     return;
   }
@@ -58,7 +59,8 @@ export async function skillInstall(name: string, options: { cwd?: string } = {})
   const entry = await resolveRegistryEntry(name, cwd);
   if (entry?.repo) {
     const source = entry.path ? `${entry.repo}#${entry.path}` : entry.repo;
-    const installed = installSkillsFromGit(source, cwd);
+    // the user asked for ONE skill: a repo without `path` may hold many
+    const installed = installSkillsFromGit(source, cwd, name);
     for (const n of installed) console.log(`✓ Installed skill '${n}' from ${entry.repo} → .agentos/skills/${n}`);
     return;
   }
@@ -88,10 +90,13 @@ export async function skillSearch(query: string, options: { cwd?: string } = {})
 
 export function skillTest(options: { cwd?: string } = {}): void {
   const cwd = options.cwd ?? process.cwd();
-  // test bundled skills, or project-installed ones if no bundled skills found
-  let root = bundledSkillsRoot();
-  if (!existsSync(root)) root = path.join(cwd, ".agentos", "skills");
-  const results = testSkills(root);
+  // bundled skills, plus whatever this project installed (community skills included);
+  // installed copies ship without their test/ dir, so that check is skipped for them
+  const installedRoot = path.join(cwd, ".agentos", "skills");
+  const results = [
+    ...testSkills(bundledSkillsRoot()),
+    ...(existsSync(installedRoot) ? testSkills(installedRoot, { requireTest: false }).map((r) => ({ ...r, skill: `${r.skill} (installed)` })) : []),
+  ];
   let failed = 0;
   for (const r of results) {
     if (r.ok) {

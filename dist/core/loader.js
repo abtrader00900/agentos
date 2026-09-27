@@ -13,12 +13,15 @@ function loadLayer(file) {
         return { error: `${file}: ${e.message}` };
     }
 }
+const keyed = (item) => !!item && typeof item === "object" && !Array.isArray(item) &&
+    (item.id !== undefined || item.name !== undefined);
 function mergeLayer(base, layer) {
     const out = { ...base };
     for (const [key, value] of Object.entries(layer)) {
         const existing = out[key];
-        if (Array.isArray(existing) && Array.isArray(value)) {
-            // merge arrays by id/name so overrides replace instead of duplicate
+        if (Array.isArray(existing) && Array.isArray(value) && [...existing, ...value].every(keyed)) {
+            // merge arrays of rules/skills/servers by id/name so overrides replace instead of duplicate;
+            // plain lists (stack: [vue]) fall through and replace the lower layer's list wholesale
             const map = new Map();
             existing.forEach((item, i) => {
                 const id = item && typeof item === "object"
@@ -53,6 +56,7 @@ export function loadConfig(cwd = process.cwd(), home = homedir()) {
     const missing = [];
     let merged = {};
     const sources = [];
+    let localMcpEnv = [];
     for (const file of layers) {
         const { raw, error } = loadLayer(file);
         if (error) {
@@ -62,12 +66,21 @@ export function loadConfig(cwd = process.cwd(), home = homedir()) {
             missing.push(file);
             continue;
         }
+        if (typeof raw !== "object" || Array.isArray(raw)) {
+            throw new Error(`Invalid config in ${file}: the top level must be a mapping (project:, rules:, …), not a ${Array.isArray(raw) ? "list" : typeof raw}`);
+        }
         sources.push(file);
+        if (file === localFile) {
+            const servers = raw.mcpServers;
+            localMcpEnv = Array.isArray(servers)
+                ? servers.filter((s) => s && typeof s === "object" && s.env).map((s) => String(s.name))
+                : [];
+        }
         merged = mergeLayer(merged, raw);
     }
     if (sources.length === 0) {
-        throw new Error(`No agent.config.yaml found. Searched:\n  ${layers.join("\n  ")}\n\n` +
-            `Run "agentos init" to create one.`);
+        // first line stands alone: status/doctor show only that line
+        throw new Error(`No agent.config.yaml found in ${cwd} — run "agentos init". Searched:\n  ${layers.join("\n  ")}`);
     }
     const parsed = agentConfigSchema.safeParse(merged);
     if (!parsed.success) {
@@ -76,6 +89,6 @@ export function loadConfig(cwd = process.cwd(), home = homedir()) {
             .join("\n");
         throw new Error(`agent.config.yaml validation failed:\n${issues}`);
     }
-    return { config: parsed.data, sources, missing };
+    return { config: parsed.data, sources, missing, hasProject: sources.includes(projectFile), localMcpEnv };
 }
 //# sourceMappingURL=loader.js.map

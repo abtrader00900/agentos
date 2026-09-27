@@ -16,8 +16,8 @@ export function parseSkill(skillMd) {
         body: m[2],
     };
 }
-export function validateSkillDir(skillDir) {
-    const skillName = path.basename(skillDir);
+export function validateSkillDir(skillDir, opts = {}) {
+    const skillName = opts.name ?? path.basename(skillDir);
     const issues = [];
     const skillMdPath = path.join(skillDir, "SKILL.md");
     if (!existsSync(skillMdPath)) {
@@ -41,10 +41,27 @@ export function validateSkillDir(skillDir) {
         issues.push("body must have at least 2 '##' sections (e.g. Workflow, Rules)");
     if (/TODO|TBD|PLACEHOLDER/i.test(raw))
         issues.push("contains TODO/TBD/PLACEHOLDER");
-    if (!existsSync(path.join(skillDir, "test"))) {
+    if (opts.requireTest !== false && !existsSync(path.join(skillDir, "test"))) {
         issues.push("test/ directory missing (FR-6.2)");
     }
     return { skill: skillName, ok: issues.length === 0, issues };
+}
+/**
+ * Copy a validated skill into the project. Its test/ directory stays behind:
+ * .agentos/skills/<name>/test/skill.test.mjs imports vitest and would be picked
+ * up by the user's own `vitest` run (the default include matches it).
+ */
+export function copySkill(src, dst) {
+    if (path.resolve(src) === path.resolve(dst))
+        return; // already in place — rmSync would delete the source
+    rmSync(dst, { recursive: true, force: true });
+    cpSync(src, dst, {
+        recursive: true,
+        filter: (p) => {
+            const rel = path.relative(src, p).split(path.sep);
+            return rel[0] !== ".git" && rel[0] !== "test";
+        },
+    });
 }
 export function listSkills(skillsRoot) {
     if (!existsSync(skillsRoot))
@@ -63,8 +80,8 @@ export function listSkills(skillsRoot) {
     })
         .sort((a, b) => a.name.localeCompare(b.name));
 }
-export function testSkills(skillsRoot) {
-    return listSkills(skillsRoot).map((s) => validateSkillDir(s.dir));
+export function testSkills(skillsRoot, opts = {}) {
+    return listSkills(skillsRoot).map((s) => validateSkillDir(s.dir, opts));
 }
 /** FR-6.4: install a bundled skill into a project's .agentos/skills/ */
 export function installSkill(bundledRoot, projectDir, name) {
@@ -75,9 +92,7 @@ export function installSkill(bundledRoot, projectDir, name) {
     if (!check.ok) {
         throw new Error(`Skill '${name}' is invalid:\n  - ${check.issues.join("\n  - ")}`);
     }
-    const dst = path.join(projectDir, ".agentos", "skills", name);
-    rmSync(dst, { recursive: true, force: true });
-    cpSync(src, dst, { recursive: true });
+    copySkill(src, path.join(projectDir, ".agentos", "skills", name));
 }
 export function bundledSkillsRoot() {
     // works from src/ (tsx) and dist/ alike; import.meta.dirname would need Node >= 20.11

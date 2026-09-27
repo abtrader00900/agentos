@@ -63,7 +63,9 @@ describe("Phase 5 harness targets (FR-1.8)", () => {
     sync({ cwd: dir, quiet: true });
     const md = readFileSync(path.join(dir, ".windsurf/rules/agentos.md"), "utf8");
     expect(md).toContain("all-rule");
-    expect(md).toContain("Local Tools (AgentOS)");
+    expect(md).toContain("trigger: always_on");
+    // no mcpServers configured → no tools promised (regressions.test.ts covers the configured case)
+    expect(md).not.toContain("Local Tools (AgentOS)");
   });
 
   it("cursor-only rule does not leak into windsurf config", () => {

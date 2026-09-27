@@ -20,10 +20,13 @@ export interface FactInput {
     source?: string;
     pinned?: boolean;
 }
+/** a fact is one list item: newlines in it would start new headings/items in the export */
+export declare const oneLine: (s: string) => string;
 export declare class MemoryStore {
     private db;
     constructor(dbPath: string);
     store(input: FactInput): Fact;
+    private upsert;
     /** FR-3.5: recall by topic / key substring / free text in value */
     recall(query?: {
         topic?: string;

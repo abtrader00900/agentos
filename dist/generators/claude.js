@@ -1,37 +1,25 @@
-import { rulesForHarness } from "../core/schema.js";
+import { mcpServersJson, ruleBody } from "./shared.js";
 /** CLAUDE.md + .mcp.json for Claude Code (FR-1.2) */
 export const claudeGenerator = {
     harness: "claude-code",
     generate(config) {
-        const rules = rulesForHarness(config, "claude-code");
-        const lines = [
-            `# ${config.project.name}`,
-            "",
-            config.project.description ?? "",
-            "",
-        ];
-        if (config.stack.length) {
-            lines.push(`**Stack:** ${config.stack.join(", ")}`, "");
-        }
-        if (rules.length) {
-            lines.push("## Rules", "");
-            for (const r of rules)
-                lines.push(`- **${r.id}:** ${r.text}`);
-            lines.push("");
-        }
+        const lines = ruleBody(config, "claude-code");
         if (config.skills.length) {
-            lines.push("## Skills", "");
-            for (const s of config.skills)
-                lines.push(`- ${s.name}${s.source ? ` (${s.source})` : ""}`);
-            lines.push("", "Skills live in .agentos/skills/. Read SKILL.md before applying a skill.", "");
+            // skills go before the tools section in the original layout; keep them near the rules
+            const at = lines.indexOf("## Local Tools (AgentOS)");
+            const skills = [
+                "## Skills",
+                "",
+                ...config.skills.map((s) => `- ${s.name}${s.source ? ` (${s.source})` : ""}`),
+                "",
+                "Skills live in .agentos/skills/. Read SKILL.md before applying a skill.",
+                "",
+            ];
+            lines.splice(at < 0 ? lines.length : at, 0, ...skills);
         }
-        lines.push("## Local Tools (AgentOS)", "", "Deterministic tools are available via MCP — prefer them over guessing:", "- `memory` — store/recall project facts (long-term memory)", "- `supersearch` — text/symbol/git-history search", "- `codegraph` — dependency graph + change impact", "");
-        const mcp = {
-            mcpServers: Object.fromEntries(config.mcpServers.map((s) => [s.name, { command: s.command, args: s.args, ...(s.env ? { env: s.env } : {}) }])),
-        };
         return [
             { path: "CLAUDE.md", content: lines.join("\n") },
-            { path: ".mcp.json", content: JSON.stringify(mcp, null, 2) + "\n" },
+            { path: ".mcp.json", content: mcpServersJson(config) },
         ];
     },
 };

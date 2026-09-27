@@ -1,20 +1,35 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+const isDir = (p) => { try {
+    return statSync(p).isDirectory();
+}
+catch {
+    return false;
+} };
 /**
  * Where the project lives, for MCP servers a harness may start from anywhere:
- * AGENTOS_PROJECT wins, then the nearest ancestor of `from` that holds an
- * agent.config.yaml (or an .agentos/ directory), then `from` itself.
+ * AGENTOS_PROJECT (when it names an existing directory) wins, then the nearest
+ * ancestor of `from` that holds an agent.config.yaml or a project .agentos/
+ * directory, then `from` itself.
+ *
+ * ~/.agentos is the GLOBAL config directory, not a project marker — treating it
+ * as one made every MCP server launched outside a project index the whole home.
  */
-export function projectRoot(from = process.cwd()) {
-    if (process.env.AGENTOS_PROJECT)
-        return process.env.AGENTOS_PROJECT;
-    let dir = path.resolve(from);
+export function projectRoot(from = process.cwd(), home = homedir()) {
+    const env = process.env.AGENTOS_PROJECT?.trim();
+    if (env && isDir(path.resolve(env)))
+        return path.resolve(env);
+    const start = path.resolve(from);
+    let dir = start;
     for (;;) {
-        if (existsSync(path.join(dir, "agent.config.yaml")) || existsSync(path.join(dir, ".agentos")))
+        if (existsSync(path.join(dir, "agent.config.yaml")))
+            return dir;
+        if (dir !== path.resolve(home) && isDir(path.join(dir, ".agentos")))
             return dir;
         const parent = path.dirname(dir);
         if (parent === dir)
-            return path.resolve(from);
+            return start;
         dir = parent;
     }
 }

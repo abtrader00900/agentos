@@ -29,7 +29,7 @@ One `agent.config.yaml` in your repo generates the config for **5 harnesses** �
 - **11 battle-tested skills** (tdd-laravel, tdd-react, code-review, security-scan, db-migration-check, refactor-safe, …) with a validation framework. Same skill runs on every harness.
 - **Handoff protocol (open RFC).** `agentos handoff --to codex --task "..."` exports task state + decisions + memory snapshot + git state; the receiving agent auto-receives it via its config. Written as a versioned spec so non-AgentOS tools can adopt it.
 - **`agentos learn`** — mines your git history and suggests config rules (files that always change together, hot spots). It gets smarter the more you use it.
-- **`agentos doctor`** — a 12-point health check with actionable fixes.
+- **`agentos doctor`** — a health check (config, every harness file, drift, MCP commands, memory, skills, handoff) with actionable fixes.
 
 ### Zero is the magic number
 

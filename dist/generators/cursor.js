@@ -1,35 +1,26 @@
-import { rulesForHarness } from "../core/schema.js";
+import { mcpServersJson, ruleBody, yamlString } from "./shared.js";
 /**
- * Cursor target (FR-1.8): .cursor/rules/*.mdc
- * Cursor loads rule files from .cursor/rules/; .mdc supports frontmatter
- * (description, globs, alwaysApply).
+ * Cursor target (FR-1.8): .cursor/rules/*.mdc + .cursor/mcp.json.
+ * Cursor loads rule files from .cursor/rules/ (.mdc frontmatter: description,
+ * globs, alwaysApply) and project MCP servers from .cursor/mcp.json
+ * (https://cursor.com/docs/context/mcp) — without it the rule's "Local Tools"
+ * would point at tools Cursor never started.
  */
 export const cursorGenerator = {
     harness: "cursor",
     generate(config) {
-        const rules = rulesForHarness(config, "cursor");
         const lines = [
             "---",
-            `description: AgentOS rules — ${config.project.name}`,
+            `description: ${yamlString(`AgentOS rules — ${config.project.name}`)}`,
             "alwaysApply: true",
             "---",
             "",
-            `# ${config.project.name}`,
-            "",
-            config.project.description ?? "",
-            "",
+            ...ruleBody(config, "cursor"),
         ];
-        if (config.stack.length) {
-            lines.push(`**Stack:** ${config.stack.join(", ")}`, "");
-        }
-        if (rules.length) {
-            lines.push("## Rules", "");
-            for (const r of rules)
-                lines.push(`- **${r.id}:** ${r.text}`);
-            lines.push("");
-        }
-        lines.push("## Local Tools (AgentOS)", "", "Deterministic tools are available via MCP — prefer them over guessing:", "- `memory` — store/recall project facts", "- `supersearch` — text/symbol/git-history search", "- `codegraph` — dependency graph + change impact", "");
-        return [{ path: ".cursor/rules/agentos.mdc", content: lines.join("\n") }];
+        const files = [{ path: ".cursor/rules/agentos.mdc", content: lines.join("\n") }];
+        if (config.mcpServers.length)
+            files.push({ path: ".cursor/mcp.json", content: mcpServersJson(config) });
+        return files;
     },
 };
 //# sourceMappingURL=cursor.js.map

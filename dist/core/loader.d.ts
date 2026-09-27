@@ -10,5 +10,9 @@ export interface LoadedConfig {
     config: AgentConfig;
     sources: string[];
     missing: string[];
+    /** <cwd>/agent.config.yaml exists — sync/install refuse to generate files without one */
+    hasProject: boolean;
+    /** mcpServers whose env comes from the personal, gitignored layer (it lands in committed files) */
+    localMcpEnv: string[];
 }
 export declare function loadConfig(cwd?: string, home?: string): LoadedConfig;

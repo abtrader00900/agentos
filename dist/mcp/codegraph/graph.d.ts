@@ -8,9 +8,23 @@ export interface ImportRef {
     kind: "import" | "require";
 }
 export declare function extractImports(filePath: string, content: string): ImportRef[];
-/** readdir results for one resolution pass (update() hands the same map to every call). */
-export type DirCache = Map<string, Set<string>>;
+/**
+ * Directory listings for one resolution pass: dir → (entry name → isDirectory).
+ * update() hands the same map to every call, so resolving thousands of imports
+ * costs one readdir per directory instead of a dozen existsSync calls per import.
+ */
+export type DirCache = Map<string, Map<string, boolean>>;
 export declare function resolveModule(cwd: string, importerRel: string, specifier: string, cache?: DirCache): string | null;
+/** go.mod lookups for one resolution pass: dir → the nearest go.mod's { dir, module }, or null. */
+export type GoModCache = Map<string, {
+    dir: string;
+    module: string;
+} | null>;
+/**
+ * Every file an import points at. A Go import names a package — a directory — so it
+ * links to each non-test .go file in it; everything else resolves to one file.
+ */
+export declare function resolveTargets(cwd: string, importerRel: string, specifier: string, cache?: DirCache, goMods?: GoModCache): string[];
 export declare function scanProject(cwd: string): Map<string, number>;
 export declare class GraphStore {
     private db;

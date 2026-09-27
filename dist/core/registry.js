@@ -10,25 +10,36 @@
  *   { "version": 1, "skills": [{ "name", "description", "repo", "path?" }] }
  */
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listSkills, validateSkillDir, bundledSkillsRoot } from "./skills.js";
+import { listSkills, validateSkillDir, bundledSkillsRoot, copySkill, parseSkill } from "./skills.js";
 import { loadConfig } from "./loader.js";
 // ---------- git install ----------
+/** A path on this machine (./x, ../x, /x, ~/x, C:\x) — never something to clone from GitHub. */
+export function looksLikeLocalPath(source) {
+    return /^(\.{1,2}([\\/]|$)|[\\/]|~[\\/]|[A-Za-z]:[\\/])/.test(source);
+}
 /** "owner/repo" → GitHub; an optional "#sub/dir" selects a directory inside the clone. */
 function parseGitSource(source) {
     const hash = source.lastIndexOf("#");
     const base = hash > 0 ? source.slice(0, hash) : source;
     const sub = hash > 0 ? source.slice(hash + 1).replace(/^\/+|\/+$/g, "") : "";
-    const url = /^[\w.-]+\/[\w.-]+$/.test(base) ? `https://github.com/${base}.git` : base;
+    // skill sources come from shared config files and remote registry indexes:
+    // "--upload-pack=…" or "-c …" would be read by git as options
+    if (base.startsWith("-"))
+        throw new Error(`Refusing skill source "${source}": it looks like a command-line option`);
+    const url = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/.test(base) ? `https://github.com/${base}.git` : base;
     return sub ? { url, sub } : { url };
 }
 const MAX_SKILL_DEPTH = 3;
-/** Every directory holding a SKILL.md up to MAX_SKILL_DEPTH below root — covers skills/<name>/ layouts. */
+/**
+ * Every directory holding a SKILL.md up to MAX_SKILL_DEPTH below root — covers
+ * skills/<name>/ and .claude/skills/<name>/ layouts.
+ */
 function findSkillDirs(root, depth = 0) {
     if (existsSync(path.join(root, "SKILL.md")))
         return [root];
@@ -42,8 +53,8 @@ function findSkillDirs(root, depth = 0) {
     catch {
         return out;
     }
-    for (const entry of entries) {
-        if (entry.startsWith(".") || entry === "node_modules")
+    for (const entry of entries.sort()) {
+        if (entry === ".git" || entry === "node_modules")
             continue;
         const p = path.join(root, entry);
         try {
@@ -55,27 +66,47 @@ function findSkillDirs(root, depth = 0) {
     return out;
 }
 /**
- * Validate and copy every skill directory found under `root` into the project.
- * Returns the installed skill names. `label` is what error messages call the source.
+ * The name a skill directory installs under: its directory name — except when the
+ * source IS the skill (a single-skill repo cloned into a random temp dir), where
+ * the frontmatter name is the only meaningful one.
  */
-export function installSkillsFromDir(root, projectDir, label = root) {
-    const skillDirs = findSkillDirs(root);
+function skillNameFor(dir, root) {
+    if (path.resolve(dir) === path.resolve(root)) {
+        try {
+            const name = parseSkill(readFileSync(path.join(dir, "SKILL.md"), "utf8")).name;
+            if (name && /^[\w.-]+$/.test(name) && name !== "." && name !== "..")
+                return name;
+        }
+        catch { /* fall back to the directory name */ }
+    }
+    return path.basename(dir);
+}
+/**
+ * Validate and copy every skill directory found under `root` into the project.
+ * Returns the installed skill names. `label` is what error messages call the source;
+ * `only` installs just the skill of that name.
+ */
+export function installSkillsFromDir(root, projectDir, label = root, only) {
+    let skillDirs = findSkillDirs(root);
     if (!skillDirs.length) {
         throw new Error(`No skills (SKILL.md) found in ${label}`);
+    }
+    if (only) {
+        skillDirs = skillDirs.filter((d) => skillNameFor(d, root) === only);
+        if (!skillDirs.length)
+            throw new Error(`Skill '${only}' not found in ${label}`);
     }
     const dstRoot = path.join(projectDir, ".agentos", "skills");
     const installed = [];
     const rejected = [];
     for (const dir of skillDirs) {
-        const check = validateSkillDir(dir);
+        const name = skillNameFor(dir, root);
+        const check = validateSkillDir(dir, { name });
         if (!check.ok) {
-            rejected.push(`${path.basename(dir)}: ${check.issues.join(", ")}`);
+            rejected.push(`${name}: ${check.issues.join(", ")}`);
             continue;
         }
-        const name = path.basename(dir);
-        const dst = path.join(dstRoot, name);
-        rmSync(dst, { recursive: true, force: true });
-        cpSync(dir, dst, { recursive: true, filter: (src) => path.basename(src) !== ".git" });
+        copySkill(dir, path.join(dstRoot, name));
         installed.push(name);
     }
     if (!installed.length) {
@@ -84,20 +115,24 @@ export function installSkillsFromDir(root, projectDir, label = root) {
     return installed;
 }
 /**
- * Clone a git source and install every valid skill from it into the project.
- * Returns the installed skill names.
+ * Clone a git source and install every valid skill from it into the project
+ * (or just `only`). Returns the installed skill names.
  */
-export function installSkillsFromGit(source, projectDir) {
+export function installSkillsFromGit(source, projectDir, only) {
     const { url, sub } = parseGitSource(source);
+    // a local repo path is a fine clone source; a missing one must not fall through to anything else
+    if (looksLikeLocalPath(url) && !existsSync(url))
+        throw new Error(`No such skill directory or repository: ${source}`);
     const tmp = mkdtempSync(path.join(tmpdir(), "agentos-skill-"));
     try {
-        execFileSync("git", ["clone", "--depth", "1", url, tmp], { stdio: ["ignore", "ignore", "pipe"] });
+        // "--" ends option parsing; ext:: would run an arbitrary command as the "transport"
+        execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", url, tmp], { stdio: ["ignore", "ignore", "pipe"] });
         const root = sub ? path.resolve(tmp, sub) : tmp;
         if (sub && !root.startsWith(tmp + path.sep))
             throw new Error(`Invalid path "${sub}" in ${source}`);
-        if (sub && !existsSync(root))
+        if (sub && !(existsSync(root) && statSync(root).isDirectory()))
             throw new Error(`No directory "${sub}" in ${url}`);
-        return installSkillsFromDir(root, projectDir, `${url}${sub ? `#${sub}` : ""}`);
+        return installSkillsFromDir(root, projectDir, `${url}${sub ? `#${sub}` : ""}`, only);
     }
     finally {
         rmSync(tmp, { recursive: true, force: true });
@@ -123,7 +158,12 @@ function fetchUrl(url, redirects = 3) {
                     reject(new Error(`Too many redirects from ${url}`));
                     return;
                 }
-                resolve(fetchUrl(new URL(res.headers.location, url).href, redirects - 1));
+                const next = new URL(res.headers.location, url);
+                if (new URL(url).protocol === "https:" && next.protocol !== "https:") {
+                    reject(new Error(`Refusing redirect from ${url} to insecure ${next.href}`));
+                    return;
+                }
+                resolve(fetchUrl(next.href, redirects - 1));
                 return;
             }
             if (status !== 200) {
@@ -158,7 +198,8 @@ function normalizeIndex(raw, from) {
         skills.push({
             name: o.name,
             description: typeof o.description === "string" ? o.description : "",
-            repo: typeof o.repo === "string" ? o.repo : undefined,
+            // a repo string is handed to git clone: drop anything shaped like an option
+            repo: typeof o.repo === "string" && !o.repo.startsWith("-") ? o.repo : undefined,
             path: typeof o.path === "string" ? o.path : undefined,
         });
     }
@@ -206,7 +247,11 @@ export async function searchSkills(query, cwd) {
     if (registryUrl) {
         try {
             const index = await loadRegistryIndex(registryUrl);
+            // the official index mirrors the bundled skills — list each skill once, bundled first
+            const bundled = new Set(listSkills(bundledSkillsRoot()).map((s) => s.name));
             for (const e of index.skills) {
+                if (bundled.has(e.name))
+                    continue;
                 if (e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q)) {
                     results.push({ ...e, origin: "registry" });
                 }

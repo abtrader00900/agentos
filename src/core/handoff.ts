@@ -1,7 +1,12 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { MemoryStore } from "../mcp/memory/store.js";
+import { MemoryStore, oneLine } from "../mcp/memory/store.js";
+
+/** pinned facts always; beyond that, this many of the most recent in HANDOFF.md */
+const MAX_MD_FACTS = 30;
+/** HANDOFF.md files we generate carry this in their footer */
+const FOOTER_MARK = "AgentOS Handoff Protocol";
 
 /**
  * FR-7.x: Handoff Protocol.
@@ -109,9 +114,15 @@ export function bundleToMarkdown(bundle: HandoffBundle): string {
     lines.push("Working tree:", "```", bundle.git.status, "```", "");
   }
   if (bundle.memory.length) {
+    // HANDOFF.md is appended to every harness rule file: pinned facts plus the most
+    // recent ones; bundle.json keeps the whole snapshot
+    const shown = bundle.memory.filter((m, i) => m.pinned || i < MAX_MD_FACTS);
     lines.push("## Memory Snapshot", "");
-    for (const m of bundle.memory) {
-      lines.push(`- **[${m.topic}/${m.key}]**${m.pinned ? " 📌" : ""} ${m.value}`);
+    for (const m of shown) {
+      lines.push(`- **[${oneLine(m.topic)}/${oneLine(m.key)}]**${m.pinned ? " 📌" : ""} ${oneLine(m.value)}`);
+    }
+    if (shown.length < bundle.memory.length) {
+      lines.push(`- _…${bundle.memory.length - shown.length} more facts in bundle.json (or ask the memory MCP server)_`);
     }
     lines.push("");
   }
@@ -120,7 +131,7 @@ export function bundleToMarkdown(bundle: HandoffBundle): string {
   }
   lines.push(
     "---",
-    `_AgentOS Handoff Protocol v${bundle.version}. Machine-readable: same directory, bundle.json_`,
+    `_${FOOTER_MARK} v${bundle.version}. Machine-readable: same directory, bundle.json_`,
   );
   return lines.join("\n") + "\n";
 }
@@ -133,7 +144,13 @@ export function writeHandoff(cwd: string, bundle: HandoffBundle): { dir: string;
   writeFileSync(path.join(dir, "bundle.json"), JSON.stringify(bundle, null, 2) + "\n");
   writeFileSync(path.join(dir, "HANDOFF.md"), bundleToMarkdown(bundle));
 
+  // a HANDOFF.md we did not write is someone's document: keep it before replacing it
   const rootMd = path.join(cwd, "HANDOFF.md");
+  if (existsSync(rootMd) && !readFileSync(rootMd, "utf8").includes(FOOTER_MARK)) {
+    let bak = rootMd + ".bak";
+    for (let i = 1; existsSync(bak); i++) bak = `${rootMd}.bak.${i}`;
+    copyFileSync(rootMd, bak);
+  }
   writeFileSync(rootMd, bundleToMarkdown(bundle));
   return { dir, rootMd };
 }
@@ -141,20 +158,37 @@ export function writeHandoff(cwd: string, bundle: HandoffBundle): { dir: string;
 export function latestHandoffDir(cwd: string): string | null {
   const root = path.join(cwd, ".agentos", "handoffs");
   if (!existsSync(root)) return null;
+  // only bundle directories (<ISO-timestamp>/bundle.json); their names sort chronologically
   const dirs = readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && /^\d{4}-\d\d-\d\dT/.test(e.name) && existsSync(path.join(root, e.name, "bundle.json")))
     .map((e) => e.name)
     .sort();
   return dirs.length ? path.join(root, dirs[dirs.length - 1]) : null;
 }
 
 export function importHandoff(bundlePath: string): HandoffBundle {
-  const raw = JSON.parse(readFileSync(bundlePath, "utf8")) as HandoffBundle;
-  if (raw.format !== "agentos-handoff") {
+  const raw = JSON.parse(readFileSync(bundlePath, "utf8")) as Partial<HandoffBundle>;
+  if (raw?.format !== "agentos-handoff") {
     throw new Error(`Not an agentos handoff bundle: ${bundlePath}`);
   }
   if (raw.version !== 1) {
     throw new Error(`Unsupported handoff version ${raw.version} (this agentos supports v1)`);
   }
-  return raw;
+  // RFC §6: readers tolerate missing optional parts — a hand-written or older bundle must still render
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const git = (raw.git ?? {}) as Partial<HandoffBundle["git"]>;
+  return {
+    format: "agentos-handoff",
+    version: 1,
+    createdAt: String(raw.createdAt ?? ""),
+    fromHarness: String(raw.fromHarness ?? "unknown"),
+    toHarness: String(raw.toHarness ?? "any"),
+    task: String(raw.task ?? ""),
+    filesInProgress: list(raw.filesInProgress),
+    pendingDecisions: list(raw.pendingDecisions),
+    openQuestions: list(raw.openQuestions),
+    notes: String(raw.notes ?? ""),
+    memory: Array.isArray(raw.memory) ? raw.memory.filter((m) => m && typeof m === "object") : [],
+    git: { branch: String(git.branch ?? ""), lastCommits: list(git.lastCommits), status: String(git.status ?? ""), diffStat: String(git.diffStat ?? "") },
+  };
 }

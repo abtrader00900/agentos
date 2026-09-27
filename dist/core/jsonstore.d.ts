@@ -10,6 +10,12 @@ export declare class JsonStore {
     private reloadIfChanged;
     table<T>(name: string): T[];
     save(): void;
-    /** Every mutation already save()s; closing must not rewrite the file on a read-only open. */
+    /**
+     * Read-modify-write under a cross-process lock: the file is re-read inside the
+     * lock (a same-size write within one mtime tick cannot be missed), fn mutates
+     * this.table(...), and the result is saved before the lock is released.
+     */
+    update<R>(fn: () => R): R;
+    /** Every mutation already saves; closing must not rewrite the file on a read-only open. */
     close(): void;
 }

@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { searchText } from "./searcher.js";
 import { searchSymbols } from "./symbols.js";
 import { searchHistory, blameFile, isGitRepo } from "./gitsearch.js";
@@ -113,7 +114,8 @@ export function createSupersearchServer(cwd = projectRoot()): McpServer {
   return server;
 }
 
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+// pathToFileURL percent-encodes "#", "%" and spaces exactly like import.meta.url does
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   const server = createSupersearchServer();
   await server.connect(new StdioServerTransport());

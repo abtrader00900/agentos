@@ -28,10 +28,13 @@ const GITIGNORE_ADDITIONS = [
  */
 export function install(options: InstallOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
-  const { config } = loadConfig(cwd);
+  const { config, hasProject } = loadConfig(cwd);
+  if (!hasProject) {
+    throw new Error(`No agent.config.yaml in ${cwd} — run "agentos init" here first (the global ~/.agentos config only supplies defaults).`);
+  }
 
   // 1. .agentos directory structure
-  const dirs = [".agentos/skills", ".agentos/memory", ".agentos/handoffs"];
+  const dirs = [".agentos/skills", ".agentos/handoffs"];
   for (const d of dirs) mkdirSync(path.join(cwd, d), { recursive: true });
   log("  ✓ .agentos/ directory structure", options.quiet);
 
@@ -43,8 +46,14 @@ export function install(options: InstallOptions = {}): void {
     log("  ✓ .gitignore updated", options.quiet);
   }
 
-  // 3. skills: bundled by name, or from `source` (local path, git URL, owner/repo[#dir])
+  // 3. skills: bundled by name, or from `source` (local path, git URL, owner/repo[#dir]).
+  // An installed skill is left alone — re-running install must not wipe local edits;
+  // `agentos skill install <name>` (or install --force) refreshes it explicitly.
   for (const s of config.skills) {
+    if (!options.force && existsSync(path.join(cwd, ".agentos", "skills", s.name, "SKILL.md"))) {
+      log(`  ✓ skill present: ${s.name}`, options.quiet);
+      continue;
+    }
     try {
       if (s.source) {
         const local = path.resolve(cwd, s.source);

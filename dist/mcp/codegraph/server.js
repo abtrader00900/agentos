@@ -3,15 +3,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { GraphStore, ensureGraphEngine } from "./graph.js";
 import { projectRoot } from "../../core/project.js";
 /**
  * MCP Codegraph Server (FR-5.x)
  * Dependency graph + change impact analysis — deterministic, local, no model.
  */
-/** graph keys are project-relative with forward slashes; agents on Windows pass "src\a.ts" or "./src/a.ts" */
-const norm = (f) => f.replace(/\\/g, "/").replace(/^\.\//, "");
 export function createCodegraphServer(root = projectRoot()) {
+    // graph keys are project-relative with forward slashes; agents pass "src\a.ts",
+    // "./src/a.ts" or an absolute path
+    const norm = (f) => path.relative(root, path.resolve(root, f)).replace(/\\/g, "/");
     const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
     const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
     const fmt = (files, empty) => files.length ? { content: [{ type: "text", text: files.join("\n") }] }
@@ -73,7 +75,8 @@ export function createCodegraphServer(root = projectRoot()) {
     });
     return server;
 }
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+// pathToFileURL percent-encodes "#", "%" and spaces exactly like import.meta.url does
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
     const server = createCodegraphServer();
     await server.connect(new StdioServerTransport());

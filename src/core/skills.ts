@@ -36,8 +36,15 @@ export function parseSkill(skillMd: string): { name?: string; description?: stri
   };
 }
 
-export function validateSkillDir(skillDir: string): SkillValidation {
-  const skillName = path.basename(skillDir);
+export interface ValidateOptions {
+  /** the name the skill will be installed under (default: its directory name) */
+  name?: string;
+  /** installed copies ship without their contract test (it would run in the user's own test suite) */
+  requireTest?: boolean;
+}
+
+export function validateSkillDir(skillDir: string, opts: ValidateOptions = {}): SkillValidation {
+  const skillName = opts.name ?? path.basename(skillDir);
   const issues: string[] = [];
   const skillMdPath = path.join(skillDir, "SKILL.md");
   if (!existsSync(skillMdPath)) {
@@ -56,10 +63,27 @@ export function validateSkillDir(skillDir: string): SkillValidation {
   const headings = (meta.body.match(/^## /gm) ?? []).length;
   if (headings < 2) issues.push("body must have at least 2 '##' sections (e.g. Workflow, Rules)");
   if (/TODO|TBD|PLACEHOLDER/i.test(raw)) issues.push("contains TODO/TBD/PLACEHOLDER");
-  if (!existsSync(path.join(skillDir, "test"))) {
+  if (opts.requireTest !== false && !existsSync(path.join(skillDir, "test"))) {
     issues.push("test/ directory missing (FR-6.2)");
   }
   return { skill: skillName, ok: issues.length === 0, issues };
+}
+
+/**
+ * Copy a validated skill into the project. Its test/ directory stays behind:
+ * .agentos/skills/<name>/test/skill.test.mjs imports vitest and would be picked
+ * up by the user's own `vitest` run (the default include matches it).
+ */
+export function copySkill(src: string, dst: string): void {
+  if (path.resolve(src) === path.resolve(dst)) return; // already in place — rmSync would delete the source
+  rmSync(dst, { recursive: true, force: true });
+  cpSync(src, dst, {
+    recursive: true,
+    filter: (p) => {
+      const rel = path.relative(src, p).split(path.sep);
+      return rel[0] !== ".git" && rel[0] !== "test";
+    },
+  });
 }
 
 export function listSkills(skillsRoot: string): SkillMeta[] {
@@ -78,8 +102,8 @@ export function listSkills(skillsRoot: string): SkillMeta[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function testSkills(skillsRoot: string): SkillValidation[] {
-  return listSkills(skillsRoot).map((s) => validateSkillDir(s.dir));
+export function testSkills(skillsRoot: string, opts: Omit<ValidateOptions, "name"> = {}): SkillValidation[] {
+  return listSkills(skillsRoot).map((s) => validateSkillDir(s.dir, opts));
 }
 
 /** FR-6.4: install a bundled skill into a project's .agentos/skills/ */
@@ -90,9 +114,7 @@ export function installSkill(bundledRoot: string, projectDir: string, name: stri
   if (!check.ok) {
     throw new Error(`Skill '${name}' is invalid:\n  - ${check.issues.join("\n  - ")}`);
   }
-  const dst = path.join(projectDir, ".agentos", "skills", name);
-  rmSync(dst, { recursive: true, force: true });
-  cpSync(src, dst, { recursive: true });
+  copySkill(src, path.join(projectDir, ".agentos", "skills", name));
 }
 
 export function bundledSkillsRoot(): string {

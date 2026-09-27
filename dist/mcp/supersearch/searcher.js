@@ -2,10 +2,11 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
 const SKIP_DIRS = new Set([
-    "node_modules", ".git", "dist", "build", "vendor", ".next", ".cache",
-    "coverage", "out", ".agentos", "target", "__pycache__", ".idea", ".vscode",
+    "node_modules", "dist", "build", "vendor", "coverage", "out", "target", "__pycache__",
 ]);
 const MAX_FILE_BYTES = 512 * 1024;
+/** one minified line must not dump hundreds of KB into the model's context */
+const MAX_LINE_CHARS = 500;
 function isBinary(buf) {
     const len = Math.min(buf.length, 8000);
     for (let i = 0; i < len; i++)
@@ -13,33 +14,95 @@ function isBinary(buf) {
             return true;
     return false;
 }
-/** glob → regex source: `**` spans directories, `*` and `?` stay inside one path segment */
-function globToRegex(glob) {
-    return glob
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*\//g, "\u0000")
-        .replace(/\*\*/g, "\u0001")
-        .replace(/\*/g, "[^/]*")
-        .replace(/\?/g, "[^/]")
-        .replace(/\u0000/g, "(?:.*/)?")
-        .replace(/\u0001/g, ".*");
+/**
+ * glob → regex source: `**` spans directories, `*` and `?` stay inside one path
+ * segment, `[abc]` is a character class, `{a,b}` an alternation.
+ */
+export function globToRegex(glob) {
+    let out = "";
+    let braces = 0;
+    for (let i = 0; i < glob.length; i++) {
+        const c = glob[i];
+        if (c === "*") {
+            if (glob[i + 1] === "*") {
+                const slash = glob[i + 2] === "/";
+                out += slash ? "(?:.*/)?" : ".*";
+                i += slash ? 2 : 1;
+            }
+            else
+                out += "[^/]*";
+        }
+        else if (c === "?")
+            out += "[^/]";
+        else if (c === "[") {
+            const end = glob.indexOf("]", i + 2);
+            if (end < 0) {
+                out += "\\[";
+                continue;
+            }
+            const body = glob.slice(i + 1, end).replace(/^!/, "^").replace(/\\/g, "\\\\");
+            out += `[${body}]`;
+            i = end;
+        }
+        else if (c === "{") {
+            out += "(?:";
+            braces++;
+        }
+        else if (c === "}" && braces) {
+            out += ")";
+            braces--;
+        }
+        else if (c === "," && braces)
+            out += "|";
+        else if (c === "\\" && i + 1 < glob.length)
+            out += "\\" + glob[++i];
+        else
+            out += /[.+^$()|\]\\]/.test(c) ? "\\" + c : c;
+    }
+    return out;
 }
-function parseGitignore(cwd) {
-    const gi = path.join(cwd, ".gitignore");
-    if (!existsSync(gi))
+function readIgnoreFile(dir, base) {
+    const file = path.join(dir, ".gitignore");
+    if (!existsSync(file))
         return [];
-    return readFileSync(gi, "utf8")
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l && !l.startsWith("#") && !l.startsWith("!"))
-        .map((l) => {
-        // gitignore: a pattern with a slash is anchored to the root, one without matches at any
-        // depth ("*.log" also ignores sub/x.log); either way the match covers everything below it
-        const clean = l.replace(/\/$/, "");
-        const anchored = clean.includes("/");
-        const rx = new RegExp((anchored ? "^" : "(?:^|/)") + globToRegex(clean.replace(/^\//, "")) + "(?:/|$)");
-        return (rel) => rx.test(rel);
-    });
+    let text;
+    try {
+        text = readFileSync(file, "utf8");
+    }
+    catch {
+        return [];
+    }
+    const rules = [];
+    for (let line of text.split(/\r?\n/)) {
+        line = line.replace(/(?<!\\)\s+$/, "");
+        if (!line || line.startsWith("#"))
+            continue;
+        const negate = line.startsWith("!");
+        if (negate)
+            line = line.slice(1);
+        const dirOnly = line.endsWith("/");
+        line = line.replace(/\/+$/, "");
+        // a slash anywhere but the end anchors the pattern to its .gitignore's directory;
+        // otherwise it matches a name at any depth ("*.log" also ignores sub/x.log)
+        const anchored = line.includes("/");
+        const g = globToRegex(line.replace(/^\//, ""));
+        rules.push({ base, rx: new RegExp((anchored ? "^" : "(?:^|/)") + g + "$"), negate, dirOnly });
+    }
+    return rules;
+}
+/** gitignore semantics: rules apply in order (outer files first), the last match wins. */
+function isIgnored(rules, rel, isDir) {
+    let ignored = false;
+    for (const r of rules) {
+        if (r.dirOnly && !isDir)
+            continue;
+        if (r.base && !rel.startsWith(r.base + "/"))
+            continue;
+        const sub = r.base ? rel.slice(r.base.length + 1) : rel;
+        if (r.rx.test(sub))
+            ignored = !r.negate;
+    }
+    return ignored;
 }
 let rgCached;
 /** ripgrep >= 13 (has --no-require-git); an older rg falls back to the builtin scanner */
@@ -50,13 +113,16 @@ function rgAvailable() {
 }
 /** rg prints "./a/b.ts" (".\a\b.ts" on Windows); the builtin prints "a/b.ts" — make them identical */
 const normalizePath = (f) => f.replace(/\\/g, "/").replace(/^\.\//, "");
+/** agents on Windows write globs with backslashes; globs are always "/"-separated */
+const normalizeGlob = (g) => g.replace(/\\/g, "/");
 function searchWithRg(opts) {
     const max = opts.maxResults ?? 100;
     const args = [
         "--line-number", "--no-heading", "--color=never", "--no-require-git",
+        "--crlf", // "$" matches before \r\n, so anchored patterns work on CRLF files
         "--max-count", String(max), // per file; the total is capped below
         ...(opts.caseSensitive ? [] : ["--ignore-case"]),
-        ...(opts.glob ? ["--glob", opts.glob] : []),
+        ...(opts.glob ? ["--glob", normalizeGlob(opts.glob)] : []),
         "--", opts.pattern, ".",
     ];
     const r = spawnSync("rg", args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
@@ -64,26 +130,30 @@ function searchWithRg(opts) {
     if (r.status === 2)
         throw new Error(`ripgrep: ${(r.stderr ?? "").trim() || "search failed"}`);
     return (r.stdout ?? "")
-        .split("\n")
+        .split(/\r?\n/)
         .filter(Boolean)
         .map((l) => {
-        const m = l.match(/^(.+?):(\d+):(.*)$/);
-        return m ? { file: normalizePath(m[1]), line: parseInt(m[2], 10), text: m[3] } : null;
+        // "." does not match "\r" in JS — a CRLF file's lines used to fail this regex and vanish
+        const m = l.replace(/\r$/, "").match(/^(.+?):(\d+):(.*)$/);
+        return m ? { file: normalizePath(m[1]), line: parseInt(m[2], 10), text: m[3].slice(0, MAX_LINE_CHARS) } : null;
     })
         .filter((x) => x !== null)
         .slice(0, max);
 }
 export function searchTextBuiltin(opts) {
-    const ignores = parseGitignore(opts.cwd);
     const rx = new RegExp(opts.pattern, opts.caseSensitive ? "" : "i");
-    // "*.ts" matches a file name; "app/**" matches the path relative to the project
-    const globRx = opts.glob ? new RegExp("^" + globToRegex(opts.glob) + "$") : null;
-    const globMatches = (rel) => !globRx || globRx.test(opts.glob.includes("/") ? rel : path.basename(rel));
+    // "*.ts" matches a file name; "app/**" matches the path relative to the project; "!x" excludes
+    const rawGlob = opts.glob ? normalizeGlob(opts.glob) : undefined;
+    const negated = !!rawGlob?.startsWith("!");
+    const glob = negated ? rawGlob.slice(1) : rawGlob;
+    const globRx = glob ? new RegExp("^" + globToRegex(glob) + "$") : null;
+    const globMatches = (rel) => !globRx || globRx.test(glob.includes("/") ? rel : path.basename(rel)) !== negated;
     const results = [];
     const max = opts.maxResults ?? 100;
-    const walk = (dir, rel) => {
+    const walk = (dir, rel, rules) => {
         if (results.length >= max)
             return;
+        const here = [...rules, ...readIgnoreFile(dir, rel)];
         let entries;
         try {
             entries = readdirSync(dir, { withFileTypes: true });
@@ -94,20 +164,16 @@ export function searchTextBuiltin(opts) {
         for (const e of entries) {
             if (results.length >= max)
                 return;
-            if (e.name.startsWith(".") && e.name !== ".env.example") {
-                if (e.name === ".git" || e.isDirectory())
-                    continue;
-            }
+            if (e.name.startsWith("."))
+                continue; // hidden files and dirs, like rg's default
             const r = rel ? `${rel}/${e.name}` : e.name;
             if (e.isDirectory()) {
-                if (SKIP_DIRS.has(e.name) || ignores.some((f) => f(r)))
+                if (SKIP_DIRS.has(e.name) || isIgnored(here, r, true))
                     continue;
-                walk(path.join(dir, e.name), r);
+                walk(path.join(dir, e.name), r, here);
             }
             else if (e.isFile()) {
-                if (ignores.some((f) => f(r)))
-                    continue;
-                if (!globMatches(r))
+                if (isIgnored(here, r, false) || !globMatches(r))
                     continue;
                 let buf;
                 try {
@@ -120,17 +186,17 @@ export function searchTextBuiltin(opts) {
                 }
                 if (isBinary(buf))
                     continue;
-                const lines = buf.toString("utf8").split("\n");
+                const lines = buf.toString("utf8").split(/\r?\n/);
                 for (let i = 0; i < lines.length; i++) {
                     if (results.length >= max)
                         return;
                     if (rx.test(lines[i]))
-                        results.push({ file: r, line: i + 1, text: lines[i].slice(0, 500) });
+                        results.push({ file: r, line: i + 1, text: lines[i].slice(0, MAX_LINE_CHARS) });
                 }
             }
         }
     };
-    walk(opts.cwd, "");
+    walk(opts.cwd, "", []);
     return results;
 }
 export function searchText(opts) {

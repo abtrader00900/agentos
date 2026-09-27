@@ -32,26 +32,42 @@ export function astGrepBinary() {
 const byField = (kind) => `kind: ${kind}\n  has: { field: name, pattern: $NAME }`;
 // grammars without a `name` field: the identifier that is a direct child
 const byChild = (kind, child) => `kind: ${kind}\n  has: { kind: ${child}, pattern: $NAME, stopBy: neighbor }`;
+// a definition directly or indirectly inside a class body is a method, anywhere else a function
+const inClass = (cls) => `\n  inside: { kind: ${cls}, stopBy: end }`;
+const notInClass = (cls) => `\n  not: { inside: { kind: ${cls}, stopBy: end } }`;
 const RULES = [
     ...["TypeScript", "Tsx", "JavaScript"].flatMap((lang) => [
         { lang, kind: "function", rule: byField("function_declaration") },
+        { lang, kind: "function", rule: byField("generator_function_declaration") },
         { lang, kind: "method", rule: byField("method_definition") },
         { lang, kind: "class", rule: byField("class_declaration") },
-        ...(lang === "JavaScript" ? [] : [{ lang, kind: "interface", rule: byField("interface_declaration") }]),
+        ...(lang === "JavaScript" ? [] : [
+            { lang, kind: "class", rule: byField("abstract_class_declaration") },
+            { lang, kind: "interface", rule: byField("interface_declaration") },
+        ]),
     ]),
-    { lang: "Python", kind: "function", rule: byField("function_definition") },
+    { lang: "Python", kind: "function", rule: byField("function_definition") + notInClass("class_definition") },
+    { lang: "Python", kind: "method", rule: byField("function_definition") + inClass("class_definition") },
     { lang: "Python", kind: "class", rule: byField("class_definition") },
     { lang: "Php", kind: "function", rule: byField("function_definition") },
     { lang: "Php", kind: "method", rule: byField("method_declaration") },
     { lang: "Php", kind: "class", rule: byField("class_declaration") },
+    { lang: "Php", kind: "class", rule: byField("trait_declaration") },
+    { lang: "Php", kind: "class", rule: byField("enum_declaration") },
+    { lang: "Php", kind: "interface", rule: byField("interface_declaration") },
     { lang: "Go", kind: "function", rule: byField("function_declaration") },
     { lang: "Go", kind: "method", rule: byField("method_declaration") },
     { lang: "Go", kind: "struct", rule: `kind: type_spec\n  all:\n    - has: { field: name, pattern: $NAME }\n    - has: { field: type, kind: struct_type }` },
     { lang: "Java", kind: "method", rule: byField("method_declaration") },
+    { lang: "Java", kind: "method", rule: byField("constructor_declaration") },
     { lang: "Java", kind: "class", rule: byField("class_declaration") },
+    { lang: "Java", kind: "class", rule: byField("enum_declaration") },
+    { lang: "Java", kind: "class", rule: byField("record_declaration") },
     { lang: "Java", kind: "interface", rule: byField("interface_declaration") },
-    { lang: "Kotlin", kind: "function", rule: byChild("function_declaration", "simple_identifier") },
+    { lang: "Kotlin", kind: "function", rule: byChild("function_declaration", "simple_identifier") + notInClass("class_body") },
+    { lang: "Kotlin", kind: "method", rule: byChild("function_declaration", "simple_identifier") + inClass("class_body") },
     { lang: "Kotlin", kind: "class", rule: byChild("class_declaration", "type_identifier") },
+    { lang: "Kotlin", kind: "class", rule: byChild("object_declaration", "type_identifier") },
 ];
 export function searchSymbols(opts) {
     const binary = astGrepBinary();
@@ -66,6 +82,8 @@ export function searchSymbols(opts) {
         .join("\n---\n");
     // one scan for every rule: ast-grep walks the tree once, respecting .gitignore
     const args = ["scan", "--inline-rules", yaml, "--json=compact"];
+    // agents pass "./src/a.ts", "src\a.ts" or an absolute path — compare project-relative forward-slash paths
+    const wantFile = opts.file ? path.relative(opts.cwd, path.resolve(opts.cwd, opts.file)).replace(/\\/g, "/") : undefined;
     if (opts.file)
         args.push(path.resolve(opts.cwd, opts.file));
     const r = spawnSync(binary, args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -93,8 +111,8 @@ export function searchSymbols(opts) {
         // ast-grep returns absolute paths when given an absolute path, relative otherwise
         const relFile = rawFile
             ? (path.isAbsolute(rawFile) ? path.relative(opts.cwd, rawFile) : rawFile).replace(/\\/g, "/")
-            : (opts.file ?? "");
-        if (opts.file && relFile !== opts.file.replace(/\\/g, "/"))
+            : (wantFile ?? "");
+        if (wantFile !== undefined && relFile !== wantFile)
             continue;
         results.push({
             file: relFile,
@@ -111,7 +129,8 @@ export function searchSymbols(opts) {
 function dedupe(matches) {
     const seen = new Set();
     return matches.filter((m) => {
-        const k = `${m.file}:${m.line}:${m.name}`;
+        // kind is part of the key: `class J { J() {} }` is a class AND a constructor on one line
+        const k = `${m.file}:${m.line}:${m.kind}:${m.name}`;
         if (seen.has(k))
             return false;
         seen.add(k);

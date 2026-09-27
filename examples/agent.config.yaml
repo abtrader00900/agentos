@@ -31,16 +31,19 @@ skills:
   - name: tdd-laravel
 
 mcpServers:
+  # Installed form (what `agentos init` generates). The package name matters:
+  # plain "agentos" on npm is an unrelated placeholder owned by someone else.
   - name: memory
     command: npx
-    args: ["tsx", "/path/to/agentos/src/mcp/memory/server.ts"]
+    args: ["-y", "@basit0090/agent-os", "mcp", "memory"]
   - name: supersearch
     command: npx
-    args: ["tsx", "/path/to/agentos/src/mcp/supersearch/server.ts"]
+    args: ["-y", "@basit0090/agent-os", "mcp", "supersearch"]
   - name: codegraph
     command: npx
-    args: ["tsx", "/path/to/agentos/src/mcp/codegraph/server.ts"]
-  # After `npm i -g agentos`, use instead:
+    args: ["-y", "@basit0090/agent-os", "mcp", "codegraph"]
+
+  # Working from a checkout instead? Point at your own clone:
   # - name: memory
-  #   command: agentos
-  #   args: ["mcp", "memory"]
+  #   command: npx
+  #   args: ["tsx", "/path/to/agentos/src/mcp/memory/server.ts"]

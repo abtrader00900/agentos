@@ -1,19 +1,27 @@
 import { JsonStore } from "../../core/jsonstore.js";
+/** a fact is one list item: newlines in it would start new headings/items in the export */
+export const oneLine = (s) => s.replace(/\s*\r?\n\s*/g, " ").trim();
 export class MemoryStore {
     db;
     constructor(dbPath) {
         this.db = new JsonStore(dbPath);
     }
     store(input) {
+        // under the store lock: two harnesses writing at once must not drop each other's facts
+        return this.db.update(() => this.upsert(input));
+    }
+    upsert(input) {
         const facts = this.db.table("facts");
         const now = new Date().toISOString();
         const existing = facts.find((f) => f.topic === input.topic && f.key === input.key);
         if (existing) {
             existing.value = input.value;
-            existing.source = input.source ?? null;
-            existing.pinned = input.pinned ? 1 : 0;
+            // an update that does not mention source/pinned keeps them (re-storing a fact used to unpin it)
+            if (input.source !== undefined)
+                existing.source = input.source;
+            if (input.pinned !== undefined)
+                existing.pinned = input.pinned ? 1 : 0;
             existing.updated_at = now;
-            this.db.save();
             return { ...existing };
         }
         const fact = {
@@ -27,13 +35,13 @@ export class MemoryStore {
             updated_at: now,
         };
         facts.push(fact);
-        this.db.save();
         return { ...fact };
     }
     /** FR-3.5: recall by topic / key substring / free text in value */
     recall(query = {}) {
         const limit = query.limit ?? 20;
-        let facts = this.db.table("facts");
+        // a copy: sorting the live table would reorder what the next save writes
+        let facts = this.db.table("facts").slice();
         if (query.topic)
             facts = facts.filter((f) => f.topic === query.topic);
         if (query.key) {
@@ -54,13 +62,14 @@ export class MemoryStore {
         return f ? { ...f } : undefined;
     }
     forget(topic, key) {
-        const facts = this.db.table("facts");
-        const i = facts.findIndex((f) => f.topic === topic && f.key === key);
-        if (i < 0)
-            return false;
-        facts.splice(i, 1);
-        this.db.save();
-        return true;
+        return this.db.update(() => {
+            const facts = this.db.table("facts");
+            const i = facts.findIndex((f) => f.topic === topic && f.key === key);
+            if (i < 0)
+                return false;
+            facts.splice(i, 1);
+            return true;
+        });
     }
     topics() {
         return [...new Set(this.db.table("facts").map((f) => f.topic))].sort();
@@ -75,11 +84,11 @@ export class MemoryStore {
         for (const f of facts) {
             if (f.topic !== currentTopic) {
                 currentTopic = f.topic;
-                lines.push(`## ${currentTopic}`, "");
+                lines.push(`## ${oneLine(currentTopic)}`, "");
             }
             const pin = f.pinned ? " 📌" : "";
-            const src = f.source ? ` _(source: ${f.source})_` : "";
-            lines.push(`- **${f.key}**${pin}: ${f.value}${src}`);
+            const src = f.source ? ` _(source: ${oneLine(f.source)})_` : "";
+            lines.push(`- **${oneLine(f.key)}**${pin}: ${oneLine(f.value)}${src}`);
         }
         return lines.join("\n") + "\n";
     }

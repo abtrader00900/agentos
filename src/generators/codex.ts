@@ -1,35 +1,19 @@
 import type { AgentConfig } from "../core/schema.js";
-import { rulesForHarness } from "../core/schema.js";
 import type { GeneratedFile, HarnessGenerator } from "./types.js";
+import { ruleBody } from "./shared.js";
+
+/**
+ * Codex's default MCP startup timeout is 10s; `npx -y <pkg>` downloads the
+ * package (~150 MB with ast-grep + tree-sitter grammars) on the first run and
+ * the server was killed before it could answer `initialize`.
+ */
+const STARTUP_TIMEOUT_SEC = 120;
 
 /** AGENTS.md + .codex/config.toml for Codex (FR-1.3) */
 export const codexGenerator: HarnessGenerator = {
   harness: "codex",
   generate(config: AgentConfig): GeneratedFile[] {
-    const rules = rulesForHarness(config, "codex");
-    const lines: string[] = [
-      `# ${config.project.name}`,
-      "",
-      config.project.description ?? "",
-      "",
-    ];
-    if (config.stack.length) {
-      lines.push(`**Stack:** ${config.stack.join(", ")}`, "");
-    }
-    if (rules.length) {
-      lines.push("## Rules", "");
-      for (const r of rules) lines.push(`- **${r.id}:** ${r.text}`);
-      lines.push("");
-    }
-    lines.push(
-      "## Local Tools (AgentOS)",
-      "",
-      "Deterministic tools are available via MCP — prefer them over guessing:",
-      "- `memory` — store/recall project facts",
-      "- `supersearch` — text/symbol/git-history search",
-      "- `codegraph` — dependency graph + change impact",
-      "",
-    );
+    const lines = ruleBody(config, "codex");
 
     // Codex MCP registration: config.toml [mcp_servers.<name>].
     // JSON string escapes are valid TOML basic-string escapes, so JSON.stringify
@@ -46,6 +30,7 @@ export const codexGenerator: HarnessGenerator = {
           `[mcp_servers.${key(s.name)}]`,
           `command = ${str(s.command)}`,
           `args = [${s.args.map(str).join(", ")}]`,
+          `startup_timeout_sec = ${STARTUP_TIMEOUT_SEC}`,
           ...(envLines.length ? [``, `[mcp_servers.${key(s.name)}.env]`, ...envLines] : []),
           ``,
         ];

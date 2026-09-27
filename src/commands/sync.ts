@@ -1,8 +1,8 @@
-import { writeFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, rmSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { generators } from "../generators/index.js";
-import { writeManifest, hashContent, readManifest, detectDrift, type ManifestEntry } from "../core/manifest.js";
+import { writeManifest, hashContent, readManifest, detectDrift, normalizeEol, type ManifestEntry } from "../core/manifest.js";
 import type { HarnessName } from "../core/schema.js";
 
 export interface SyncOptions {
@@ -16,15 +16,44 @@ export interface SyncOptions {
 
 const log = (msg: string, quiet?: boolean) => { if (!quiet) console.log(msg); };
 
+/**
+ * The handoff is appended to every rule file, and rule files have budgets
+ * (Windsurf: 12,000 chars per workspace rule; Antigravity: 24 KB). HANDOFF.md
+ * keeps the full text — the rule files get a bounded excerpt that points to it.
+ */
+const MAX_INJECTED_HANDOFF = 6000;
+/** documented per-file limits of the harnesses that have one */
+const FILE_LIMITS: Record<string, number> = {
+  ".windsurf/rules/agentos.md": 12_000,
+  ".agents/rules/agentos.md": 24_000,
+};
+
+function handoffExcerpt(handoff: string): string {
+  if (handoff.length <= MAX_INJECTED_HANDOFF) return handoff;
+  const cut = handoff.lastIndexOf("\n", MAX_INJECTED_HANDOFF);
+  return handoff.slice(0, cut > 0 ? cut : MAX_INJECTED_HANDOFF) +
+    "\n\n_…truncated — read HANDOFF.md at the project root for the full handoff._\n";
+}
+
+/** <file>.bak, or <file>.bak.1, .bak.2 … — a second forced sync must not destroy the first backup */
+function backupPath(abs: string): string {
+  if (!existsSync(abs + ".bak")) return abs + ".bak";
+  for (let i = 1; ; i++) if (!existsSync(`${abs}.bak.${i}`)) return `${abs}.bak.${i}`;
+}
+
 export function sync(options: SyncOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
-  const { config, sources } = loadConfig(cwd);
+  const { config, sources, hasProject, localMcpEnv } = loadConfig(cwd);
+  // the global layer alone must not turn any directory into a project full of generated files
+  if (!hasProject) {
+    throw new Error(`No agent.config.yaml in ${cwd} — run "agentos init" here first (the global ~/.agentos config only supplies defaults).`);
+  }
   const targets = options.only ?? (Object.keys(generators) as HarnessName[]);
 
   // FR-7.3: inject the latest handoff into generated markdown configs (.md and
   // Cursor's .mdc) so the target harness auto-receives pending context.
   const handoffPath = path.join(cwd, "HANDOFF.md");
-  const handoff = existsSync(handoffPath) ? readFileSync(handoffPath, "utf8") : null;
+  const handoff = existsSync(handoffPath) ? handoffExcerpt(normalizeEol(readFileSync(handoffPath, "utf8"))) : null;
 
   const planned: { path: string; content: string }[] = [];
   for (const h of targets) {
@@ -50,7 +79,7 @@ export function sync(options: SyncOptions = {}): void {
     .filter((f) => !managed.has(f.path))
     .filter((f) => {
       const abs = path.join(cwd, f.path);
-      return existsSync(abs) && readFileSync(abs, "utf8") !== f.content;
+      return existsSync(abs) && normalizeEol(readFileSync(abs, "utf8")) !== f.content;
     })
     .map((f) => f.path);
 
@@ -77,20 +106,31 @@ export function sync(options: SyncOptions = {}): void {
   for (const file of planned) {
     const abs = path.join(cwd, file.path);
     mkdirSync(path.dirname(abs), { recursive: true });
-    if (backup.has(file.path)) copyFileSync(abs, abs + ".bak");
+    let note = "";
+    if (backup.has(file.path)) {
+      const bak = backupPath(abs);
+      copyFileSync(abs, bak);
+      note = `  (previous version → ${path.relative(cwd, bak).replace(/\\/g, "/")})`;
+    }
     writeFileSync(abs, file.content);
     const hash = hashContent(file.content);
     entries.set(file.path, { path: file.path, generatedHash: hash, writtenHash: hash });
-    log(`  ✓ ${file.path}${backup.has(file.path) ? `  (previous version → ${file.path}.bak)` : ""}`, options.quiet);
+    log(`  ✓ ${file.path}${note}`, options.quiet);
+    const limit = FILE_LIMITS[file.path];
+    if (limit && file.content.length > limit) {
+      log(`  ⚠ ${file.path} is ${file.content.length} chars — the harness reads at most ${limit}; shorten rules or the handoff`, options.quiet);
+    }
   }
   // A target that moved (Antigravity's config path did) leaves its old file behind:
   // on a full sync, remove files we generated earlier that no generator produces
-  // any more — but only if they are byte-for-byte what we wrote.
+  // any more — but only if they are still exactly what we wrote. readManifest has
+  // already dropped entries that point outside the project.
   if (!options.only) {
     for (const [p, entry] of [...entries]) {
       if (plannedPaths.has(p)) continue;
       const abs = path.join(cwd, p);
-      if (existsSync(abs) && hashContent(readFileSync(abs, "utf8")) === entry.generatedHash) {
+      const isFile = existsSync(abs) && statSync(abs).isFile();
+      if (isFile && hashContent(readFileSync(abs, "utf8")) === entry.generatedHash) {
         rmSync(abs);
         log(`  − ${p}  (no longer generated)`, options.quiet);
       } else if (existsSync(abs)) {
@@ -100,6 +140,13 @@ export function sync(options: SyncOptions = {}): void {
     }
   }
   writeManifest(cwd, [...entries.values()]);
+  if (localMcpEnv.length) {
+    log(
+      `  ⚠ env for ${localMcpEnv.join(", ")} comes from agent.config.local.yaml but is written into .mcp.json, ` +
+        `.codex/config.toml and the other MCP files — don't commit secrets; prefer variables the harness reads from your shell.`,
+      options.quiet,
+    );
+  }
   log(`Synced ${planned.length} files from ${sources.length} config source(s).`, options.quiet);
 }
 

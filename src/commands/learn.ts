@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { Document, isMap, isSeq, parseDocument } from "yaml";
 import type { AgentRule } from "../core/schema.js";
 
 /**
@@ -37,8 +37,10 @@ const GIT_ENV = {
 export function commitFileSets(cwd: string, maxCommits = 500): string[][] {
   let out: string;
   try {
-    out = execFileSync("git", ["log", `--max-count=${maxCommits}`, "--pretty=tformat:##COMMIT##", "--name-only"], {
-      cwd, encoding: "utf8", env: GIT_ENV, maxBuffer: 64 * 1024 * 1024,
+    // quotePath=false: non-ASCII names as-is, not "\303\244"-escaped into rule text;
+    // stderr ignored: outside a repo git's "fatal: not a git repository" is expected
+    out = execFileSync("git", ["-c", "core.quotePath=false", "log", `--max-count=${maxCommits}`, "--pretty=tformat:##COMMIT##", "--name-only"], {
+      cwd, encoding: "utf8", env: GIT_ENV, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
     return [];
@@ -107,11 +109,13 @@ function slug(s: string): string {
 /** Append learned rules to agent.config.local.yaml (review-then-promote flow) */
 export function applyLearnedRules(cwd: string, rules: LearnedRule[]): number {
   const localPath = path.join(cwd, "agent.config.local.yaml");
-  let doc: Record<string, unknown> = {};
-  if (existsSync(localPath)) {
-    doc = (parseYaml(readFileSync(localPath, "utf8")) as Record<string, unknown>) ?? {};
-  }
-  const existing = Array.isArray(doc.rules) ? (doc.rules as AgentRule[]) : [];
+  // edit the YAML document in place: a parse/stringify round-trip threw away every
+  // comment and the user's formatting in their personal config
+  const doc = existsSync(localPath) ? parseDocument(readFileSync(localPath, "utf8")) : new Document({});
+  if (doc.errors.length) throw new Error(`agent.config.local.yaml is not valid YAML: ${doc.errors[0].message}`);
+  if (!isMap(doc.contents)) doc.contents = doc.createNode({}) as typeof doc.contents;
+  const current = doc.toJS() as { rules?: unknown } | null;
+  const existing = Array.isArray(current?.rules) ? (current!.rules as AgentRule[]) : [];
 
   const existingIds = new Set(existing.map((r) => r.id));
   const fresh = rules
@@ -120,8 +124,9 @@ export function applyLearnedRules(cwd: string, rules: LearnedRule[]): number {
 
   if (!fresh.length) return 0;
 
-  doc.rules = [...existing, ...fresh];
-  writeFileSync(localPath, stringifyYaml(doc));
+  if (!isSeq(doc.get("rules"))) doc.set("rules", doc.createNode([]));
+  for (const r of fresh) doc.addIn(["rules"], doc.createNode(r));
+  writeFileSync(localPath, doc.toString());
   return fresh.length;
 }
 

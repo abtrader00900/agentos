@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { MemoryStore } from "./store.js";
 import { projectRoot } from "../../core/project.js";
 
@@ -112,7 +113,8 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
 }
 
 // Run directly → stdio transport
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+// pathToFileURL percent-encodes "#", "%" and spaces exactly like import.meta.url does
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   const server = createMemoryServer();
   await server.connect(new StdioServerTransport());

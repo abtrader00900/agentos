@@ -108,12 +108,16 @@ CLAUDE.md      AGENTS.md    Antigravity   .cursor/   .windsurf/
 | Harness | Generated | Note |
 |---|---|---|
 | Claude Code | `CLAUDE.md`, `.mcp.json` | Project-scoped MCP servers; Claude asks once before enabling them. |
-| Codex | `AGENTS.md`, `.codex/config.toml` | Codex only reads a project's `.codex/config.toml` when the project is **trusted** (answer the trust prompt, or set `trust_level = "trusted"` for it in `~/.codex/config.toml`). |
-| Antigravity | `.agents/rules/agentos.md`, `.agents/mcp_config.json` | Rule has `trigger: always_on` frontmatter, as Antigravity requires. It also reads `AGENTS.md`. |
-| Cursor | `.cursor/rules/agentos.mdc` | `alwaysApply: true`. |
-| Windsurf | `.windsurf/rules/agentos.md` | `trigger: always_on` frontmatter (without it a rule is manual-only). |
+| Codex | `AGENTS.md`, `.codex/config.toml` | Codex only reads a project's `.codex/config.toml` when the project is **trusted** (answer the trust prompt, or set `trust_level = "trusted"` for it in `~/.codex/config.toml`). Servers get `startup_timeout_sec = 120` — the first `npx -y` run downloads the package. |
+| Antigravity | `.agents/rules/agentos.md`, `.agents/mcp_config.json` | Rule has `trigger: always_on` frontmatter, as Antigravity requires. |
+| Cursor | `.cursor/rules/agentos.mdc`, `.cursor/mcp.json` | `alwaysApply: true`. |
+| Windsurf | `.windsurf/rules/agentos.md` | `trigger: always_on` frontmatter (without it a rule is manual-only). Windsurf has **no project-level MCP file**: add the servers from `.mcp.json` to Windsurf's global `mcp_config.json` yourself. |
 
-The MCP servers find the project from their working directory; if a harness starts them elsewhere, set `AGENTOS_PROJECT=/abs/path` in the server's `env`.
+Cursor, Windsurf and Antigravity also read `AGENTS.md`, so with `codex` among the targets they see the rules twice. If that matters, sync only what you use: `agentos sync --only claude-code,cursor`.
+
+The MCP servers find the project by walking up from their working directory to `agent.config.yaml`; set `AGENTOS_PROJECT=/abs/path` in a server's `env` to pin it. `env` values in `mcpServers` are written into the generated MCP files — keep secrets out of them (sync warns when they come from `agent.config.local.yaml`).
+
+Re-running `agentos install` leaves already-installed skills alone (your edits survive); `agentos skill install <name>` or `install --force` refreshes them. Installed copies omit the skill's `test/` directory so your own test runner doesn't pick it up.
 
 ## Config Layers (override: local > project > global)
 
@@ -161,7 +165,7 @@ skillRegistry: https://raw.githubusercontent.com/abtrader00900/agentos/master/sk
 ```
 
 Index format: `{ "version": 1, "skills": [{ "name", "description", "repo", "path?" }] }`.
-Every install is validated (frontmatter, "Use when" trigger, contract test) before it lands in `.agentos/skills/`.
+Every install is validated (frontmatter `name`/`description` with a "Use when" trigger, at least two `##` sections, a `test/` directory) before it lands in `.agentos/skills/`; `agentos skill test` checks the bundled and the installed skills.
 
 ## Editor Integrations
 

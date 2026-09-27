@@ -1,13 +1,16 @@
+/** A path on this machine (./x, ../x, /x, ~/x, C:\x) — never something to clone from GitHub. */
+export declare function looksLikeLocalPath(source: string): boolean;
 /**
  * Validate and copy every skill directory found under `root` into the project.
- * Returns the installed skill names. `label` is what error messages call the source.
+ * Returns the installed skill names. `label` is what error messages call the source;
+ * `only` installs just the skill of that name.
  */
-export declare function installSkillsFromDir(root: string, projectDir: string, label?: string): string[];
+export declare function installSkillsFromDir(root: string, projectDir: string, label?: string, only?: string): string[];
 /**
- * Clone a git source and install every valid skill from it into the project.
- * Returns the installed skill names.
+ * Clone a git source and install every valid skill from it into the project
+ * (or just `only`). Returns the installed skill names.
  */
-export declare function installSkillsFromGit(source: string, projectDir: string): string[];
+export declare function installSkillsFromGit(source: string, projectDir: string, only?: string): string[];
 export declare function looksLikeGitSource(name: string): boolean;
 export interface RegistryEntry {
     name: string;

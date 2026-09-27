@@ -1,10 +1,9 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { detectDrift } from "../core/manifest.js";
 import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot } from "../core/skills.js";
-import { MemoryStore } from "../mcp/memory/store.js";
 import { PKG } from "./init.js";
 export function doctor(options = {}) {
     const cwd = options.cwd ?? process.cwd();
@@ -15,6 +14,10 @@ export function doctor(options = {}) {
     try {
         const loaded = loadConfig(cwd);
         config = loaded.config;
+        if (!loaded.hasProject) {
+            add({ name: "config", status: "fail", detail: `no agent.config.yaml in ${cwd} (only the global defaults)`, fix: "Run: agentos init" });
+            return report(checks, options);
+        }
         add({ name: "config", status: "pass", detail: `${loaded.sources.length} source(s), ${config.rules.length} rules` });
     }
     catch (e) {
@@ -43,12 +46,17 @@ export function doctor(options = {}) {
     // 4. MCP servers configured + command resolvable
     for (const s of config.mcpServers) {
         const cmd = s.command;
-        const isLocalScript = s.args.some((a) => a.endsWith(".ts") || a.endsWith(".js"));
+        const scripts = s.args.filter((a) => /\.(c|m)?[jt]s$/.test(a));
+        const missingScript = scripts.find((a) => !existsSync(path.resolve(cwd, a)));
+        const isLocalScript = scripts.length > 0;
         const known = cmd === "npx" || cmd === "node" || cmd === "agentos";
         // `npx agentos` runs a stranger's placeholder package — the published name is @basit0090/agent-os
         const npxPkg = cmd === "npx" ? s.args.find((a) => !a.startsWith("-")) : undefined;
         if (npxPkg && /^(agentos|agent-os)(@|$)/.test(npxPkg)) {
-            add({ name: `mcp:${s.name}`, status: "fail", detail: `npx package '${npxPkg}' is not AgentOS`, fix: `Use "${PKG}" in the args (agentos init --force writes the current template)` });
+            add({ name: `mcp:${s.name}`, status: "fail", detail: `npx package '${npxPkg}' is not AgentOS`, fix: `In agent.config.yaml mcpServers, replace "${npxPkg}" with "${PKG}", then: agentos sync` });
+        }
+        else if (missingScript) {
+            add({ name: `mcp:${s.name}`, status: "fail", detail: `script not found: ${missingScript}`, fix: "Fix the path in agent.config.yaml mcpServers (relative paths resolve from the project root)" });
         }
         else if (known || isLocalScript || isCommandOnPath(cmd)) {
             add({ name: `mcp:${s.name}`, status: "pass", detail: `${cmd} ${s.args.join(" ")}` });
@@ -60,14 +68,14 @@ export function doctor(options = {}) {
     // 5. memory
     const memDb = path.join(cwd, ".agentos", "memory.json");
     if (existsSync(memDb)) {
+        // read it directly: opening a MemoryStore would quarantine a corrupt file as a side effect
         try {
-            const store = new MemoryStore(memDb);
-            const s = store.stats();
-            store.close();
-            add({ name: "memory", status: "pass", detail: `${s.facts} facts, ${(statSync(memDb).size / 1024).toFixed(1)} KB` });
+            const data = JSON.parse(readFileSync(memDb, "utf8"));
+            const facts = Array.isArray(data?.facts) ? data.facts.length : 0;
+            add({ name: "memory", status: "pass", detail: `${facts} facts, ${(statSync(memDb).size / 1024).toFixed(1)} KB` });
         }
         catch (e) {
-            add({ name: "memory", status: "fail", detail: `corrupt: ${e.message}`, fix: "Delete .agentos/memory.json (memory regenerates)" });
+            add({ name: "memory", status: "fail", detail: `unreadable: ${e.message.split("\n")[0]}`, fix: "Move .agentos/memory.json aside (keep it for recovery); memory starts fresh on next MCP use" });
         }
     }
     else {
@@ -85,9 +93,10 @@ export function doctor(options = {}) {
     // installed skills include community ones — validate them, not just the bundled set
     const installedRoot = path.join(cwd, ".agentos", "skills");
     if (existsSync(installedRoot)) {
-        const installed = testSkills(installedRoot);
+        const installed = testSkills(installedRoot, { requireTest: false });
         const broken = installed.filter((s) => !s.ok);
-        const missing = config.skills.filter((s) => !installed.some((i) => i.skill === s.name));
+        // a `source` entry may install skills under other names — only named, sourceless entries are checkable
+        const missing = config.skills.filter((s) => !s.source && !installed.some((i) => i.skill === s.name));
         if (broken.length) {
             add({ name: "skills:installed", status: "fail", detail: broken.map((s) => `${s.skill}: ${s.issues.join("; ")}`).join(" | "), fix: "Re-install it: agentos skill install <name>, or delete .agentos/skills/<name>" });
         }
