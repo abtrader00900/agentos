@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, cpSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, cpSync, rmSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -77,13 +77,13 @@ export function validateSkillDir(skillDir: string, opts: ValidateOptions = {}): 
 export function copySkill(src: string, dst: string): void {
   if (path.resolve(src) === path.resolve(dst)) return; // already in place — rmSync would delete the source
   rmSync(dst, { recursive: true, force: true });
-  cpSync(src, dst, {
-    recursive: true,
-    filter: (p) => {
-      const rel = path.relative(src, p).split(path.sep);
-      return rel[0] !== ".git" && rel[0] !== "test";
-    },
-  });
+  mkdirSync(dst, { recursive: true });
+  // copy entry by entry instead of cpSync's `filter`: on Windows + Node 20 the filter did
+  // not keep test/ out (CI caught it), and only these two top-level names need skipping
+  for (const entry of readdirSync(src)) {
+    if (entry === ".git" || entry === "test") continue;
+    cpSync(path.join(src, entry), path.join(dst, entry), { recursive: true });
+  }
 }
 
 export function listSkills(skillsRoot: string): SkillMeta[] {
