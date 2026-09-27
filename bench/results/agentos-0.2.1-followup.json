@@ -1,0 +1,478 @@
+{
+  "meta": {
+    "date": "2026-09-27T20:48:18.319Z",
+    "label": "followup",
+    "target": "agentos-0.2.1",
+    "ref": "db4db8b",
+    "model": "claude-sonnet-5",
+    "reps": 3,
+    "claude": "2.1.278 (Claude Code)",
+    "agentosMcp": "0.2.0",
+    "platform": "win32 10.0.26200, node v26.5.0",
+    "flags": [
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--model",
+      "claude-sonnet-5",
+      "--setting-sources",
+      "project",
+      "--disable-slash-commands",
+      "--strict-mcp-config",
+      "--no-session-persistence",
+      "--max-budget-usd",
+      "3",
+      "--allowedTools",
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "Bash",
+      "PowerShell",
+      "mcp__memory",
+      "mcp__supersearch",
+      "mcp__codegraph"
+    ]
+  },
+  "runs": [
+    {
+      "task": "recall",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": false,
+      "detail": {
+        "named": [
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.0526978,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 8170,
+        "cacheRead": 66649,
+        "output": 668,
+        "total": 75491
+      },
+      "turns": 2,
+      "durationMs": 24855,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 1
+      },
+      "mcpServers": [],
+      "answer": "This project ships a CLI (`bin: agentos → dist/cli.js`) that npm/npx installs will execute immediately, and consumers installing the published package won't have `devDependencies` like `typescript`/`tsx` available to build it on the fly. By committing `dist/` and only compiling via `prepublishOnly` (which runs once, at publish time, in the maintainer's own environment), the package works out of the box for any installer without needing a build step or the TS toolchain present.\n\nSCRIPTS: prepare, postinstall"
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": false,
+      "detail": {
+        "named": [
+          "preinstall",
+          "postinstall",
+          "prepare",
+          "build"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.0692636,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 9880,
+        "cacheRead": 106258,
+        "output": 848,
+        "total": 116992
+      },
+      "turns": 5,
+      "durationMs": 27022,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Read": 1,
+        "ToolSearch": 1,
+        "Bash": 1,
+        "mcp__memory__memory_recall": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The `bin` field (`agentos: ./dist/cli.js`) points straight at compiled output, and there's no `prepare`/`postinstall`/`preinstall` script that runs `tsc` on install — only `prepublishOnly`, which fires on `npm publish`, not on consumer install. Since `dist/` isn't in `.gitignore`, it's checked in so that installing directly from git (or any path that skips `prepublishOnly`, like a git-dependency install) still gets a working `agentos` binary without requiring `typescript`/`tsx` devDependencies to be present.\n\nSCRIPTS: prepare, postinstall, preinstall, build"
+    },
+    {
+      "task": "locate",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.1061164,
+      "tokens": {
+        "input": 10,
+        "cacheCreation": 14418,
+        "cacheRead": 184772,
+        "output": 1147,
+        "total": 200347
+      },
+      "turns": 6,
+      "durationMs": 28200,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 2,
+        "Bash": 1,
+        "Read": 2
+      },
+      "mcpServers": [],
+      "answer": "The check is `isProjectPath()` in `src/core/manifest.ts` (lines 42–46).\n\n`readManifest()` (same file, lines 48–69) filters every manifest entry through `isProjectPath(cwd, f.path)` before returning it — so even if someone hand-edits `.agentos/manifest.json` to add an entry like `../secret.txt` or `C:\\secret.txt`, that entry is silently dropped and never makes it into the `entries` map that `sync()` in `src/commands/sync.ts` later iterates over to delete stale generated files (the `rmSync(abs)` call around line 134).\n\n`isProjectPath` itself does the actual guarding:\n```ts\nexport function isProjectPath(cwd: string, p: string): boolean {\n  if (typeof p !== \"string\" || !p || path.isAbsolute(p) || /^[a-zA-Z]:/.test(p)) return false;\n  const rel = path.relative(cwd, path.resolve(cwd, p));\n  return !!rel && !rel.startsWith(\"..\") && !path.isAbsolute(rel);\n}\n```\nIt rejects absolute paths and Windows drive-letter paths outright, then resolves the candidate against `cwd` and checks that the resulting relative path doesn't start with `..` (catching `../secret.txt`, `foo/../../secret.txt`, etc.) and isn't itself absolute (catching drive changes via `path.resolve`).\n\nSo sync never even sees a malicious entry — it's filtered out at manifest-load time, one layer before the deletion loop runs."
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.0935388,
+      "tokens": {
+        "input": 8,
+        "cacheCreation": 13563,
+        "cacheRead": 146604,
+        "output": 995,
+        "total": 161170
+      },
+      "turns": 4,
+      "durationMs": 37453,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The check that protects `sync` from deleting files outside the project is `isProjectPath()` in `src/core/manifest.ts:42-46`.\n\nHere's the flow:\n\n1. `sync()` in `src/commands/sync.ts` builds its list of candidate-to-delete files from `readManifest(cwd)` (line 74), then later iterates those entries and calls `rmSync(abs)` (line 134) for any that are no longer produced by a generator.\n2. `readManifest()` (`manifest.ts:48-69`) is what guards this: when it loads `.agentos/manifest.json`, it filters every entry through `isProjectPath(cwd, f.path)` (line 66) before returning it. Any entry whose `path` is absolute, drive-letter-prefixed (`C:\\...`), or resolves via `..` outside `cwd` is silently dropped from the returned manifest — so it never becomes a candidate for `rmSync` in the first place.\n\nSo if someone edits `.agentos/manifest.json` to add an entry like `\"path\": \"../secret.txt\"` or `\"path\": \"C:\\\\Users\\\\basit\\\\secret.txt\"`, `isProjectPath` computes `path.relative(cwd, path.resolve(cwd, p))`, sees it starts with `..` (or is absolute), returns `false`, and the entry is filtered out before `sync()` ever sees it — so `rmSync` is never called on it.\n\nWorth noting: this check only applies to the *deletion* path (stale-manifest cleanup) via `readManifest`. The write path (`generators[h].generate(config)` → `writeFileSync`) isn't validated against `isProjectPath` at all — that's a separate trust boundary (generator output, not manifest data), so it's out of scope for this specific question but worth being aware of if generators were ever made to accept path input from an untrusted source."
+    },
+    {
+      "task": "recall",
+      "arm": "baseline",
+      "rep": 2,
+      "pass": false,
+      "detail": {
+        "named": [
+          "install",
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.051021800000000006,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 8116,
+        "cacheRead": 66649,
+        "output": 522,
+        "total": 75291
+      },
+      "turns": 2,
+      "durationMs": 11309,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 1
+      },
+      "mcpServers": [],
+      "answer": "This project's `bin` field points straight at `dist/cli.js`, and there's no `prepare`/`postinstall`/`install` script in package.json to trigger a build — so if `dist/` weren't committed, anyone installing from git (or via npm without a prepack build step firing) would get a package with no runnable CLI. Committing `dist/` guarantees the compiled output is always present at install time regardless of how the package is fetched, with `compile` only ever invoked manually or via `prepublishOnly` when the maintainer cuts a release.\n\nSCRIPTS: prepare, postinstall, install"
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 2,
+      "pass": true,
+      "detail": {
+        "named": [
+          "preinstall",
+          "install",
+          "postinstall",
+          "prepare",
+          "prepack",
+          "build"
+        ],
+        "why": true
+      },
+      "error": null,
+      "costUsd": 0.074516,
+      "tokens": {
+        "input": 8,
+        "cacheCreation": 9823,
+        "cacheRead": 143740,
+        "output": 646,
+        "total": 154217
+      },
+      "turns": 5,
+      "durationMs": 13982,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "ToolSearch": 1,
+        "mcp__memory__memory_recall": 2,
+        "Read": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "dist/ is committed because agentos is installed as a git dependency (e.g. `npm install -g <git url>`), and under `-g` npm's nested install for any of the lifecycle scripts below inherits the `--global`/`--prefix` flags and corrupts the tree being installed. So instead of building on install, the project rebuilds and commits dist/ with every source change, and CI verifies dist/ stays in sync with src/.\n\nSCRIPTS: preinstall, install, postinstall, prepare, prepack, build"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 2,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.08043040000000001,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 13473,
+        "cacheRead": 105282,
+        "output": 547,
+        "total": 119308
+      },
+      "turns": 4,
+      "durationMs": 10018,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The check is `isProjectPath()` in `src/core/manifest.ts` (lines 42–46).\n\nIt's applied inside `readManifest()` (line 66), which filters out any manifest entry whose `path` is absolute, drive-qualified (`C:\\...`), or resolves outside `cwd` (e.g. `../secret.txt`) before those entries ever reach `sync()`'s stale-file cleanup loop. So even if someone edits `.agentos/manifest.json` to add a malicious path, it's dropped at load time and `sync()` in `src/commands/sync.ts` never sees it as a candidate to `rmSync`."
+    },
+    {
+      "task": "locate",
+      "arm": "baseline",
+      "rep": 2,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.0901768,
+      "tokens": {
+        "input": 8,
+        "cacheCreation": 13049,
+        "cacheRead": 144874,
+        "output": 899,
+        "total": 158830
+      },
+      "turns": 5,
+      "durationMs": 18330,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Bash": 1,
+        "Read": 2
+      },
+      "mcpServers": [],
+      "answer": "The check is `isProjectPath(cwd, p)` in `src/core/manifest.ts:42-46`.\n\n`readManifest` (same file, lines 48-69) filters every manifest entry through `isProjectPath` before returning it — so even if `.agentos/manifest.json` is hand-edited to contain a path like `../secret.txt` or `C:\\secret.txt`, that entry is dropped when the manifest is loaded and never reaches `sync()`'s deletion loop (`src/commands/sync.ts:128-141`, which only iterates `entries` built from `readManifest`'s output).\n\n`isProjectPath` itself rejects the path if:\n- it's not a non-empty string,\n- `path.isAbsolute(p)` is true, or\n- it matches `/^[a-zA-Z]:/` (a Windows drive-letter path, which `path.isAbsolute` alone wouldn't catch for a value like `C:secret.txt`),\n\nand otherwise resolves `p` against `cwd` and checks the relative path doesn't start with `..` — catching `../../secret.txt`-style traversal."
+    },
+    {
+      "task": "recall",
+      "arm": "baseline",
+      "rep": 3,
+      "pass": false,
+      "detail": {
+        "named": [
+          "preinstall",
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.0502016,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 8321,
+        "cacheRead": 66648,
+        "output": 358,
+        "total": 75331
+      },
+      "turns": 2,
+      "durationMs": 9551,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 1
+      },
+      "mcpServers": [],
+      "answer": "The `bin` entry (`./dist/cli.js`) is what npm actually executes when someone runs `agentos` via `npx`/global install, and npm never runs arbitrary build steps on install for regular consumers — only `prepublishOnly` runs, and only on `npm publish`, not `npm install`. Since there's no `postinstall`/`prepare` hook building from source, committing `dist/` guarantees the package is runnable immediately after install without requiring consumers to have `tsc`/`tsx` or dev dependencies present.\n\nSCRIPTS: postinstall, prepare, preinstall"
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 3,
+      "pass": false,
+      "detail": {
+        "named": [
+          "preinstall",
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.06823760000000001,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 9405,
+        "cacheRead": 106278,
+        "output": 935,
+        "total": 116624
+      },
+      "turns": 4,
+      "durationMs": 15166,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "ToolSearch": 1,
+        "Read": 1,
+        "mcp__memory__memory_recall": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "Since `bin` points to `./dist/cli.js` and the package is consumed directly from git/npm without guaranteeing consumers have `typescript`/`tsc` available, committing the built `dist/` means the CLI works immediately after install or clone with zero build step — consistent with the \"zero API dependency, local-first\" design goal. The only build step defined (`compile`) is wired to `prepublishOnly`, which runs on the maintainer's machine at publish time, not on the consumer's machine at install time.\n\nSCRIPTS: postinstall, preinstall, prepare"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 3,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.0902632,
+      "tokens": {
+        "input": 8,
+        "cacheCreation": 13589,
+        "cacheRead": 146656,
+        "output": 656,
+        "total": 160909
+      },
+      "turns": 4,
+      "durationMs": 16652,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The guard is the `isProjectPath` function in `src/core/manifest.ts` (lines 42-46).\n\nIt's used inside `readManifest` (same file, lines 64-67), which filters out any manifest entry whose `path` is absolute (`path.isAbsolute(p)` or a `C:`-style drive prefix) or whose resolved path escapes `cwd` via `..` (checked by resolving the path and confirming `path.relative(cwd, resolved)` doesn't start with `..`).\n\nSince `sync.ts`'s stale-file cleanup loop (`src/commands/sync.ts:128-141`) only iterates over entries that came from `readManifest`, an entry like `../secret.txt` or `C:\\Users\\...\\secret.txt` never survives into that `entries` map — it's dropped before `sync` ever sees it, so `rmSync` can't be reached with it."
+    },
+    {
+      "task": "locate",
+      "arm": "baseline",
+      "rep": 3,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.0775432,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 12816,
+        "cacheRead": 103936,
+        "output": 548,
+        "total": 117306
+      },
+      "turns": 4,
+      "durationMs": 13993,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Read": 2
+      },
+      "mcpServers": [],
+      "answer": "The check is `isProjectPath` in `src/core/manifest.ts:42-46`.\n\nIt's called from `readManifest` (`src/core/manifest.ts:66`), which filters out any manifest entry whose `path` is absolute, drive-qualified (`C:...`), or resolves outside `cwd` (i.e. `path.relative(cwd, ...)` starts with `..`). Since `sync()` (`src/commands/sync.ts:74,128-140`) builds its deletion candidates only from what `readManifest` returns, a manifest entry edited to say `../secret.txt` or `C:\\secret.txt` never makes it into `entries`, so it can never be scheduled for `rmSync`."
+    }
+  ]
+}

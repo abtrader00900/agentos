@@ -1,7 +1,7 @@
 // Target: this repo at a pinned commit (the 0.2.0 release). Pinned so the copy never contains bench/
 // (task answers) and every run sees the same code.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +10,7 @@ const repo = fileURLToPath(new URL("../..", import.meta.url));
 // a git worktree has no node_modules of its own; the main checkout's sits next to the shared .git
 function nodeModules() {
   const own = path.join(repo, "node_modules");
-  if (existsSync(own)) return own;
+  if (existsSync(own)) return realpathSync(own); // a junction-linked node_modules cannot be cpSync-ed
   const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repo, encoding: "utf8" }).trim();
   return path.join(path.dirname(common), "node_modules");
 }

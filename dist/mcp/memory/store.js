@@ -48,12 +48,21 @@ export class MemoryStore {
             const k = query.key.toLowerCase();
             facts = facts.filter((f) => f.key.toLowerCase().includes(k));
         }
+        // free text: a fact matches if any word appears in its topic, key or value; more words matched ranks higher.
+        // A whole-phrase match missed natural queries ("dist compiled build" found nothing, bench/RESULTS.md).
+        // ponytail: word-count ranking, move to BM25 if stores grow to thousands of facts
+        const hits = new Map();
         if (query.text) {
-            const t = query.text.toLowerCase();
-            facts = facts.filter((f) => f.value.toLowerCase().includes(t));
+            const all = query.text.toLowerCase().split(/\s+/).filter(Boolean);
+            const words = all.some((w) => w.length > 2) ? all.filter((w) => w.length > 2) : all; // skip "is", "a" …
+            for (const f of facts) {
+                const hay = `${f.topic} ${f.key} ${f.value}`.toLowerCase();
+                hits.set(f, words.filter((w) => hay.includes(w)).length);
+            }
+            facts = facts.filter((f) => hits.get(f) > 0);
         }
         return facts
-            .sort((a, b) => (b.pinned - a.pinned) || b.updated_at.localeCompare(a.updated_at))
+            .sort((a, b) => (hits.get(b) ?? 0) - (hits.get(a) ?? 0) || (b.pinned - a.pinned) || b.updated_at.localeCompare(a.updated_at))
             .slice(0, limit)
             .map((f) => ({ ...f }));
     }

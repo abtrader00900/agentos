@@ -39,6 +39,16 @@ describe("MemoryStore (FR-3.x)", () => {
     expect(store.recall({ text: "nothing-matches" })).toHaveLength(0);
   });
 
+  // bench/RESULTS.md: the agent's first query was "dist compiled build" and a whole-phrase match returned nothing
+  it("free text matches any word of the query across topic, key and value, best match first", () => {
+    store.store({ topic: "build", key: "dist-committed", value: "dist/ is committed on purpose: git installs run a nested npm install" });
+    store.store({ topic: "ci", key: "matrix", value: "Linux + Windows, is run on every push" });
+    const facts = store.recall({ text: "why is dist compiled build" });
+    expect(facts.map((f) => f.key)).toEqual(["dist-committed"]); // "is" is too short to count
+    expect(store.recall({ text: "matrix nested" }).map((f) => f.key).sort()).toEqual(["dist-committed", "matrix"]);
+    expect(store.recall({ text: "nested npm install" })[0].key).toBe("dist-committed");
+  });
+
   it("tags source and pins facts", () => {
     store.store({ topic: "t", key: "k", value: "v", source: "app/Models/User.php", pinned: true });
     const f = store.get("t", "k")!;

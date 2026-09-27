@@ -46,7 +46,7 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
 
   server.tool(
     "memory_recall",
-    "Recall stored project facts. Filter by topic, key substring, or free text.",
+    "Recall stored project facts. Filter by topic, key substring, or free text (any word matches; best matches first).",
     {
       topic: z.string().optional(),
       key: z.string().optional(),
