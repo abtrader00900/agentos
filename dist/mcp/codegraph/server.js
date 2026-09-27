@@ -13,7 +13,8 @@ import { projectRoot } from "../../core/project.js";
 export function createCodegraphServer(root = projectRoot()) {
     // graph keys are project-relative with forward slashes; agents pass "src\a.ts",
     // "./src/a.ts" or an absolute path
-    const norm = (f) => path.relative(root, path.resolve(root, f)).replace(/\\/g, "/");
+    // (backslashes first: on Linux path.resolve would keep "src\a.ts" as one file name)
+    const norm = (f) => path.relative(root, path.resolve(root, f.replace(/\\/g, "/"))).replace(/\\/g, "/");
     const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
     const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
     const fmt = (files, empty) => files.length ? { content: [{ type: "text", text: files.join("\n") }] }

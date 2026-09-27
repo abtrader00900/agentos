@@ -108,9 +108,11 @@ export function searchSymbols(opts: SymbolSearchOptions): SymbolMatch[] {
 
   // one scan for every rule: ast-grep walks the tree once, respecting .gitignore
   const args = ["scan", "--inline-rules", yaml, "--json=compact"];
-  // agents pass "./src/a.ts", "src\a.ts" or an absolute path — compare project-relative forward-slash paths
-  const wantFile = opts.file ? path.relative(opts.cwd, path.resolve(opts.cwd, opts.file)).replace(/\\/g, "/") : undefined;
-  if (opts.file) args.push(path.resolve(opts.cwd, opts.file));
+  // agents pass "./src/a.ts", "src\a.ts" or an absolute path — compare project-relative forward-slash
+  // paths (backslashes first: on Linux path.resolve would keep "src\a.ts" as one file name)
+  const file = opts.file?.replace(/\\/g, "/");
+  const wantFile = file ? path.relative(opts.cwd, path.resolve(opts.cwd, file)).replace(/\\/g, "/") : undefined;
+  if (file) args.push(path.resolve(opts.cwd, file));
   const r = spawnSync(binary, args, { cwd: opts.cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (!r.stdout && r.status !== 0) throw new Error(`ast-grep failed: ${(r.stderr ?? "").trim() || `exit ${r.status}`}`);
 
