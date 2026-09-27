@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MemoryStore } from "./store.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 /**
  * MCP Memory Server (FR-3.x)
  * Zero network, zero API. stdio transport → works with Claude Code, Codex, Antigravity.
@@ -20,7 +21,7 @@ export function createMemoryServer(dbPath = resolveDbPath()) {
     const store = new MemoryStore(dbPath);
     const server = new McpServer({
         name: "agentos-memory",
-        version: "0.1.0",
+        version: VERSION,
     });
     server.tool("memory_store", "Store a project fact (architecture decision, convention, entity location). Persists across sessions.", {
         topic: z.string().describe("Category, e.g. 'architecture', 'conventions', 'entities'"),

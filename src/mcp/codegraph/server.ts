@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { GraphStore, ensureGraphEngine } from "./graph.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 
 /**
  * MCP Codegraph Server (FR-5.x)
@@ -19,7 +20,7 @@ export function createCodegraphServer(root = projectRoot()): McpServer {
   const norm = (f: string) => path.relative(root, path.resolve(root, f.replace(/\\/g, "/"))).replace(/\\/g, "/");
   const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
 
-  const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
+  const server = new McpServer({ name: "agentos-codegraph", version: VERSION });
 
   const fmt = (files: string[], empty: string) =>
     files.length ? { content: [{ type: "text" as const, text: files.join("\n") }] }

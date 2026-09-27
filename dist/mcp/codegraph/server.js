@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { GraphStore, ensureGraphEngine } from "./graph.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 /**
  * MCP Codegraph Server (FR-5.x)
  * Dependency graph + change impact analysis — deterministic, local, no model.
@@ -16,7 +17,7 @@ export function createCodegraphServer(root = projectRoot()) {
     // (backslashes first: on Linux path.resolve would keep "src\a.ts" as one file name)
     const norm = (f) => path.relative(root, path.resolve(root, f.replace(/\\/g, "/"))).replace(/\\/g, "/");
     const store = new GraphStore(path.join(root, ".agentos", "graph.json"));
-    const server = new McpServer({ name: "agentos-codegraph", version: "0.1.0" });
+    const server = new McpServer({ name: "agentos-codegraph", version: VERSION });
     const fmt = (files, empty) => files.length ? { content: [{ type: "text", text: files.join("\n") }] }
         : { content: [{ type: "text", text: empty }] };
     const refresh = async () => {

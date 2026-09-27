@@ -1,6 +1,6 @@
 {
   "name": "@basit0090/agent-os",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first, multi-harness agent operating system. One agent.config.yaml → Claude Code, Codex, Antigravity, Cursor, Windsurf. Zero API dependency.",
   "type": "module",
   "bin": {
@@ -38,7 +38,8 @@
     "skills",
     "RFC",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "repository": {
     "type": "git",

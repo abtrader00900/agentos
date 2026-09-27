@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MemoryStore } from "./store.js";
 import { projectRoot } from "../../core/project.js";
+import { VERSION } from "../../version.js";
 
 /**
  * MCP Memory Server (FR-3.x)
@@ -24,7 +25,7 @@ export function createMemoryServer(dbPath = resolveDbPath()): McpServer {
 
   const server = new McpServer({
     name: "agentos-memory",
-    version: "0.1.0",
+    version: VERSION,
   });
 
   server.tool(
