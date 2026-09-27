@@ -24,7 +24,7 @@ One `agent.config.yaml` in your repo generates the config for **5 harnesses** �
 
 - **One config → 5 agents.** Rules, stack description, MCP registration — generated per harness, with drift detection (if you hand-edit a generated file, sync refuses to silently overwrite).
 - **Shared long-term memory** (`memory` MCP server). Agents store and recall project facts in a local JSON store. Session ends, memory stays. Next session starts where you left off.
-- **Deterministic search, zero tokens** (`supersearch` MCP server): regex text search (ripgrep-powered), symbol search via ast-grep, and git archaeology — pickaxe + per-line blame.
+- **Symbol and git search** (`supersearch` MCP server): symbol definitions via ast-grep and git archaeology — pickaxe + per-line blame. Plain text search stays with your agent's built-in grep.
 - **Change impact analysis** (`codegraph` MCP server): "if I change this file, what breaks?" — transitive dependents, orphans, import cycles. Your agent stops guessing.
 - **11 battle-tested skills** (tdd-laravel, tdd-react, code-review, security-scan, db-migration-check, refactor-safe, …) with a validation framework. Same skill runs on every harness.
 - **Handoff protocol (open RFC).** `agentos handoff --to codex --task "..."` exports task state + decisions + memory snapshot + git state; the receiving agent auto-receives it via its config. Written as a versioned spec so non-AgentOS tools can adopt it.
@@ -39,11 +39,11 @@ One `agent.config.yaml` in your repo generates the config for **5 harnesses** �
 
 ### Why this matters
 
-Cheap operations (search, recall, impact checks) currently get routed through expensive LLM context. AgentOS moves them to deterministic local tools, so your tokens go to actual reasoning. In practice that's the difference between burning your quota by Tuesday and forgetting what a quota is.
+Cheap operations (recall, impact checks, symbol lookup) currently get routed through expensive LLM context. AgentOS moves them to deterministic local tools, so your tokens go to actual reasoning. In practice that's the difference between burning your quota by Tuesday and forgetting what a quota is.
 
 ### Status
 
-v0.2.0 — the core is solid (5 harness targets, 3 MCP servers, 11 skills, handoff RFC, CI on Linux + Windows). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
+v0.2.1 — the core is solid (5 harness targets, 3 MCP servers, 11 skills, handoff RFC, CI on Linux + Windows). MIT licensed. Early, honest, and looking for contributors — especially on the handoff protocol spec, new skills, and more harness targets.
 
 Repo: https://github.com/abtrader00900/agentos
 

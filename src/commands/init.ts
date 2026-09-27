@@ -22,7 +22,7 @@ rules:
   - id: run-tests-first
     text: Before marking any task done, run the project test suite and paste results.
   - id: no-guessing-deps
-    text: Use the codegraph/supersearch MCP tools to verify dependencies instead of guessing imports.
+    text: Use the codegraph MCP tools to verify dependencies instead of guessing imports.
 
 skills:
   - name: tdd-laravel   # remove if not a Laravel project

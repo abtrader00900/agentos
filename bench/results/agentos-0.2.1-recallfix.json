@@ -1,0 +1,274 @@
+{
+  "meta": {
+    "date": "2026-09-27T20:52:45.706Z",
+    "label": "recallfix",
+    "target": "agentos-0.2.1",
+    "ref": "db4db8b",
+    "model": "claude-sonnet-5",
+    "reps": 3,
+    "claude": "2.1.278 (Claude Code)",
+    "agentosMcp": "0.2.0",
+    "platform": "win32 10.0.26200, node v26.5.0",
+    "flags": [
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--model",
+      "claude-sonnet-5",
+      "--setting-sources",
+      "project",
+      "--disable-slash-commands",
+      "--strict-mcp-config",
+      "--no-session-persistence",
+      "--max-budget-usd",
+      "3",
+      "--allowedTools",
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "Bash",
+      "PowerShell",
+      "mcp__memory",
+      "mcp__supersearch",
+      "mcp__codegraph"
+    ]
+  },
+  "runs": [
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "named": [
+          "preinstall",
+          "install",
+          "postinstall",
+          "prepare",
+          "prepack",
+          "build"
+        ],
+        "why": true
+      },
+      "error": null,
+      "costUsd": 0.0660094,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 9697,
+        "cacheRead": 106297,
+        "output": 595,
+        "total": 116595
+      },
+      "turns": 4,
+      "durationMs": 13289,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "ToolSearch": 1,
+        "Read": 1,
+        "mcp__memory__memory_recall": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "This project is designed to be installed directly from a git URL (`npm install -g <git url>`), and npm's global-install path is fragile: if package.json declares any of `preinstall`, `install`, `postinstall`, `prepare`, `prepack`, or `build`, npm triggers a nested install inside the cloned repo that inherits the outer `--global`/`--prefix` flags and corrupts the tree being installed. Committing the compiled `dist/` sidesteps that nested-install trap entirely, since no build step is needed at install time (CI verifies `dist/` stays in sync with source on every change). The current build script is deliberately named `compile` instead of `build` to avoid tripping this.\n\nSCRIPTS: preinstall, install, postinstall, prepare, prepack, build"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.09196460000000001,
+      "tokens": {
+        "input": 8,
+        "cacheCreation": 13838,
+        "cacheRead": 147133,
+        "output": 717,
+        "total": 161696
+      },
+      "turns": 5,
+      "durationMs": 14857,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 2,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The check is `isProjectPath`, defined in `src/core/manifest.ts` (line 42-46).\n\nIt's called from `readManifest` (same file, line 66), which filters out any manifest entry whose `path` fails `isProjectPath` — i.e. is absolute, drive-letter-rooted, or resolves outside `cwd` via `..`. Since `sync.ts`'s deletion loop (`src/commands/sync.ts:128-141`) only ever iterates over entries that came from `readManifest`, an entry like `../secret.txt` is dropped before it ever reaches the `rmSync(abs)` call — so it can't be used to delete files outside the project."
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 2,
+      "pass": false,
+      "detail": {
+        "named": [
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.057771,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 8949,
+        "cacheRead": 67335,
+        "output": 850,
+        "total": 77138
+      },
+      "turns": 2,
+      "durationMs": 26499,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "Because `bin` points at `./dist/cli.js` and the package has no `postinstall`/`prepare` step, npm install (including installs straight from the git repo, which this local-first tool supports) must produce a working `cli.js` immediately without needing devDependencies like `typescript` present. Committing `dist/` guarantees the binary works right after checkout/install; `compile` only runs manually or via `prepublishOnly` when cutting an npm release, not on consumer install.\n\nSCRIPTS: postinstall, prepare"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 2,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.08134640000000001,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 13465,
+        "cacheRead": 105272,
+        "output": 642,
+        "total": 119385
+      },
+      "turns": 4,
+      "durationMs": 16591,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 1,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The check is `isProjectPath` in `src/core/manifest.ts` (lines 42–46).\n\n`readManifest` (same file, lines 64–67) filters every manifest entry through `isProjectPath` before returning it, so entries like `../secret.txt` or `C:\\...` never make it into the in-memory manifest that `sync.ts` iterates over when deciding what to delete. It rejects a path if it's empty/non-string, absolute (`path.isAbsolute`), a drive-letter path (`/^[a-zA-Z]:/`), or if resolving it relative to `cwd` produces something outside `cwd` (`rel.startsWith(\"..\")`). Since `sync()` (`src/commands/sync.ts:128-141`) only calls `rmSync` on paths that came from `entries` (built from `manifest?.files`), a manifest tampered with an out-of-project path is silently dropped rather than deleted."
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 3,
+      "pass": true,
+      "detail": {
+        "named": [
+          "preinstall",
+          "install",
+          "postinstall",
+          "prepare",
+          "prepack",
+          "build"
+        ],
+        "why": true
+      },
+      "error": null,
+      "costUsd": 0.06502140000000001,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 9580,
+        "cacheRead": 106297,
+        "output": 543,
+        "total": 116426
+      },
+      "turns": 4,
+      "durationMs": 12903,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "ToolSearch": 1,
+        "Read": 1,
+        "mcp__memory__memory_recall": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "dist/ is committed because agentos is often installed as a git dependency (`npm install -g <git-url>`), and under `-g` a nested npm install triggered by a build-type script inherits the outer `--global`/`--prefix` flags and corrupts the install tree. Since npm auto-runs `preinstall`, `install`, `postinstall`, `prepare`, `prepack`, or `build` scripts on install, none of those can exist — the compile step is deliberately named `compile` instead, and CI verifies dist/ stays in sync with source.\n\nSCRIPTS: preinstall, install, postinstall, prepare, prepack, build"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 3,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.11294699999999999,
+      "tokens": {
+        "input": 12,
+        "cacheCreation": 14140,
+        "cacheRead": 223715,
+        "output": 1162,
+        "total": 239029
+      },
+      "turns": 6,
+      "durationMs": 19496,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 3,
+        "Read": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The function is `isProjectPath`, defined in `src/core/manifest.ts` (lines 42–46).\n\nMechanics:\n\n1. `sync.ts`'s deletion loop (lines 128–141) only ever operates on entries that came from `readManifest(cwd)`.\n2. `readManifest` filters the raw JSON's `files` array through `isProjectPath(cwd, f.path)` before returning it (manifest.ts:64–67) — so a tampered `../secret.txt` or `C:\\...` entry never even survives parsing into an in-memory `ManifestEntry`.\n3. `isProjectPath` rejects the entry if the path is absolute (`path.isAbsolute(p)`), Windows-drive-qualified (`/^[a-zA-Z]:/`), or if resolving it against `cwd` and taking the relative path yields something starting with `..` — i.e. it escapes the project root.\n\nSince `entries` in `sync.ts` is built from `manifest?.files ?? []` (line 104), any malicious path is already gone before the `rmSync(abs)` call on line 134 ever runs, so sync can't be tricked into deleting a file outside the project."
+    }
+  ]
+}

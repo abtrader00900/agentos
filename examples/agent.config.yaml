@@ -16,7 +16,7 @@ rules:
   - id: laravel-conventions
     text: "Follow Laravel conventions: thin controllers, form requests, service classes in app/Services."
   - id: no-guessing-deps
-    text: "Use supersearch/codegraph MCP tools to verify dependencies — never guess import paths."
+    text: "Use codegraph MCP tools to verify dependencies — never guess import paths."
   - id: migration-safety
     text: "DB migrations must be reversible. Never edit a migrated migration; create a new one."
   - id: no-any-ts

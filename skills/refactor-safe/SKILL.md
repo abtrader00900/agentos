@@ -9,7 +9,7 @@ description: Safe refactoring protocol using impact analysis and green tests. Us
 
 1. **Baseline** — Run the full test suite. If red, STOP: fix or flag tests first. Refactoring starts from green only.
 2. **Impact** — Call `codegraph_impact` on every file you plan to touch. List all transitive dependents.
-3. **Catalog** — Find every usage of the symbols being moved/renamed (supersearch_symbol + supersearch_text).
+3. **Catalog** — Find every usage of the symbols being moved/renamed (supersearch_symbol for definitions, grep for every other usage).
 4. **Small steps** — One mechanical change at a time; run tests after each step. Commit after each green step.
 5. **Verify** — Full suite + typecheck at the end. `codegraph_cycles` if you changed import structure.
 

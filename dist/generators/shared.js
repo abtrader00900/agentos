@@ -1,10 +1,12 @@
 import { rulesForHarness } from "../core/schema.js";
 /** A YAML double-quoted scalar (JSON strings are valid YAML): "my: app" must not break frontmatter. */
 export const yamlString = (s) => JSON.stringify(s);
+// the question each tool answers: agents only reach for a tool when told when to use it (bench/RESULTS.md).
+// Every word lands in every session — keep these short.
 const TOOL_DESCRIPTIONS = {
-    memory: "store/recall project facts (long-term memory)",
-    supersearch: "text/symbol/git-history search",
-    codegraph: "dependency graph + change impact",
+    memory: "why/how this project does things, conventions, commands, past decisions: call `memory_recall` first",
+    supersearch: "symbol definitions, git history, blame (plain text search: your built-in Grep)",
+    codegraph: "what breaks if X changes, who uses X: `codegraph_impact`",
 };
 /** The body shared by every rule file: title, description, stack, rules, and the MCP tools actually configured. */
 export function ruleBody(config, harness, toolsNote) {
@@ -21,7 +23,7 @@ export function ruleBody(config, harness, toolsNote) {
     // only advertise tools that are configured — promising MCP tools the agent cannot
     // reach sends it hunting for them
     if (config.mcpServers.length) {
-        lines.push("## Local Tools (AgentOS)", "", "Deterministic tools are available via MCP — prefer them over guessing:", ...config.mcpServers.map((s) => `- \`${s.name}\`${TOOL_DESCRIPTIONS[s.name] ? ` — ${TOOL_DESCRIPTIONS[s.name]}` : ""}`), "");
+        lines.push("## Local Tools (AgentOS)", "", "Use these MCP tools instead of guessing:", ...config.mcpServers.map((s) => `- \`${s.name}\`${TOOL_DESCRIPTIONS[s.name] ? ` — ${TOOL_DESCRIPTIONS[s.name]}` : ""}`), "");
         if (toolsNote)
             lines.push(toolsNote, "");
     }

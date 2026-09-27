@@ -14,6 +14,8 @@ Summed over the five tasks, agentos used 31 % fewer tokens and cost 24 % less. T
 
 A variant that adds one rule telling the agent to call `memory_recall` for why/how questions turned recall from **0/3 to 3/3 correct**, at $0.071 per question (baseline: $0.055 for a wrong answer). The rule also caused an unneeded memory lookup in 2 of the 6 locate and fix runs. See [Memory-first variant](#memory-first-variant-not-what-agentos-generates-today).
 
+**0.2.1** applies these findings. On re-running recall and locate: recall went from **0/3 to 2/3**, and locate went from **+25 % to +2 % tokens** against baseline. See [0.2.1 follow-up](#021-follow-up-recall-and-locate-only).
+
 ## Setup
 
 | | |
@@ -147,6 +149,42 @@ Same flags and tasks as the full run, agentos arm only, 3 runs per task. Baselin
 - **Side effect:** the model also consulted memory on tasks that do not need it (one locate run, one fix run). The failed locate run did answer correctly (`isProjectPath` in `manifest.ts`). It then made another memory call and ended with a note on why it would not store the fact. `claude -p` prints only that last message, and the check scores what is printed, so the run counts as a failure. The scoring rule was fixed before the runs and was not changed afterwards.
 - The locate and fix differences against agentos 0.2.0 (−19 %, +37 %) are inside the run-to-run spread; fix alone ranged from 373k to 818k tokens.
 
+## 0.2.1 follow-up (recall and locate only)
+
+What changed in 0.2.1 (see CHANGELOG):
+- The generated "Local Tools" note now says which question each tool answers:
+  - `memory`: why/how, conventions, commands, past decisions → call `memory_recall` first
+  - `codegraph`: what breaks if X changes, who uses X → `codegraph_impact`
+  - `supersearch`: symbol definitions, git history, blame. Plain text search goes to the built-in Grep.
+- `supersearch_text` is no longer described as a Grep replacement.
+- The `init` rule `no-guessing-deps` names codegraph only.
+
+The note is still 4 lines, but 84 characters longer (note +96, rule −12), roughly +20 tokens per session. The overhead task was not re-run.
+
+Target: `targets/agentos-0.2.1.mjs`. It is the base agentos arm with the 0.2.1 `init` rule, and it runs the MCP servers from the checkout's `dist/` instead of npm 0.2.0. Same model (Sonnet 5), same Claude Code (2.1.278), same flags, 3 runs per task, 2 at a time. Baseline was re-run in the same session.
+
+**Round 1 — the note only** (`c8c3483`, `results/agentos-0.2.1-followup.json`, both arms, $0.90):
+
+| task | pass (agentos / baseline) | total tokens, median | Δ tokens | cost, median | Δ cost | turns |
+|---|---|---|---|---|---|---|
+| recall | 1/3 / 0/3 | 116,992 vs 75,331 | +55 % | $0.069 vs $0.051 | +36 % | 5 vs 2 |
+| locate | 3/3 / 3/3 | 160,909 vs 158,830 | +1 % | $0.090 vs $0.090 | 0 % | 4 vs 5 |
+
+The note did its job: all 3 recall runs called `memory_recall`, against 0/4 on 0.2.0. Two of them still guessed, because the search failed. In 0.2.0, `memory_recall`'s `text` must match the fact's value as one literal phrase. The agent's first queries were `"dist compiled build"`, `"dist build compiled committed"` and `"dist compiled build committed git prepublishOnly"`. Each came back "No matching facts.", although the fact is stored under topic `build` and its value contains "dist". One run retried with `topic: "build"` and passed. The other two answered from `package.json`.
+
+**Round 2 — note + search fix** (`f8e37d8`, `results/agentos-0.2.1-recallfix.json`, agentos arm only, $0.48). A fact now matches when any word of the query (3+ letters) appears in its topic, key or value, and facts matching more words come first. The baseline column is round 1's:
+
+| task | pass (agentos / baseline) | total tokens, median | Δ tokens | cost, median | Δ cost | turns | tool calls, agentos (all reps) |
+|---|---|---|---|---|---|---|---|
+| recall | **2/3** / 0/3 | 116,426 vs 75,331 | +55 % | $0.065 vs $0.051 | +27 % | 4 vs 2 | memory_recall 2, ToolSearch 2, Read 2, Bash 1 |
+| locate | 3/3 / 3/3 | 161,696 vs 158,830 | +2 % | $0.092 vs $0.090 | +2 % | 5 vs 5 | Grep 6, Read 6 |
+
+- **Recall: 2/3, not the 3/3 expected.** Both runs that called `memory_recall` found the fact with their first query (`"dist compiled build install postinstall prepublish"`, `"dist build postinstall prepare"`) and answered correctly. The third run never called memory: it read `package.json` and guessed. Over both rounds, the note got memory consulted in 5 of 6 recall runs.
+- **Cost of a correct recall answer:** 116k tokens and $0.065 in 4 turns. The memory-first variant needed 153k tokens and $0.071 in 5 turns, because it retried until the phrase search matched. The wrong baseline answer costs $0.051.
+- **Locate: the supersearch overhead is gone.** No supersearch, ToolSearch or memory call in any of the 6 runs, only Grep and Read. Tokens are +1 % and +2 % against baseline, down from +25 % on 0.2.0. The memory-first variant's side effect (an unneeded memory lookup on locate) did not occur.
+- The baseline re-run matches the full run: recall 0/3 at ~75k tokens, locate 3/3 at ~159k.
+- n = 3 per cell. 2/3 against 3/3 is one run, which is within the noise. The mechanism is visible in the transcripts: the note makes the call happen, and the search fix makes it find the fact.
+
 ## Limitations
 
 - **One small target.** 201 files, 35 of them in `src/`, and the repo is agentos itself. On a large codebase Grep gets more expensive and codegraph/supersearch are likely to matter more. That has not been measured here. `targets/local.example.mjs` shows how to run the same benchmark on a private repo, e.g. a Laravel ERP, without committing anything from it.
@@ -165,11 +203,13 @@ API list price. On the Max plan these runs count against the plan's usage limits
 | pilot | 10 | $1.15 |
 | full run | 30 | $3.26 |
 | memory-first variant | 15 | $1.51 |
-| **total** | 58 | **$6.21** |
+| 0.2.1 round 1 (recall + locate, both arms) | 12 | $0.90 |
+| 0.2.1 round 2 (recall + locate, agentos arm) | 6 | $0.48 |
+| **total** | 76 | **$7.59** |
 
 ## What to change in agentos
 
-In order of measured effect:
+In order of measured effect. Items 1–3 shipped in 0.2.1, together with the `memory_recall` search fix; see [0.2.1 follow-up](#021-follow-up-recall-and-locate-only).
 
 1. **Say when to use memory.** At present the generated tool note says only "`memory` — store/recall project facts" (`src/generators/shared.ts`), and no default rule mentions memory. As a result, seeded memory was never read (0/4). One sentence tying `memory_recall` to why/how/convention questions made it 3/3. Put that sentence in the generated "Local Tools" note, or in the `agentos init` template rules, so every project gets it. The cost is roughly +3 turns on questions that do use memory, and an occasional unneeded lookup elsewhere.
 2. **Name the question each tool answers.** Tools got used where a rule named them, and not otherwise. `codegraph_impact` is the measured win: −72 % tokens, −67 % cost, 3 turns every time, 4/4 correct against 3/4. The note should map questions to tools: "what breaks / who imports X → `codegraph_impact`", "why / how do we → `memory_recall`".
@@ -184,6 +224,7 @@ node bench/run.mjs --label pilot                          # 1 run per task per a
 node bench/run.mjs --label full --reps 3 --concurrency 2  # ~$3.3
 node bench/report.mjs bench/results/agentos-full.json     # the tables above
 BENCH_TARGET=bench/targets/agentos-memrule.mjs node bench/run.mjs --label full --reps 3 --arms agentos --concurrency 2  # variant (~$1.5)
+npm run compile && node bench/run.mjs --target bench/targets/agentos-0.2.1.mjs --label followup --tasks recall,locate --reps 3 --concurrency 2  # 0.2.1 (~$0.9)
 ```
 
 `claude` must be logged in (`claude auth status`). Raw per-run results (tokens, cost, turns, tool calls, answer, check detail) are in `bench/results/*.json`. Full transcripts go to `bench/results/transcripts/`, which is gitignored. A private target: `BENCH_TARGET=/abs/path/my-target.mjs node bench/run.mjs`, with results in `bench/results/local/`, also gitignored.

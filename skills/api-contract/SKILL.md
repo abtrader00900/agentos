@@ -7,7 +7,7 @@ description: Laravel API consistency and versioning review. Use when adding or c
 
 ## Workflow
 
-1. Identify the endpoint(s) changed and their consumers (supersearch_text for route names).
+1. Identify the endpoint(s) changed and their consumers (grep for route names).
 2. Check consistency against the checklist.
 3. Flag any response-shape change to existing consumers as BREAKING.
 

@@ -15,7 +15,7 @@ import { VERSION } from "../../version.js";
  */
 export function createSupersearchServer(cwd = projectRoot()) {
     const server = new McpServer({ name: "agentos-supersearch", version: VERSION });
-    server.tool("supersearch_text", "Search file contents by regex across the project. Honors .gitignore, skips binaries. Faster and free compared to asking the LLM to read files.", {
+    server.tool("supersearch_text", "Regex search of file contents across the project (honors .gitignore, skips binaries). For harnesses without a built-in grep — where one exists, use it for plain text search.", {
         pattern: z.string().describe("Regex to search for"),
         glob: z.string().optional().describe("e.g. '*.ts' or 'app/**'"),
         caseSensitive: z.boolean().optional().default(false),

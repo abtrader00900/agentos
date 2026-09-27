@@ -33,7 +33,7 @@ export function createMemoryServer(dbPath = resolveDbPath()) {
         const fact = store.store({ topic, key, value, source, pinned });
         return { content: [{ type: "text", text: `Stored [${fact.topic}/${fact.key}]` }] };
     });
-    server.tool("memory_recall", "Recall stored project facts. Filter by topic, key substring, or free text.", {
+    server.tool("memory_recall", "Recall stored project facts. Filter by topic, key substring, or free text (any word matches; best matches first).", {
         topic: z.string().optional(),
         key: z.string().optional(),
         text: z.string().optional(),
