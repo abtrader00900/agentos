@@ -7,7 +7,7 @@ description: Security checklist sweep for Laravel + React codebases. Use when re
 
 ## Workflow
 
-Scan the diff (or requested scope) against this checklist. Use supersearch_text to sweep the whole repo for each pattern — don't rely on reading alone.
+Scan the diff (or requested scope) against this checklist. Grep the whole repo for each pattern — don't rely on reading alone.
 
 ## Backend (Laravel)
 

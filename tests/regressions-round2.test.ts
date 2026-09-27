@@ -576,6 +576,19 @@ describe("generators", () => {
     expect(gen("windsurf", withServers)[".windsurf/rules/agentos.md"]).toContain("mcp_config.json");
   });
 
+  // bench/RESULTS.md: seeded memory went unread and supersearch_text lost to Grep until the note said which
+  // question each tool answers
+  it("the tools note maps questions to tools and leaves plain text search to the built-in Grep", () => {
+    const all = cfg({ mcpServers: ["memory", "supersearch", "codegraph"].map((name) => ({ name, command: "npx", args: ["mcp", name] })) });
+    for (const [h, file] of [["claude-code", "CLAUDE.md"], ["codex", "AGENTS.md"], ["cursor", ".cursor/rules/agentos.mdc"]] as const) {
+      const md = gen(h, all)[file];
+      expect(md).toMatch(/`memory` — why\/how[^\n]*`memory_recall` first/);
+      expect(md).toMatch(/`codegraph` — what breaks[^\n]*`codegraph_impact`/);
+      expect(md).toMatch(/`supersearch` — symbol[^\n]*plain text search: your built-in Grep/);
+      expect(md).not.toMatch(/prefer them/);
+    }
+  });
+
   it("Codex gets a startup timeout long enough for an npx cold start", () => {
     expect(gen("codex", withServers)[".codex/config.toml"]).toMatch(/startup_timeout_sec = \d{2,}/);
   });

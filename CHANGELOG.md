@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 — 2026-09-28
+
+Follow-ups from the token benchmark (`bench/RESULTS.md`, PR #11). Run `agentos sync` to pick up the new rule text.
+
+### Changed
+
+- **The generated "Local Tools" note names the question each tool answers.** Why/how, conventions, commands, past decisions → `memory_recall` first; what breaks if X changes / who uses X → `codegraph_impact`; supersearch → symbol definitions, git history, blame. In the benchmark, seeded memory was never read (recall 0/3) until one sentence said when to use it (3/3). The note is emitted by every generator (Claude Code, Codex, Antigravity, Cursor, Windsurf).
+- **`supersearch_text` is no longer presented as a Grep replacement** (tool description, generated note, README, skills): on the benchmark repo it cost 25 % more tokens than the built-in Grep for the same results. Plain text search stays with the harness's own Grep.
+- The `agentos init` template's `no-guessing-deps` rule points at codegraph only.
+
 ## 0.2.0 — 2026-09-27
 
 Two full audit rounds (PRs #5–#9). Every fix is pinned by a test in `tests/regressions.test.ts` or `tests/regressions-round2.test.ts`; CI now runs on Linux and Windows (Node 20/22), with and without ripgrep, and installs the package the way users do.
