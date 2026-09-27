@@ -1,0 +1,384 @@
+{
+  "meta": {
+    "date": "2026-09-27T19:50:07.846Z",
+    "label": "pilot",
+    "target": "agentos",
+    "ref": "db4db8b",
+    "model": "claude-sonnet-5",
+    "reps": 1,
+    "claude": "2.1.278 (Claude Code)",
+    "agentosMcp": "0.2.0",
+    "platform": "win32 10.0.26200, node v26.5.0",
+    "flags": [
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--model",
+      "claude-sonnet-5",
+      "--setting-sources",
+      "project",
+      "--disable-slash-commands",
+      "--strict-mcp-config",
+      "--no-session-persistence",
+      "--max-budget-usd",
+      "3",
+      "--allowedTools",
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "Bash",
+      "PowerShell",
+      "mcp__memory",
+      "mcp__supersearch",
+      "mcp__codegraph"
+    ]
+  },
+  "runs": [
+    {
+      "task": "overhead",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": true,
+      "detail": "OK",
+      "error": null,
+      "costUsd": 0.0343444,
+      "tokens": {
+        "input": 2,
+        "cacheCreation": 7088,
+        "cacheRead": 29742,
+        "output": 4,
+        "total": 36836
+      },
+      "turns": 1,
+      "durationMs": 3331,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {},
+      "mcpServers": [],
+      "answer": "OK"
+    },
+    {
+      "task": "overhead",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": "OK",
+      "error": null,
+      "costUsd": 0.0369684,
+      "tokens": {
+        "input": 2,
+        "cacheCreation": 7744,
+        "cacheRead": 29742,
+        "output": 4,
+        "total": 37492
+      },
+      "turns": 1,
+      "durationMs": 2001,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {},
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "OK"
+    },
+    {
+      "task": "recall",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": false,
+      "detail": {
+        "named": [
+          "preinstall",
+          "install",
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.063691,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 9163,
+        "cacheRead": 67305,
+        "output": 1357,
+        "total": 77829
+      },
+      "turns": 2,
+      "durationMs": 21269,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "Because `package.json`'s `bin` field points straight at `./dist/cli.js` and consumers install this via npm/npx (including as a global CLI), the package can't rely on TypeScript, tsx, or other devDependencies being present at install time — pre-building and committing `dist/` guarantees the CLI runs immediately after `npm install` with no compile step. The only script that does compile (`compile`) is wired to run at publish time via `prepublishOnly`, not at install time, which is exactly why no install-time lifecycle hook exists in this repo.\n\nSCRIPTS: preinstall, install, postinstall, prepare"
+    },
+    {
+      "task": "recall",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": false,
+      "detail": {
+        "named": [
+          "postinstall",
+          "prepare"
+        ],
+        "why": false
+      },
+      "error": null,
+      "costUsd": 0.055483000000000005,
+      "tokens": {
+        "input": 4,
+        "cacheCreation": 8129,
+        "cacheRead": 66645,
+        "output": 963,
+        "total": 75741
+      },
+      "turns": 2,
+      "durationMs": 12788,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Read": 1
+      },
+      "mcpServers": [],
+      "answer": "Because the package's `bin` entry (`./dist/cli.js`) must exist and be runnable the moment a consumer runs `npm install` or `npx agentos` — consumers only get `dependencies`, not `devDependencies` like `typescript`/`tsx`, so there's no toolchain available to compile TypeScript at install time. Committing `dist/` (and listing it in `files`) guarantees the compiled CLI is present straight from git clone or the npm tarball without relying on any install-time build step.\n\nSCRIPTS: prepare, postinstall"
+    },
+    {
+      "task": "impact",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": false,
+      "detail": {
+        "missing": [
+          "src/mcp/memory/server.ts"
+        ],
+        "extra": []
+      },
+      "error": null,
+      "costUsd": 0.188469,
+      "tokens": {
+        "input": 26,
+        "cacheCreation": 12635,
+        "cacheRead": 501135,
+        "output": 3765,
+        "total": 517561
+      },
+      "turns": 13,
+      "durationMs": 43990,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Bash": 2,
+        "Grep": 9,
+        "Glob": 1
+      },
+      "mcpServers": [],
+      "answer": "Dependency chain from `src/core/jsonstore.ts`:\n\n- **Direct importers**: `src/mcp/codegraph/graph.ts`, `src/mcp/memory/store.ts`\n- **Indirect via graph.ts**: `src/mcp/codegraph/tsparser.ts` (circular import back into graph.ts), `src/mcp/codegraph/server.ts`, `src/cli.ts` (imports server.ts)\n- **Indirect via store.ts**: `src/core/handoff.ts` → `src/commands/handoff.ts` → `src/cli.ts`\n\nThat's 6 dependent files total (excluding jsonstore.ts itself).\n\nFILES: src/mcp/codegraph/graph.ts, src/mcp/memory/store.ts, src/mcp/codegraph/tsparser.ts, src/mcp/codegraph/server.ts, src/core/handoff.ts, src/commands/handoff.ts, src/cli.ts"
+    },
+    {
+      "task": "impact",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "missing": [],
+        "extra": []
+      },
+      "error": null,
+      "costUsd": 0.06389220000000001,
+      "tokens": {
+        "input": 6,
+        "cacheCreation": 8741,
+        "cacheRead": 105381,
+        "output": 784,
+        "total": 114912
+      },
+      "turns": 3,
+      "durationMs": 12179,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "ToolSearch": 1,
+        "mcp__codegraph__codegraph_impact": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "Changing `src/core/jsonstore.ts`'s exported API would impact 8 files under `src/` (2 direct importers, 6 more transitively via those):\n\n- Direct: `src/mcp/codegraph/graph.ts`, `src/mcp/memory/store.ts`\n- Indirect: `src/cli.ts`, `src/commands/handoff.ts`, `src/core/handoff.ts`, `src/mcp/codegraph/server.ts`, `src/mcp/codegraph/tsparser.ts`, `src/mcp/memory/server.ts`\n\n(Codegraph also flagged 7 test files under `tests/`, excluded here since the question asked for files under `src/`.)\n\nFILES: src/mcp/codegraph/graph.ts, src/mcp/memory/store.ts, src/cli.ts, src/commands/handoff.ts, src/core/handoff.ts, src/mcp/codegraph/server.ts, src/mcp/codegraph/tsparser.ts, src/mcp/memory/server.ts"
+    },
+    {
+      "task": "locate",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.1858874,
+      "tokens": {
+        "input": 22,
+        "cacheCreation": 31270,
+        "cacheRead": 287702,
+        "output": 3292,
+        "total": 322286
+      },
+      "turns": 1,
+      "durationMs": 6569,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 1,
+      "tools": {
+        "Agent": 1,
+        "ScheduleWakeup": 2,
+        "Bash": 2,
+        "Read": 2,
+        "Grep": 1
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "The guard is `isProjectPath(cwd, p)`, defined in `src/core/manifest.ts` (lines 42–46):\n\n```ts\nexport function isProjectPath(cwd: string, p: string): boolean {\n  if (typeof p !== \"string\" || !p || path.isAbsolute(p) || /^[a-zA-Z]:/.test(p)) return false;\n  const rel = path.relative(cwd, path.resolve(cwd, p));\n  return !!rel && !rel.startsWith(\"..\") && !path.isAbsolute(rel);\n}\n```\n\nIt's not called at the deletion site itself — it's applied earlier, inside `readManifest()` (same file, ~lines 48–69), which filters every entry in the manifest's `files` array through `isProjectPath` before returning it. `sync()` in `src/commands/sync.ts` builds its delete list entirely from that already-filtered `readManifest(cwd)` output, so an entry like `\"../secret.txt\"` or `\"C:\\...\\secret.txt\"` never survives to reach the `rmSync(path.join(cwd, p))` call.\n\nSo the mechanism that stops the traversal is: `isProjectPath` rejects any path that's absolute, has a drive letter, or whose resolved form relative to `cwd` starts with `..` — and `readManifest` enforces that filter on every manifest entry before sync ever sees it."
+    },
+    {
+      "task": "locate",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "fn": true,
+        "file": true
+      },
+      "error": null,
+      "costUsd": 0.1037352,
+      "tokens": {
+        "input": 10,
+        "cacheCreation": 14176,
+        "cacheRead": 184256,
+        "output": 1016,
+        "total": 199458
+      },
+      "turns": 6,
+      "durationMs": 18361,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 3,
+        "Read": 2
+      },
+      "mcpServers": [],
+      "answer": "The safeguard is `isProjectPath` in `src/core/manifest.ts` (manifest.ts:42-46).\n\n`readManifest` (same file, line 64-67) filters every manifest entry through `isProjectPath(cwd, entry.path)` before returning the file list. Any entry whose `path` is absolute, drive-qualified (`C:\\...`), or resolves outside `cwd` via `..` gets dropped there — so `sync.ts`'s deletion loop (`src/commands/sync.ts:128-141`, which calls `path.join(cwd, p)` then `rmSync`) never even sees an entry like `../secret.txt`; it's already gone from the manifest by the time `readManifest` returns it.\n\nConcretely, `isProjectPath` rejects a path if:\n- it's not a non-empty string,\n- `path.isAbsolute(p)` is true, or\n- it matches a Windows drive prefix (`^[a-zA-Z]:`), or\n- resolving it against `cwd` produces a relative path that starts with `..`.\n\nSo editing the manifest's `files` list to add `../secret.txt` or `C:\\secret.txt` doesn't work — that entry is stripped before `sync` ever iterates over it for deletion."
+    },
+    {
+      "task": "fix",
+      "arm": "baseline",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "summary": "Tests  199 passed (199)",
+        "failed": []
+      },
+      "error": null,
+      "costUsd": 0.2018814,
+      "tokens": {
+        "input": 22,
+        "cacheCreation": 20879,
+        "cacheRead": 462657,
+        "output": 2579,
+        "total": 486137
+      },
+      "turns": 11,
+      "durationMs": 92655,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 3,
+        "Read": 2,
+        "Edit": 2,
+        "Bash": 3
+      },
+      "mcpServers": [],
+      "answer": "All 199 tests pass (198 existing + 1 new regression test).\n\n## Summary\n\nFixed `backupPath()` in `src/commands/sync.ts:38-43`: it previously always returned `<file>.bak`, so a second forced sync clobbered the backup of the original hand-written file. It now checks if `.bak` exists and, if so, finds the next free `.bak.N` suffix, preserving every prior backup.\n\nAdded a regression test in `tests/regressions.test.ts` verifying that three successive forced syncs with hand-edits in between produce `CLAUDE.md.bak`, `CLAUDE.md.bak.1`, and `CLAUDE.md.bak.2`, each retaining its own distinct content."
+    },
+    {
+      "task": "fix",
+      "arm": "agentos",
+      "rep": 1,
+      "pass": true,
+      "detail": {
+        "summary": "Tests  199 passed (199)",
+        "failed": []
+      },
+      "error": null,
+      "costUsd": 0.2169094,
+      "tokens": {
+        "input": 26,
+        "cacheCreation": 20406,
+        "cacheRead": 527167,
+        "output": 2980,
+        "total": 550579
+      },
+      "turns": 13,
+      "durationMs": 69187,
+      "stop": "success",
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "subagents": 0,
+      "tools": {
+        "Grep": 5,
+        "Read": 3,
+        "Edit": 2,
+        "Bash": 2
+      },
+      "mcpServers": [
+        "memory:connected",
+        "supersearch:connected",
+        "codegraph:connected"
+      ],
+      "answer": "All 199 tests pass, including the new regression test for the `.bak` rollover.\n\n**Fix:** `backupPath` in `src/commands/sync.ts:38` now checks for an existing `CLAUDE.md.bak` and, if found, rolls to `.bak.1`, `.bak.2`, etc., instead of blindly overwriting. Added a regression test in `tests/regressions.test.ts` covering three successive `--force` syncs to verify each backup is preserved."
+    }
+  ]
+}

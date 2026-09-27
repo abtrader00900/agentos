@@ -3,3 +3,7 @@ node_modules/
 .agentos/
 editors/vscode/out/
 editors/vscode/node_modules/
+
+# bench: per-run transcripts and results of local-only (private) targets
+bench/results/transcripts/
+bench/results/local/
