@@ -45,6 +45,17 @@ export const agentConfigSchema = z.object({
   mcpServers: z.array(mcpServerRefSchema).default([]),
   /** Community skill registry index (https URL, file:// path, or local path) */
   skillRegistry: z.string().optional(),
+  /** When doctor/sync call injected context stale */
+  staleAfter: z
+    .object({
+      /** the active handoff is older than this */
+      handoffDays: z.number().positive().default(3),
+      /** HEAD moved more than this many commits past the handoff's commit */
+      handoffCommits: z.number().int().nonnegative().default(20),
+      /** a pinned memory fact was not updated for this long */
+      pinnedFactDays: z.number().positive().default(14),
+    })
+    .default({}),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;

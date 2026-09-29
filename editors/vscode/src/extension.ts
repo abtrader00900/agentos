@@ -394,7 +394,7 @@ async function handoffWizard(cwd: string): Promise<void> {
     placeHolder: "app/Jobs/GenerateInvoicePdf.php, resources/views/invoices/pdf.blade.php",
   });
   const decisions = await vscode.window.showInputBox({
-    prompt: "Pending decisions (comma-separated, optional)",
+    prompt: "Pending decisions (separate with ; — commas stay inside a decision; optional)",
   });
 
   const args = ["handoff", "--to", to, "--task", task];

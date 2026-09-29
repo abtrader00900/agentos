@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { generators } from "../generators/index.js";
 import { writeManifest, hashContent, readManifest, detectDrift, normalizeEol } from "../core/manifest.js";
+import { handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 const log = (msg, quiet) => { if (!quiet)
     console.log(msg); };
 /**
@@ -128,6 +129,9 @@ export function sync(options = {}) {
             `.codex/config.toml and the other MCP files — don't commit secrets; prefer variables the harness reads from your shell.`, options.quiet);
     }
     log(`Synced ${planned.length} files from ${sources.length} config source(s).`, options.quiet);
+    const stale = handoff ? handoffStaleness(cwd, config.staleAfter) : null;
+    if (stale?.stale)
+        log(`  ⚠ stale handoff injected into the rule files: ${stale.detail}.\n    ${HANDOFF_FIX}`, options.quiet);
 }
 export { detectDrift, readManifest };
 //# sourceMappingURL=sync.js.map

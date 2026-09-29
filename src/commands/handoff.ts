@@ -1,5 +1,5 @@
 import path from "node:path";
-import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown } from "../core/handoff.js";
+import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown, clearHandoff } from "../core/handoff.js";
 import { ALL_HARNESSES } from "../core/schema.js";
 
 /** FR-2.5 / FR-7.x: agentos handoff */
@@ -9,20 +9,31 @@ export interface HandoffOptions {
   to?: string;
   from?: string;
   task?: string;
-  files?: string;
-  decisions?: string;
-  questions?: string;
+  /** a string or repeated flags; each value is split on , ; and newlines */
+  files?: string | string[];
+  /** decisions and questions are sentences: split on ; and newlines only — a comma stays inside an item */
+  decisions?: string | string[];
+  questions?: string | string[];
   notes?: string;
+  /** remove HANDOFF.md so sync stops injecting it */
+  clear?: boolean;
 }
 
-function splitList(s?: string): string[] {
-  return s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
+function splitList(s: string | string[] | undefined, sep: RegExp): string[] {
+  return [s ?? []].flat().flatMap((x) => x.split(sep)).map((x) => x.trim()).filter(Boolean);
 }
 
 const VALID: string[] = [...ALL_HARNESSES, "any"];
 
 export function handoff(options: HandoffOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
+
+  if (options.clear) {
+    console.log(clearHandoff(cwd)
+      ? "✓ HANDOFF.md removed (its bundle stays in .agentos/handoffs/).\nNext: agentos sync — drops the handoff from the rule files."
+      : "No HANDOFF.md — nothing to clear.");
+    return;
+  }
 
   for (const [flag, value] of [["--to", options.to], ["--from", options.from]] as const) {
     if (value !== undefined && !VALID.includes(value)) {
@@ -38,9 +49,9 @@ export function handoff(options: HandoffOptions = {}): void {
 
   const bundle = exportHandoff(cwd, {
     task: options.task,
-    filesInProgress: splitList(options.files),
-    pendingDecisions: splitList(options.decisions),
-    openQuestions: splitList(options.questions),
+    filesInProgress: splitList(options.files, /[,;\n]/),
+    pendingDecisions: splitList(options.decisions, /[;\n]/),
+    openQuestions: splitList(options.questions, /[;\n]/),
     notes: options.notes,
     fromHarness: options.from ?? detectHarness(),
     toHarness: options.to ?? "any",

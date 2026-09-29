@@ -4,6 +4,7 @@ import { loadConfig } from "../core/loader.js";
 import { generators } from "../generators/index.js";
 import { writeManifest, hashContent, readManifest, detectDrift, normalizeEol, type ManifestEntry } from "../core/manifest.js";
 import type { HarnessName } from "../core/schema.js";
+import { handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 
 export interface SyncOptions {
   cwd?: string;
@@ -148,6 +149,8 @@ export function sync(options: SyncOptions = {}): void {
     );
   }
   log(`Synced ${planned.length} files from ${sources.length} config source(s).`, options.quiet);
+  const stale = handoff ? handoffStaleness(cwd, config.staleAfter) : null;
+  if (stale?.stale) log(`  ⚠ stale handoff injected into the rule files: ${stale.detail}.\n    ${HANDOFF_FIX}`, options.quiet);
 }
 
 export { detectDrift, readManifest };

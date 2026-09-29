@@ -15,4 +15,8 @@ export declare function doctor(options?: {
     checks: Check[];
     ok: boolean;
 };
+/** project paths with trust_level = "trusted" in Codex's config.toml ([projects.'<path>'] or [projects."<path>"] tables) */
+export declare function trustedCodexProjects(toml: string): string[];
+/** Codex lower-cases project keys on Windows (d:\madina electric yasir\…); elsewhere paths compare exactly */
+export declare function sameCodexPath(a: string, b: string, platform?: string): boolean;
 export {};

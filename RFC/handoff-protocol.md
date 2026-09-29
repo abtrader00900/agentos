@@ -31,8 +31,8 @@ Two artifacts, always written together to `.agentos/handoffs/<ISO-timestamp>/`:
   "pendingDecisions": ["use queue vs sync for PDF export"],
   "openQuestions": ["should refund hit the same ledger entry?"],
   "notes": "free-form",
-  "memory": [{ "topic": "...", "key": "...", "value": "...", "pinned": false }],
-  "git": { "branch": "...", "lastCommits": ["%h %s"], "status": "short-status", "diffStat": "" }
+  "memory": [{ "topic": "...", "key": "...", "value": "...", "pinned": false, "updatedAt": "ISO-8601" }],
+  "git": { "branch": "...", "head": "full commit sha", "lastCommits": ["%h %s"], "status": "short-status", "diffStat": "" }
 }
 ```
 
@@ -44,8 +44,8 @@ Two artifacts, always written together to `.agentos/handoffs/<ISO-timestamp>/`:
 - `filesInProgress`: files with unsaved/uncommitted intent — the next agent should read these first.
 - `pendingDecisions`: decisions the previous agent deliberately deferred.
 - `openQuestions`: questions the previous agent could not answer from the codebase.
-- `memory`: snapshot of the AgentOS memory store at handoff time. Receiving harnesses should treat pinned facts as ground truth.
-- `git`: factual repo state. Receiving agents must re-verify before acting; this is a hint, not authority.
+- `memory`: snapshot of the AgentOS memory store at handoff time. Receiving harnesses should treat pinned facts as ground truth, weighed by `updatedAt` (optional, since 0.2.2; HANDOFF.md shows it per fact).
+- `git`: factual repo state. `head` (optional, since 0.2.2) is the commit the handoff was written at; doctor and sync measure staleness from it. Receiving agents must re-verify before acting; this is a hint, not authority.
 
 ## 4. Lifecycle
 
@@ -57,8 +57,9 @@ import:  harness configs regenerated via `agentos sync` inject HANDOFF.md under
          "## Active Handoff (AgentOS)" — the receiving agent sees it in its
          system context automatically.
 
-consume: after the receiving agent picks up the work, delete HANDOFF.md
-         (doctor warns if it is >24h old).
+consume: when the work is done: agentos handoff --clear, then agentos sync.
+         doctor and sync warn when HANDOFF.md is older than staleAfter.handoffDays
+         (default 3) or HEAD moved more than staleAfter.handoffCommits (default 20).
 ```
 
 ## 5. Harness Integration
