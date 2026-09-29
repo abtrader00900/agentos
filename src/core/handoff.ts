@@ -212,16 +212,17 @@ export function handoffStaleness(
 ): { stale: boolean; detail: string } | null {
   const rootMd = path.join(cwd, "HANDOFF.md");
   if (!existsSync(rootMd)) return null;
-  // ours names its bundle: "- **Created:** <createdAt>" → .agentos/handoffs/<createdAt with ":." as "-">/bundle.json
-  const created = /^- \*\*Created:\*\* (\S+)/m.exec(readFileSync(rootMd, "utf8"))?.[1];
+  const md = readFileSync(rootMd, "utf8");
+  const created = createdAt(md);
   let bundle: HandoffBundle | null = null;
   try {
-    const file = created && path.join(cwd, ".agentos", "handoffs", created.replace(/[:.]/g, "-"), "bundle.json");
-    if (file && existsSync(file)) bundle = importHandoff(file);
+    const dir = bundleDir(cwd, md);
+    if (dir && existsSync(path.join(dir, "bundle.json"))) bundle = importHandoff(path.join(dir, "bundle.json"));
   } catch { /* unreadable bundle: the date alone */ }
 
   const createdMs = Date.parse(bundle?.createdAt || created || "");
-  const days = Math.floor((Date.now() - (Number.isNaN(createdMs) ? statSync(rootMd).mtimeMs : createdMs)) / 864e5);
+  const ageMs = Date.now() - (Number.isNaN(createdMs) ? statSync(rootMd).mtimeMs : createdMs);
+  const days = Math.floor(ageMs / 864e5);
   // bundles before 0.2.2 have no git.head; their first "Recent commits" line starts with the short hash
   const commit = bundle?.git.head || bundle?.git.lastCommits[0]?.split(" ")[0] || "";
   const count = /^[0-9a-f]{4,64}$/i.test(commit) ? gitCapture(cwd, ["rev-list", "--count", `${commit}..HEAD`]) : "";
@@ -229,15 +230,30 @@ export function handoffStaleness(
 
   const detail = `HANDOFF.md is ${days} day${days === 1 ? "" : "s"} old` +
     (commits === null ? "" : `, ${commits} commit${commits === 1 ? "" : "s"} since it was written`);
-  return { stale: days > limits.handoffDays || (commits ?? 0) > limits.handoffCommits, detail };
+  return { stale: ageMs > limits.handoffDays * 864e5 || (commits ?? 0) > limits.handoffCommits, detail };
+}
+
+const createdAt = (md: string) => /^- \*\*Created:\*\* (\S+)/m.exec(md)?.[1];
+
+/** ours names its bundle: "- **Created:** <createdAt>" → .agentos/handoffs/<createdAt with ":." as "-"> */
+function bundleDir(cwd: string, md: string): string | null {
+  const created = createdAt(md);
+  return created ? path.join(cwd, ".agentos", "handoffs", created.replace(/[:.]/g, "-")) : null;
 }
 
 /** Stop injecting a finished handoff. Its bundle (and markdown copy) stay in .agentos/handoffs/. */
 export function clearHandoff(cwd: string): boolean {
   const rootMd = path.join(cwd, "HANDOFF.md");
   if (!existsSync(rootMd)) return false;
-  if (!readFileSync(rootMd, "utf8").includes(FOOTER_MARK)) {
+  const md = readFileSync(rootMd, "utf8").replace(/\r\n/g, "\n");
+  if (!md.includes(FOOTER_MARK)) {
     throw new Error("HANDOFF.md was not written by agentos — move or delete it yourself (sync injects it while it exists).");
+  }
+  // only delete what the bundle directory keeps a copy of: notes added to HANDOFF.md exist nowhere else
+  const dir = bundleDir(cwd, md);
+  const copy = dir && path.join(dir, "HANDOFF.md");
+  if (!copy || !existsSync(copy) || readFileSync(copy, "utf8").replace(/\r\n/g, "\n") !== md) {
+    throw new Error("HANDOFF.md was edited after agentos wrote it (or its bundle copy is missing) — move your notes elsewhere, then delete it yourself.");
   }
   rmSync(rootMd);
   return true;

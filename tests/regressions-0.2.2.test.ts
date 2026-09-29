@@ -179,6 +179,25 @@ describe("stale handoff", () => {
     expect(existsSync(path.join(dir, "HANDOFF.md"))).toBe(true);
   });
 
+  it("handoff --clear refuses to delete an agentos HANDOFF.md someone edited", () => {
+    handoffAt(new Date().toISOString());
+    const md = path.join(dir, "HANDOFF.md");
+    writeFileSync(md, readFileSync(md, "utf8") + "\nOwner note: call the supplier first.\n");
+    expect(() => handoff({ cwd: dir, clear: true })).toThrow(/edited/);
+    expect(readFileSync(md, "utf8")).toContain("Owner note");
+    // a CRLF checkout of an unedited one is not an edit
+    writeHandoff(dir, exportHandoff(dir, { task: "t", ...noLists }));
+    writeFileSync(md, readFileSync(md, "utf8").replace(/\n/g, "\r\n"));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    handoff({ cwd: dir, clear: true });
+    expect(existsSync(md)).toBe(false);
+  });
+
+  it("3.9 days old is past a 3-day limit", () => {
+    handoffAt(daysAgo(3.9));
+    expect(check("handoff")).toMatchObject({ status: "warn" });
+  });
+
   it("staleAfter defaults: 3 days, 20 commits, 14 days for pinned facts", () => {
     expect(loadConfig(dir, dir).config.staleAfter).toEqual({ handoffDays: 3, handoffCommits: 20, pinnedFactDays: 14 });
   });
@@ -318,6 +337,13 @@ trust_level = "untrusted"
     const key = process.platform === "win32" ? dir.toLowerCase() : dir;
     writeFileSync(globalToml, GLOBAL + `\n[projects.'${key}']\ntrust_level = "trusted"\n`);
     expect(check("codex:trust")).toMatchObject({ status: "pass" });
+  });
+
+  it("no MCP servers in .codex/config.toml: no trust check", () => {
+    write({ "agent.config.yaml": "project: { name: bare }\n" });
+    sync({ cwd: dir, quiet: true });
+    mkdirSync(codexHome, { recursive: true });
+    expect(check("codex:trust")).toBeUndefined();
   });
 
   it("no Codex install, or no Codex target in the project: no check", () => {

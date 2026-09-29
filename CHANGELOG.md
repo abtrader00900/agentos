@@ -9,7 +9,7 @@ Fixes from two days of agentos on a real project. Every fix is pinned by a test 
 ### Fixed
 
 - **Generated MCP configs ran a stale agentos forever.** `sync` wrote `npx -y @basit0090/agent-os …` with no version; npx caches that spec (as `@latest`) and kept starting the version it fetched first — a project's memory server still reported 0.2.0 after 0.2.1 shipped, so the `memory_recall` fix never reached it. Every generator (Claude Code `.mcp.json`, Codex `.codex/config.toml`, Cursor, Antigravity) now writes `@basit0090/agent-os@<version of the CLI running sync>`. Other servers, and a version you wrote yourself in `agent.config.yaml`, are left as they are. `doctor` warns (`mcp:version`) when a generated config runs another version or none.
-- **A finished handoff kept steering every new chat.** `doctor` and `sync` warn when the active `HANDOFF.md` is older than 3 days or HEAD moved more than 20 commits past the commit it was written at (the old check was file mtime > 24 h, which a checkout resets). `bundle.json` now records that commit (`git.head`); older bundles are measured from their first recent commit. New `agentos handoff --clear` removes `HANDOFF.md` (the bundle stays in `.agentos/handoffs/`) so the next `sync` stops injecting it.
+- **A finished handoff kept steering every new chat.** `doctor` and `sync` warn when the active `HANDOFF.md` is older than 3 days or HEAD moved more than 20 commits past the commit it was written at (the old check was file mtime > 24 h, which a checkout resets). `bundle.json` now records that commit (`git.head`); older bundles are measured from their first recent commit. New `agentos handoff --clear` removes `HANDOFF.md` (the bundle stays in `.agentos/handoffs/`) so the next `sync` stops injecting it — it refuses when `HANDOFF.md` was edited after agentos wrote it, so added notes are never lost.
 - **Pinned memory went stale unnoticed.** The handoff memory snapshot shows each fact's last-updated date (`_(updated 2026-09-27)_`), and `doctor` lists pinned facts not updated in 14 days (`memory:pinned`) — re-store one with `memory_store` to confirm it. The memory file format is unchanged; bundles gain an optional `updatedAt` per fact.
 - **Codex trust.** Codex ignores a project's `.codex/config.toml` until the project is trusted. `doctor` (`codex:trust`) now checks `~/.codex/config.toml` (or `$CODEX_HOME`) for the project, its git root or its main checkout — case-insensitively on Windows, where Codex lower-cases the key — and says how to trust it. It never writes the trust entry.
 
@@ -17,6 +17,11 @@ Fixes from two days of agentos on a real project. Every fix is pinned by a test 
 
 - **`handoff --decisions` / `--questions` no longer split on commas** — one sentence with commas became several bullets. They split on `;` or newlines; `--decision "…"` and `--question "…"` (and `--file`) can be repeated, one item each. `--files` still splits on commas (and `;`). The VS Code handoff wizard says so.
 - New optional `staleAfter` in `agent.config.yaml`: `handoffDays` (3), `handoffCommits` (20), `pinnedFactDays` (14).
+
+### Known
+
+- `mcp:version` suggests `agentos sync` even when the other version is pinned by hand in `agent.config.yaml` (sync keeps it); edit the config instead.
+- The `codex:trust` hint prints a TOML key that is wrong for a path containing `'`; git submodules are checked against their own root only.
 
 ## 0.2.1 — 2026-09-28
 

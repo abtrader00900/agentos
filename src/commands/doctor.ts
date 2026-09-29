@@ -171,7 +171,9 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   // 8. Codex reads .codex/config.toml (the MCP servers) only in trusted projects. Trust is a
   // security setting that belongs to the user: report it, never write it.
   const codexHome = process.env.CODEX_HOME || path.join(homedir(), ".codex");
-  if (existsSync(path.join(cwd, ".codex", "config.toml")) && existsSync(codexHome)) {
+  const projectToml = path.join(cwd, ".codex", "config.toml");
+  // no [mcp_servers.*] → nothing Codex would miss
+  if (existsSync(projectToml) && /^\s*\[mcp_servers\./m.test(readFileSync(projectToml, "utf8")) && existsSync(codexHome)) {
     const globalToml = path.join(codexHome, "config.toml");
     const trusted = existsSync(globalToml) ? trustedCodexProjects(readFileSync(globalToml, "utf8")) : [];
     // Codex keys trust by the git repository root (the main checkout, for a worktree), else the folder
