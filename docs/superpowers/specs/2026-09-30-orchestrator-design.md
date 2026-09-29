@@ -49,13 +49,13 @@ New code lives in `src/orchestrator/`.
 
 | File | Responsibility |
 |---|---|
-| `run.ts` | Run record and state machine: `queued → planning → working → integrating → verifying → fixing → pr_open`, terminal `needs_human`, `failed`, `cancelled`, plus `paused` (rate limit). Persists to `.agentos/runs/<id>/state.json`. |
-| `planner.ts` | Builds the planner prompt (task, `memory_recall` hits, codegraph file map, config rules), calls the planner runner, validates the JSON plan with zod. |
+| `run.ts` | Run record and state machine: `queued → planning → working → verifying ⇄ fixing → pr_open`, terminal `needs_human`, `failed`, `cancelled`, plus `paused` (rate limit). Persists to `.agentos/runs/<id>/state.json`. |
+| `planner.ts` | Builds the planner prompt (task, `memory_recall` hits, the tracked file list; the planner agent can query the codegraph MCP itself), calls the planner runner, validates the JSON plan with zod. |
 | `runners/types.ts` | `Runner` interface: `run({prompt, cwd, timeoutMs, signal}) → AsyncIterable<RunnerEvent>` ending in `{ok, summary, exitCode}`. |
 | `runners/claude.ts` | `claude -p --output-format stream-json --permission-mode acceptEdits` |
 | `runners/codex.ts` | `codex exec --json -s workspace-write` with stdin closed |
 | `runners/fake.ts` | Test runner: applies scripted file edits and commits. No model. |
-| `workspace.ts` | Worktree per subtask off the run branch; merge in dependency order; cleanup (removes Windows junctions before `git worktree remove`). |
+| `workspace.ts` | Worktree per subtask off the run branch; each finished subtask merges into the run branch at once (so dependents start from their dependencies' code); cleanup (removes Windows junctions before `git worktree remove`). |
 | `scheduler.ts` | Runs subtasks whose `dependsOn` are done, up to `maxWorkers`, with a free-memory check before each spawn. |
 | `verifier.ts` | Runs `verify` commands in the run worktree; asks the reviewer runner for JSON findings on `base..run`. |
 | `gate.ts` | Secret scan of the diff, push the run branch, `gh pr create` with the report body. |
@@ -63,7 +63,7 @@ New code lives in `src/orchestrator/`.
 
 The entry points are:
 - `src/commands/run.ts`: `agentos run "<task>"`, `agentos runs`, and
-  `agentos run <id> --resume | --cancel | --status`.
+  `agentos run --resume <id> | --cancel <id> | --status <id>`.
 - `src/mcp/orchestrator/server.ts`: the tools `run_task`, `run_status` and
   `run_cancel`. `run_task` starts a detached `agentos run` process and returns
   the run id at once.
@@ -82,6 +82,7 @@ orchestrator:
   reviewer: codex         # must differ from the subtask's author; falls back to the other CLI
   verify: [npm test, npx tsc --noEmit]
   minFreeMemoryMb: 1500
+  link: [node_modules]    # folders linked from the checkout into each worktree (deps for verify)
 ```
 
 The whole block is optional. When it is missing, `agentos run` stops with a
@@ -122,8 +123,9 @@ run goes to `needs_human`.
 3. **Work.** The scheduler starts ready subtasks in their own worktrees. Each
    runner gets the subtask prompt, the plan summary, and "commit your work on
    this branch". Every runner event is appended to `events.jsonl`.
-4. **Integrate.** Subtask branches merge into the run branch in dependency
-   order. On a conflict, a fixer runner resolves it in the run worktree. If
+4. **Integrate.** Each subtask branch merges into the run branch as soon as
+   it finishes (merges are serialized), so a dependent subtask starts from its
+   dependencies' code. On a conflict, a fixer runner resolves it in the run worktree. If
    that fails, the run goes to `needs_human`.
 5. **Verify.** The run executes the `verify` commands. Then the reviewer, a
    different CLI from the author, returns
@@ -132,7 +134,8 @@ run goes to `needs_human`.
    high/medium finding exists. The author runner gets the failures and
    findings and commits, then the run goes back to step 5. It stops after
    `maxFixRounds`, then goes to `needs_human` with the last report.
-7. **PR.** If the default branch moved, rebase first (fixer on conflict).
+7. **PR.** If the default branch moved, merge the new base into the run
+   branch first (same conflict fixer as step 4).
    Then:
    - Secret-scan the diff.
    - Push the run branch.
