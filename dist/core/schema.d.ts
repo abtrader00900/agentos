@@ -116,6 +116,23 @@ export declare const agentConfigSchema: z.ZodObject<{
     }>, "many">>;
     /** Community skill registry index (https URL, file:// path, or local path) */
     skillRegistry: z.ZodOptional<z.ZodString>;
+    /** When doctor/sync call injected context stale */
+    staleAfter: z.ZodDefault<z.ZodObject<{
+        /** the active handoff is older than this */
+        handoffDays: z.ZodDefault<z.ZodNumber>;
+        /** HEAD moved more than this many commits past the handoff's commit */
+        handoffCommits: z.ZodDefault<z.ZodNumber>;
+        /** a pinned memory fact was not updated for this long */
+        pinnedFactDays: z.ZodDefault<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        handoffDays: number;
+        handoffCommits: number;
+        pinnedFactDays: number;
+    }, {
+        handoffDays?: number | undefined;
+        handoffCommits?: number | undefined;
+        pinnedFactDays?: number | undefined;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     project: {
         name: string;
@@ -138,6 +155,11 @@ export declare const agentConfigSchema: z.ZodObject<{
         args: string[];
         env?: Record<string, string> | undefined;
     }[];
+    staleAfter: {
+        handoffDays: number;
+        handoffCommits: number;
+        pinnedFactDays: number;
+    };
     skillRegistry?: string | undefined;
 }, {
     project: {
@@ -162,6 +184,11 @@ export declare const agentConfigSchema: z.ZodObject<{
         env?: Record<string, string> | undefined;
     }[] | undefined;
     skillRegistry?: string | undefined;
+    staleAfter?: {
+        handoffDays?: number | undefined;
+        handoffCommits?: number | undefined;
+        pinnedFactDays?: number | undefined;
+    } | undefined;
 }>;
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AgentRule = z.infer<typeof ruleSchema>;

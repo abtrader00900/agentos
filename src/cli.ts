@@ -17,6 +17,8 @@ import type { HarnessName } from "./core/schema.js";
 import { VERSION } from "./version.js";
 
 const program = new Command();
+/** a repeatable option: --question a --question b → ["a", "b"] */
+const collect = (value: string, previous: string[]) => [...previous, value];
 
 program
   .name("agentos")
@@ -121,12 +123,23 @@ program
   .option("--to <harness>", `target harness: ${ALL_HARNESSES.join(" | ")} | any`)
   .option("--from <harness>", "source harness (auto-detected if omitted)")
   .option("--task <text>", "REQUIRED: what was being worked on + current state")
-  .option("--files <list>", "comma-separated files in progress")
-  .option("--decisions <list>", "comma-separated pending decisions")
-  .option("--questions <list>", "comma-separated open questions")
+  .option("--file <path>", "a file in progress (repeatable)", collect, [])
+  .option("--files <list>", "files in progress, separated by , or ;", collect, [])
+  .option("--decision <text>", "a pending decision (repeatable; commas stay inside it)", collect, [])
+  .option("--decisions <list>", "pending decisions, separated by ; or newlines", collect, [])
+  .option("--question <text>", "an open question (repeatable; commas stay inside it)", collect, [])
+  .option("--questions <list>", "open questions, separated by ; or newlines", collect, [])
   .option("--notes <text>", "free-form notes")
+  .option("--clear", "remove HANDOFF.md (finished work) so sync stops injecting it; bundles are kept")
   .action((opts) => {
-    try { handoff(opts); } catch (e) { fail(e); }
+    try {
+      handoff({
+        ...opts,
+        files: [...opts.file, ...opts.files],
+        decisions: [...opts.decision, ...opts.decisions],
+        questions: [...opts.question, ...opts.questions],
+      });
+    } catch (e) { fail(e); }
   });
 
 program

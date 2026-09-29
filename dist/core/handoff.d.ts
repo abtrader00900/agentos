@@ -24,19 +24,24 @@ export interface HandoffBundle {
     pendingDecisions: string[];
     openQuestions: string[];
     notes: string;
+    /** updatedAt: absent in bundles written before 0.2.2 */
     memory: {
         topic: string;
         key: string;
         value: string;
         pinned: boolean;
+        updatedAt?: string;
     }[];
+    /** head: the full commit the handoff was written at ("" before 0.2.2 or outside git) */
     git: {
         branch: string;
+        head: string;
         lastCommits: string[];
         status: string;
         diffStat: string;
     };
 }
+export declare function gitCapture(cwd: string, args: string[]): string;
 export declare function collectGitState(cwd: string): HandoffBundle["git"];
 export declare function exportHandoff(cwd: string, input: HandoffInput): HandoffBundle;
 export declare function bundleToMarkdown(bundle: HandoffBundle): string;
@@ -47,3 +52,18 @@ export declare function writeHandoff(cwd: string, bundle: HandoffBundle): {
 };
 export declare function latestHandoffDir(cwd: string): string | null;
 export declare function importHandoff(bundlePath: string): HandoffBundle;
+export declare const HANDOFF_FIX = "Finished? Run: agentos handoff --clear, then agentos sync. Still in progress? Write a fresh one: agentos handoff --task \"...\"";
+/**
+ * Staleness of the handoff sync injects into every rule file (the root HANDOFF.md): days since
+ * it was written and commits since its HEAD. Nobody refreshed the ERP's, and it kept telling
+ * every new chat to do work finished days earlier. null when there is no HANDOFF.md.
+ */
+export declare function handoffStaleness(cwd: string, limits: {
+    handoffDays: number;
+    handoffCommits: number;
+}): {
+    stale: boolean;
+    detail: string;
+} | null;
+/** Stop injecting a finished handoff. Its bundle (and markdown copy) stay in .agentos/handoffs/. */
+export declare function clearHandoff(cwd: string): boolean;

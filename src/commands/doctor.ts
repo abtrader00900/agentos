@@ -1,10 +1,15 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
 import { detectDrift } from "../core/manifest.js";
+import { gitCapture, handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot } from "../core/skills.js";
-import { PKG } from "./init.js";
+import { PKG, VERSION } from "../version.js";
+
+/** the generated files that start MCP servers */
+const MCP_FILES = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json", ".agents/mcp_config.json"];
 
 /**
  * FR-2.4: doctor — health checks with actionable fixes.
@@ -77,14 +82,53 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
     }
   }
 
+  // 4b. generated MCP files run the agentos version of this CLI (npx caches an unversioned spec forever)
+  const specRe = new RegExp(`"${PKG.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?:@([^"]*))?"`, "g");
+  const pins: string[] = [];
+  const off: string[] = [];
+  for (const f of MCP_FILES) {
+    const abs = path.join(cwd, f);
+    if (!existsSync(abs)) continue;
+    for (const [, v] of readFileSync(abs, "utf8").matchAll(specRe)) {
+      pins.push(f);
+      if (v !== VERSION) off.push(`${f} runs ${v ?? "unpinned"}`);
+    }
+  }
+  if (off.length) {
+    const why = off.some((o) => o.endsWith("unpinned")) ? " (npx keeps running whichever version it cached first for an unpinned spec)" : "";
+    add({
+      name: "mcp:version", status: "warn",
+      detail: `${[...new Set(off)].join(", ")} — this CLI is ${VERSION}${why}`,
+      fix: "Run: agentos sync (it pins the version of the CLI you run; a version written in agent.config.yaml mcpServers stays as written)",
+    });
+  } else if (pins.length) {
+    add({ name: "mcp:version", status: "pass", detail: `generated MCP configs run ${PKG}@${VERSION}` });
+  }
+
   // 5. memory
   const memDb = path.join(cwd, ".agentos", "memory.json");
   if (existsSync(memDb)) {
     // read it directly: opening a MemoryStore would quarantine a corrupt file as a side effect
     try {
       const data = JSON.parse(readFileSync(memDb, "utf8")) as { facts?: unknown };
-      const facts = Array.isArray(data?.facts) ? data.facts.length : 0;
-      add({ name: "memory", status: "pass", detail: `${facts} facts, ${(statSync(memDb).size / 1024).toFixed(1)} KB` });
+      const facts = (Array.isArray(data?.facts) ? data.facts : []) as { topic?: string; key?: string; pinned?: number; updated_at?: string }[];
+      add({ name: "memory", status: "pass", detail: `${facts.length} facts, ${(statSync(memDb).size / 1024).toFixed(1)} KB` });
+
+      // pinned facts ride along in every handoff snapshot — one reality moved past misleads every chat
+      const days = config.staleAfter.pinnedFactDays;
+      const pinned = facts.filter((f) => f?.pinned);
+      const cutoff = Date.now() - days * 864e5;
+      const stale = pinned.filter((f) => !(Date.parse(f.updated_at ?? "") >= cutoff));
+      if (stale.length) {
+        add({
+          name: "memory:pinned", status: "warn",
+          detail: `${stale.length} pinned fact(s) not updated in ${days}+ days: ` +
+            stale.map((f) => `[${f.topic}/${f.key}] ${String(f.updated_at ?? "?").slice(0, 10)}`).join(", "),
+          fix: "Still true? Re-store it with memory_store (that updates its date). Changed? Store the new value, or memory_forget it.",
+        });
+      } else if (pinned.length) {
+        add({ name: "memory:pinned", status: "pass", detail: `${pinned.length} pinned, all updated within ${days} days` });
+      }
     } catch (e) {
       add({ name: "memory", status: "fail", detail: `unreadable: ${(e as Error).message.split("\n")[0]}`, fix: "Move .agentos/memory.json aside (keep it for recovery); memory starts fresh on next MCP use" });
     }
@@ -116,18 +160,63 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
     }
   }
 
-  // 7. handoff freshness
-  const rootMd = path.join(cwd, "HANDOFF.md");
-  if (existsSync(rootMd)) {
-    const ageH = (Date.now() - statSync(rootMd).mtimeMs) / 3.6e6;
-    if (ageH > 24) {
-      add({ name: "handoff", status: "warn", detail: `HANDOFF.md is ${Math.floor(ageH)}h old`, fix: "Stale context — re-run: agentos handoff, or delete HANDOFF.md if consumed" });
+  // 7. handoff freshness — sync injects HANDOFF.md into every rule file
+  const handoff = handoffStaleness(cwd, config.staleAfter);
+  if (handoff) {
+    add(handoff.stale
+      ? { name: "handoff", status: "warn", detail: handoff.detail, fix: HANDOFF_FIX }
+      : { name: "handoff", status: "pass", detail: handoff.detail });
+  }
+
+  // 8. Codex reads .codex/config.toml (the MCP servers) only in trusted projects. Trust is a
+  // security setting that belongs to the user: report it, never write it.
+  const codexHome = process.env.CODEX_HOME || path.join(homedir(), ".codex");
+  if (existsSync(path.join(cwd, ".codex", "config.toml")) && existsSync(codexHome)) {
+    const globalToml = path.join(codexHome, "config.toml");
+    const trusted = existsSync(globalToml) ? trustedCodexProjects(readFileSync(globalToml, "utf8")) : [];
+    // Codex keys trust by the git repository root (the main checkout, for a worktree), else the folder
+    const commonDir = gitCapture(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    const roots = [commonDir && path.dirname(commonDir), gitCapture(cwd, ["rev-parse", "--show-toplevel"]), cwd].filter(Boolean);
+    if (roots.some((r) => trusted.some((t) => sameCodexPath(t, r)))) {
+      add({ name: "codex:trust", status: "pass", detail: "project is trusted — Codex loads .codex/config.toml" });
     } else {
-      add({ name: "handoff", status: "pass", detail: `${Math.floor(ageH)}h old` });
+      const root = path.resolve(roots[0]);
+      const key = process.platform === "win32" ? root.toLowerCase() : root;
+      add({
+        name: "codex:trust", status: "warn",
+        detail: "Codex ignores .codex/config.toml (the agentos MCP servers) until this project is trusted",
+        fix: `Open ${root} in Codex and choose to trust it when asked (Codex app: add it as a project; CLI: run codex there). ` +
+          `agentos does not change trust settings. By hand: add [projects.'${key}'] with trust_level = "trusted" to ${globalToml}`,
+      });
     }
   }
 
   return report(checks, options);
+}
+
+/** project paths with trust_level = "trusted" in Codex's config.toml ([projects.'<path>'] or [projects."<path>"] tables) */
+export function trustedCodexProjects(toml: string): string[] {
+  const out: string[] = [];
+  let project: string | null = null;
+  for (const line of toml.split(/\r?\n/)) {
+    const header = /^\s*\[\s*projects\s*\.\s*(?:'([^']*)'|"((?:[^"\\]|\\.)*)")\s*\]\s*(#.*)?$/.exec(line);
+    if (header) {
+      try { project = header[1] ?? JSON.parse(`"${header[2]}"`); } catch { project = null; }
+    } else if (/^\s*\[/.test(line)) {
+      project = null;
+    } else if (project !== null && /^\s*trust_level\s*=\s*["']trusted["']/.test(line)) {
+      out.push(project);
+    }
+  }
+  return out;
+}
+
+/** Codex lower-cases project keys on Windows (d:\madina electric yasir\…); elsewhere paths compare exactly */
+export function sameCodexPath(a: string, b: string, platform: string = process.platform): boolean {
+  const norm = platform === "win32"
+    ? (p: string) => path.win32.resolve(p.replace(/^\\\\\?\\/, "")).replace(/\\+$/, "").toLowerCase()
+    : (p: string) => path.posix.resolve(p).replace(/(.)\/+$/, "$1");
+  return norm(a) === norm(b);
 }
 
 /**

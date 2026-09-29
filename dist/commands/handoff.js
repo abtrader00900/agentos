@@ -1,12 +1,18 @@
 import path from "node:path";
-import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown } from "../core/handoff.js";
+import { exportHandoff, writeHandoff, importHandoff, latestHandoffDir, bundleToMarkdown, clearHandoff } from "../core/handoff.js";
 import { ALL_HARNESSES } from "../core/schema.js";
-function splitList(s) {
-    return s ? s.split(",").map((x) => x.trim()).filter(Boolean) : [];
+function splitList(s, sep) {
+    return [s ?? []].flat().flatMap((x) => x.split(sep)).map((x) => x.trim()).filter(Boolean);
 }
 const VALID = [...ALL_HARNESSES, "any"];
 export function handoff(options = {}) {
     const cwd = options.cwd ?? process.cwd();
+    if (options.clear) {
+        console.log(clearHandoff(cwd)
+            ? "✓ HANDOFF.md removed (its bundle stays in .agentos/handoffs/).\nNext: agentos sync — drops the handoff from the rule files."
+            : "No HANDOFF.md — nothing to clear.");
+        return;
+    }
     for (const [flag, value] of [["--to", options.to], ["--from", options.from]]) {
         if (value !== undefined && !VALID.includes(value)) {
             throw new Error(`Unknown harness "${value}" for ${flag}. Valid: ${VALID.join(", ")}`);
@@ -18,9 +24,9 @@ export function handoff(options = {}) {
     }
     const bundle = exportHandoff(cwd, {
         task: options.task,
-        filesInProgress: splitList(options.files),
-        pendingDecisions: splitList(options.decisions),
-        openQuestions: splitList(options.questions),
+        filesInProgress: splitList(options.files, /[,;\n]/),
+        pendingDecisions: splitList(options.decisions, /[;\n]/),
+        openQuestions: splitList(options.questions, /[;\n]/),
         notes: options.notes,
         fromHarness: options.from ?? detectHarness(),
         toHarness: options.to ?? "any",

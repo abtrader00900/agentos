@@ -4,7 +4,7 @@
 
 Ek `agent.config.yaml` → Claude Code, Codex, Antigravity, Cursor, Windsurf — 5 harnesses ke configs, MCP tools, aur shared memory. API ka kharcha zero, har project mein same brain.
 
-> Status: **v0.2.1** — all 4 milestones + Phase 5 shipped, two full audit rounds (see CHANGELOG.md), CI green on Linux + Windows. See `RFC/` for the handoff protocol spec.
+> Status: **v0.2.2** — all 4 milestones + Phase 5 shipped, two full audit rounds (see CHANGELOG.md), CI green on Linux + Windows. See `RFC/` for the handoff protocol spec.
 
 ![AgentOS demo: install → handoff → doctor](docs/images/demo.gif)
 
@@ -31,6 +31,18 @@ agentos doctor      # health check
 
 From source: `npm install && npm test`, dev CLI: `npx tsx src/cli.ts <cmd>`.
 
+### Upgrading
+
+`agentos sync` pins the MCP servers it writes to its own version (`npx -y @basit0090/agent-os@0.2.2 mcp memory`) — npx caches an unversioned spec and would keep running whichever version it fetched first. So after a new release:
+
+```bash
+npm install -g @basit0090/agent-os@latest   # or run it once: npx -y @basit0090/agent-os@latest sync
+agentos sync                                # rewrites .mcp.json, .codex/config.toml, … with the new version
+agentos doctor                              # "mcp:version" warns if a generated config still runs another version
+```
+
+Then restart the harness (or reconnect its MCP servers) so it starts the new version.
+
 Adopting agentos in a project that already has a `CLAUDE.md` / `AGENTS.md`? `install` refuses to overwrite them — move their content into `agent.config.yaml`, then `agentos install --force` (the originals are kept as `<file>.bak`).
 
 ### agent.config.yaml
@@ -51,14 +63,20 @@ skills:
 mcpServers:                            # what `agentos init` generates
   - name: memory
     command: npx
-    args: ["-y", "@basit0090/agent-os", "mcp", "memory"]
+    args: ["-y", "@basit0090/agent-os", "mcp", "memory"]   # sync writes @basit0090/agent-os@<its version>
   - name: supersearch
     command: npx
     args: ["-y", "@basit0090/agent-os", "mcp", "supersearch"]
   - name: codegraph
     command: npx
     args: ["-y", "@basit0090/agent-os", "mcp", "codegraph"]
+staleAfter:                            # optional — when doctor/sync call context stale (defaults shown)
+  handoffDays: 3                       # HANDOFF.md older than this
+  handoffCommits: 20                   # HEAD moved more than this past the handoff's commit
+  pinnedFactDays: 14                   # a pinned memory fact not updated for this long
 ```
+
+Leave the version out of `agent.config.yaml`: `sync` pins the servers to the CLI that runs it. A version you do write there (`@basit0090/agent-os@0.2.1`) is kept as written.
 
 ### Commands
 
@@ -70,9 +88,10 @@ mcpServers:                            # what `agentos init` generates
 | `agentos sync --force` | Drifted / pehle se maujood files overwrite (purani copy `<file>.bak`) |
 | `agentos sync --only codex` | Sirf ek harness sync (baqi ka drift tracking barqarar) |
 | `agentos status [--json]` | Project, harnesses, drift, memory status |
-| `agentos doctor [--json]` | Health check — config, harness files, drift, MCP commands, memory, skills, handoff |
+| `agentos doctor [--json]` | Health check — config, harness files, drift, MCP commands + pinned version, memory (stale pinned facts), skills, handoff freshness, Codex trust |
 | `agentos skill list \| install \| search \| test` | Skills — bundled, registry, `owner/repo[#dir]`, git URL, ya local path |
 | `agentos handoff --to <harness> --task "..."` | Context bundle export (task, decisions, memory, git) |
+| `agentos handoff --clear` | Kaam khatam: `HANDOFF.md` hatao (bundle `.agentos/handoffs/` mein rehta hai), phir `agentos sync` |
 | `agentos learn [--apply]` | Git history se rule suggestions |
 | `agentos mcp memory \| supersearch \| codegraph` | MCP servers (stdio — har harness ke liye) |
 
@@ -108,7 +127,7 @@ CLAUDE.md      AGENTS.md    Antigravity   .cursor/   .windsurf/
 | Harness | Generated | Note |
 |---|---|---|
 | Claude Code | `CLAUDE.md`, `.mcp.json` | Project-scoped MCP servers; Claude asks once before enabling them. |
-| Codex | `AGENTS.md`, `.codex/config.toml` | Codex only reads a project's `.codex/config.toml` when the project is **trusted** (answer the trust prompt, or set `trust_level = "trusted"` for it in `~/.codex/config.toml`). Servers get `startup_timeout_sec = 120` — the first `npx -y` run downloads the package. |
+| Codex | `AGENTS.md`, `.codex/config.toml` | Codex only reads a project's `.codex/config.toml` when the project is **trusted** (answer the trust prompt, or set `trust_level = "trusted"` for it in `~/.codex/config.toml`). `agentos doctor` warns when the trust entry is missing — it never writes it; trust is your call. Servers get `startup_timeout_sec = 120` — the first `npx -y` run downloads the package. |
 | Antigravity | `.agents/rules/agentos.md`, `.agents/mcp_config.json` | Rule has `trigger: always_on` frontmatter, as Antigravity requires. |
 | Cursor | `.cursor/rules/agentos.mdc`, `.cursor/mcp.json` | `alwaysApply: true`. |
 | Windsurf | `.windsurf/rules/agentos.md` | `trigger: always_on` frontmatter (without it a rule is manual-only). Windsurf has **no project-level MCP file**: add the servers from `.mcp.json` to Windsurf's global `mcp_config.json` yourself. |
@@ -185,11 +204,18 @@ Switch agents mid-task with zero re-explaining:
 
 ```bash
 agentos handoff --to codex --task "Invoice PDF export half-done: queue job done, blade template missing" \
-  --files "app/Jobs/GenerateInvoicePdf.php" --decisions "queue vs sync pending"
+  --file app/Jobs/GenerateInvoicePdf.php \
+  --decision "queue vs sync, pending" \
+  --question "Should the refund hit the same ledger entry, or a new one?"
 agentos sync   # HANDOFF.md auto-injected into all 5 harness configs
+
+# work finished:
+agentos handoff --clear && agentos sync
 ```
 
-The receiving agent gets: task state, files in progress, pending decisions, open questions, memory snapshot, git state. Spec: `RFC/handoff-protocol.md`.
+`--file`, `--decision` and `--question` repeat, one item each. The list forms still work: `--files a.ts,b.ts` splits on `,` or `;`; `--decisions` and `--questions` split on `;` or newlines only, so a sentence with commas stays one item (before 0.2.2 they split on every comma).
+
+The receiving agent gets: task state, files in progress, pending decisions, open questions, memory snapshot (each fact with its last-updated date), git state. `doctor` and `sync` warn once the handoff is older than 3 days or HEAD moved more than 20 commits past it (`staleAfter`). Spec: `RFC/handoff-protocol.md`.
 
 ## Storage
 

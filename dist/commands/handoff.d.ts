@@ -4,10 +4,14 @@ export interface HandoffOptions {
     to?: string;
     from?: string;
     task?: string;
-    files?: string;
-    decisions?: string;
-    questions?: string;
+    /** a string or repeated flags; each value is split on , ; and newlines */
+    files?: string | string[];
+    /** decisions and questions are sentences: split on ; and newlines only — a comma stays inside an item */
+    decisions?: string | string[];
+    questions?: string | string[];
     notes?: string;
+    /** remove HANDOFF.md so sync stops injecting it */
+    clear?: boolean;
 }
 export declare function handoff(options?: HandoffOptions): void;
 export declare function handoffShow(options?: {

@@ -1,13 +1,8 @@
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { PKG } from "../version.js";
 
-/**
- * Published npm name. The generated config runs the MCP servers through
- * `npx -y <PKG>`, so this must match package.json exactly -- "agentos" is an
- * unrelated placeholder package owned by someone else on the public registry.
- */
-export const PKG = "@basit0090/agent-os";
-
+// No version in the template: sync pins the servers to the CLI that runs it (generators/shared.ts).
 const TEMPLATE = `# AgentOS project config — single source of truth for all agent harnesses.
 # Docs: https://github.com/abtrader00900/agentos
 

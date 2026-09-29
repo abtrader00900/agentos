@@ -1,4 +1,5 @@
 import { rulesForHarness } from "../core/schema.js";
+import { PKG, VERSION } from "../version.js";
 /** A YAML double-quoted scalar (JSON strings are valid YAML): "my: app" must not break frontmatter. */
 export const yamlString = (s) => JSON.stringify(s);
 // the question each tool answers: agents only reach for a tool when told when to use it (bench/RESULTS.md).
@@ -29,10 +30,20 @@ export function ruleBody(config, harness, toolsNote) {
     }
     return lines;
 }
+/**
+ * config.mcpServers with agentos's own package pinned to the CLI that generates the file.
+ * npx caches by spec: an unversioned (= @latest) `npx -y @basit0090/agent-os` kept running
+ * whichever version it fetched first — 0.2.0 long after 0.2.1 shipped. Other servers, and an
+ * explicit version in agent.config.yaml, are written as they are.
+ */
+export function mcpServers(config) {
+    const unpinned = new Set([PKG, `${PKG}@latest`]);
+    return config.mcpServers.map((s) => ({ ...s, args: s.args.map((a) => (unpinned.has(a) ? `${PKG}@${VERSION}` : a)) }));
+}
 /** { mcpServers: { name: { command, args, env? } } } — the shape Claude Code, Cursor and Antigravity read. */
 export function mcpServersJson(config) {
     const mcp = {
-        mcpServers: Object.fromEntries(config.mcpServers.map((s) => [s.name, { command: s.command, args: s.args, ...(s.env ? { env: s.env } : {}) }])),
+        mcpServers: Object.fromEntries(mcpServers(config).map((s) => [s.name, { command: s.command, args: s.args, ...(s.env ? { env: s.env } : {}) }])),
     };
     return JSON.stringify(mcp, null, 2) + "\n";
 }
