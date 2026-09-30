@@ -1,5 +1,7 @@
-import { existsSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { preflight as realPreflight } from "../commands/run.js";
 import { listLessons, safetyCheck } from "../learning/lessons.js";
 import { listDrafts, readDraft } from "../learning/skilldraft.js";
@@ -164,9 +166,28 @@ function runDiff(root: string, id: string): { diff: string; truncated: boolean }
   for (const ref of [run.base, run.branch]) {
     if (!tryGit(root, ["rev-parse", "--verify", "--quiet", ref]).ok) throw new Http(404, `no diff for ${id}: ${ref} is gone`);
   }
-  const out = tryGit(root, ["diff", `${run.base}..${run.branch}`]);
-  if (!out.ok) throw new Http(500, `git diff failed: ${out.out}`);
-  return { diff: out.out.slice(0, DIFF_CAP), truncated: out.out.length > DIFF_CAP };
+  const dir = mkdtempSync(path.join(tmpdir(), "agentos-diff-"));
+  const file = path.join(dir, "diff");
+  try {
+    const out = tryGit(root, ["diff", `--output=${file}`, `${run.base}..${run.branch}`]);
+    if (!out.ok) throw new Http(500, `git diff failed: ${out.out}`);
+    const fd = openSync(file, "r");
+    try {
+      const decoder = new StringDecoder("utf8");
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let text = "";
+      while (text.length <= DIFF_CAP) {
+        const n = readSync(fd, buffer, 0, buffer.length, null);
+        if (!n) { text += decoder.end(); break; }
+        text += decoder.write(buffer.subarray(0, n));
+      }
+      return { diff: text.slice(0, DIFF_CAP), truncated: text.length > DIFF_CAP };
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Anchored patterns: /runs/:id must not swallow /runs/:id/diff. */
