@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { dropLock, withLock } from "../src/core/jsonstore.js";
@@ -68,6 +68,22 @@ describe("dropLock", () => {
 
     expect(readFileSync(lock, "utf8")).toBe("other-process-token");
     expect(existsSync(taken)).toBe(false);
+  });
+
+  it("keeps a lock it could not hand back instead of deleting it", () => {
+    // link back fails for a reason other than the path being taken: the lock's own
+    // directory is gone, so the file we took is all that is left of a live lock
+    const held = path.join(dir, "held");
+    const kept = path.join(dir, "store.json.lock.mine");
+    mkdirSync(held);
+    writeFileSync(path.join(held, "store.json.lock"), "other-process-token");
+
+    dropLock(path.join(held, "store.json.lock"), kept, () => {
+      rmSync(held, { recursive: true, force: true });
+      return false;
+    });
+
+    expect(readFileSync(kept, "utf8")).toBe("other-process-token");
   });
 
   it("hands back a lock that turns out to be someone else's", () => {

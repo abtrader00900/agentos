@@ -62,7 +62,14 @@ export function dropLock(lock: string, to: string, mine: (taken: string) => bool
   let ours = false;
   try { ours = mine(to); } catch { /* unreadable: treat as someone else's */ }
   if (!ours) {
-    try { linkSync(to, lock); } catch { /* the path holds a live lock now */ }
+    try {
+      retrying(() => linkSync(to, lock));
+    } catch (e) {
+      // EEXIST means the path holds a live lock again, so the file we took is obsolete.
+      // Any other failure (no hard links on this filesystem, I/O error) means we could
+      // not give the lock back — keep the file rather than delete another holder's lock.
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return;
+    }
   }
   try { unlinkSync(to); } catch { /* best effort */ }
 }
