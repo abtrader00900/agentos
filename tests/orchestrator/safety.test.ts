@@ -28,4 +28,8 @@ describe("redact", () => {
     const env = { API_KEY: "s3cr3t-value", DB_PASSWORD: "hunter22", PATH: "/usr/bin", SHORT_TOKEN: "abc" };
     expect(redact("key=s3cr3t-value pw=hunter22 path=/usr/bin t=abc", env)).toBe("key=*** pw=*** path=/usr/bin t=abc");
   });
+
+  it("also masks secret patterns that are in no environment variable", () => {
+    expect(redact(`t=${GH} k=${AWS} ok`, {})).toBe("t=*** k=*** ok");
+  });
 });

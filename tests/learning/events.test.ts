@@ -65,6 +65,19 @@ describe("run events for learning", { timeout: 60_000 }, () => {
     expect(events("ev4").find((e) => e.type === "planner-retry").error).toContain("no JSON object");
   });
 
+  it("masks a pattern secret (a GitHub token an agent or a failing test printed) everywhere in events.jsonl", async () => {
+    const token = "gh" + "p_" + "A".repeat(36); // built at runtime: this file holds no token-shaped string
+    const verify = [`node -e "console.log('gh'+'p_'+'A'.repeat(36)); process.exit(1)"`];
+    const failing: Runner = async (req) => { req.onLine?.(`using ${token}`); return { ok: false, output: `Error: bad token ${token}\n`, rateLimited: false, timedOut: false }; };
+    const ok: Runner = async (req) => { req.onLine?.(`token ${token}`); creates(req.cwd, req.prompt); return reply(); };
+    await startRun(repo.root, "t", cfg({ verify, maxFixRounds: 0 }), deps(planner(planOf("a")), failing, ok), "ev6");
+    const raw = readFileSync(path.join(runDir(repo.root, "ev6"), "events.jsonl"), "utf8");
+    expect(raw).toContain("FAILED"); // the verify output was logged
+    expect(raw).toMatch(/"type":"fallback"/);
+    expect(raw).toMatch(/"type":"agent"/);
+    expect(raw).not.toMatch(/gh[pousr]_[A-Za-z0-9]{36,}/);
+  });
+
   it("redacts secrets from the planner-retry and fallback events", async () => {
     const secret = "s3cr3t-value-123456";
     process.env.AGENTOS_TEST_TOKEN = secret;
