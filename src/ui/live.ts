@@ -55,7 +55,7 @@ export function liveEvents(
   res.writeHead(200, { ...sec, "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 
   const file = path.join(dir, "events.jsonl");
-  const since = startFrom(url, req);
+  let since = startFrom(url, req);
   const buf = Buffer.allocUnsafe(CHUNK);
   let decoder = new StringDecoder("utf8");
   let offset = 0;
@@ -79,6 +79,7 @@ export function liveEvents(
         partial = "";
         decoder = new StringDecoder("utf8");
         seen = 0;
+        since = 0;
       }
       for (;;) {
         const n = readSync(fd, buf, 0, buf.length, offset);

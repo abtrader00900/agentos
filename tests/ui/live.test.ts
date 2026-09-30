@@ -55,7 +55,7 @@ describe("live events", () => {
 
   it("restarts at id 1 when the event log shrinks", async () => {
     setTimeout(() => writeFileSync(path.join(repo.root, ".agentos", "runs", "s1", "events.jsonl"), '{"type":"new"}\n'), 800);
-    const text = await stream(`/api/p/${pid}/runs/s1/events`, {}, (s) => s.includes('data: {"type":"new"}'));
+    const text = await stream(`/api/p/${pid}/runs/s1/events?since=2`, {}, (s) => s.includes('data: {"type":"new"}'));
     expect(text).toContain('id: 1\ndata: {"type":"new"}');
   });
 
