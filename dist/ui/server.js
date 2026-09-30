@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRoutes } from "./api.js";
+import { liveEvents } from "./live.js";
 const COOKIE = "agentos_ui";
 const MAX_BODY = 16 * 1024;
 /** No inline anything and no framing: the frontend is plain files from ui/. */
@@ -19,6 +20,7 @@ const TYPES = {
     ".svg": "image/svg+xml",
     ".json": "application/json; charset=utf-8",
 };
+const LIVE = /^\/api\/p\/([^/]+)\/runs\/([^/]+)\/events$/;
 const routes = [];
 /** Tasks 3-5 add their endpoints here so the security pipeline stays in one place. */
 export function route(method, pattern, handler) {
@@ -123,8 +125,16 @@ async function handle(opts, staticDir, server, req, res) {
             return sendJson(400, { error: "invalid JSON body" });
         }
     }
-    // 5. API.
+    // 5. API. The event stream owns its response, so it cannot be a route() handler,
+    //    but it still sits behind the Host check and the token like everything else.
     if (isApi) {
+        const live = method === "GET" ? LIVE.exec(url.pathname) : null;
+        if (live) {
+            const out = liveEvents(live[1], live[2], opts, url, req, res, SEC);
+            if (out)
+                return sendJson(out.status, out.json);
+            return;
+        }
         for (const r of routes) {
             if (r.method !== method)
                 continue;

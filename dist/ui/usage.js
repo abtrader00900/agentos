@@ -36,8 +36,7 @@ export function runUsage(root, runId) {
     const total = { inputTokens: 0, outputTokens: 0, byAgent: {} };
     try {
         const lines = readFileSync(path.join(runDir(root, runId), "events.jsonl"), "utf8").split("\n");
-        const events = [];
-        let hasUsageEvent = false;
+        let previousUsageAgent = null;
         for (const line of lines) {
             if (!line.trim())
                 continue;
@@ -45,36 +44,33 @@ export function runUsage(root, runId) {
                 const event = JSON.parse(line);
                 if (!event || typeof event !== "object")
                     continue;
-                events.push(event);
-                if (event.type === "usage")
-                    hasUsageEvent = true;
-            }
-            catch { /* malformed event lines are ignored */ }
-        }
-        for (const event of events) {
-            let usage = null;
-            if (hasUsageEvent && event.type === "usage") {
-                if (finite(event.inputTokens) && finite(event.outputTokens)) {
+                let usage = null;
+                const agent = typeof event.agent === "string" ? event.agent : null;
+                if (event.type === "usage" && agent && finite(event.inputTokens) && finite(event.outputTokens)) {
                     usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens };
                     if (finite(event.costUsd))
                         usage.costUsd = event.costUsd;
                 }
+                else if (event.type === "agent" && agent && agent !== previousUsageAgent && typeof event.line === "string") {
+                    usage = usageFromLine(event.line);
+                }
+                previousUsageAgent = event.type === "usage" && usage && agent ? agent : null;
+                if (!usage || !agent)
+                    continue;
+                total.inputTokens += usage.inputTokens;
+                total.outputTokens += usage.outputTokens;
+                const agentUsage = total.byAgent[agent] ?? { inputTokens: 0, outputTokens: 0 };
+                agentUsage.inputTokens += usage.inputTokens;
+                agentUsage.outputTokens += usage.outputTokens;
+                if (usage.costUsd !== undefined) {
+                    total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+                    agentUsage.costUsd = (agentUsage.costUsd ?? 0) + usage.costUsd;
+                }
+                total.byAgent[agent] = agentUsage;
             }
-            else if (!hasUsageEvent && event.type === "agent" && typeof event.line === "string") {
-                usage = usageFromLine(event.line);
+            catch {
+                previousUsageAgent = null;
             }
-            if (!usage || typeof event.agent !== "string")
-                continue;
-            total.inputTokens += usage.inputTokens;
-            total.outputTokens += usage.outputTokens;
-            const agent = total.byAgent[event.agent] ?? { inputTokens: 0, outputTokens: 0 };
-            agent.inputTokens += usage.inputTokens;
-            agent.outputTokens += usage.outputTokens;
-            if (usage.costUsd !== undefined) {
-                total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
-                agent.costUsd = (agent.costUsd ?? 0) + usage.costUsd;
-            }
-            total.byAgent[event.agent] = agent;
         }
     }
     catch { /* missing, unreadable, or invalid run data has zero usage */ }
