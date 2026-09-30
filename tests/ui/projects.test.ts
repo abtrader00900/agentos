@@ -27,9 +27,21 @@ describe("project registry", () => {
   it("ids are stable per path and resolve only through the registry", () => {
     const a = tmp("proj-b-");
     expect(projectId(a)).toBe(projectId(a));
-    const p = registerProject(a, home);
+    const p = registerProject(a, home)!;
     expect(getProject(p.id, home)?.path).toBe(real(a));
     expect(getProject("nope-0000", home)).toBeUndefined();
+  });
+
+  it("does not register agentos run worktrees", () => {
+    const a = tmp("proj-worktree-");
+    registerProject(a, home);
+    const worktree = path.join(a, ".agentos", "runs", "abc", "wt", "run");
+    const upperWorktree = path.join(a, ".AGENTOS", "RUNS", "def", "wt", "run");
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(upperWorktree, { recursive: true });
+    expect(registerProject(worktree, home)).toBeUndefined();
+    expect(registerProject(upperWorktree, home)).toBeUndefined();
+    expect(listProjects(home)).toHaveLength(1);
   });
 
   it("registers the same existing folder through different spellings once", () => {
@@ -43,7 +55,7 @@ describe("project registry", () => {
 
   it("marks a deleted folder missing; remove drops the entry", () => {
     const a = tmp("proj-c-");
-    const p = registerProject(a, home);
+    const p = registerProject(a, home)!;
     rmSync(a, { recursive: true, force: true });
     expect(listProjects(home)[0].missing).toBe(true);
     expect(removeProject(p.id, home)).toBe(true);

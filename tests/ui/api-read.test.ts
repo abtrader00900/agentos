@@ -18,7 +18,7 @@ const get = async (p: string) => { const r = await req(t.port, { path: p }); ret
 beforeEach(async () => {
   t = await startTestServer({ preflight: () => { throw new Error("agent.config.yaml has no orchestrator block"); } });
   repo = makeRepo();
-  pid = registerProject(repo.root, t.home).id;
+  pid = registerProject(repo.root, t.home)!.id;
 });
 afterEach(async () => { await t.close(); repo.cleanup(); });
 
