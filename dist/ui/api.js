@@ -58,12 +58,21 @@ function runOf(root, id) {
     catch {
         throw new Http(400, `invalid run id: ${id}`);
     }
+    let run;
     try {
-        return loadRun(root, id);
+        run = loadRun(root, id);
     }
     catch {
         throw new Http(404, `no such run: ${id}`);
     }
+    // state.json parses but says nothing useful: hand-edited or half-written, and
+    // the caller reads run.id/status/subtasks. That is the file's problem, not a
+    // server bug, so it reads as an unreadable run rather than a 500.
+    const r = run;
+    if (!r || typeof r !== "object" || Array.isArray(r) || r.id !== id || typeof r.status !== "string" || !Array.isArray(r.subtasks)) {
+        throw new Http(404, "unreadable run");
+    }
+    return run;
 }
 const noCounts = () => ({ running: 0, needsYou: 0, pendingLessons: 0, drafts: 0, week: { runs: 0, prs: 0, costUsd: 0 } });
 /**

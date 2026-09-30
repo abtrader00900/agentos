@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRoutes } from "./api.js";
+import { liveEvents } from "./live.js";
 
 /**
  * The dashboard's HTTP server.
@@ -47,6 +48,8 @@ const TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".json": "application/json; charset=utf-8",
 };
+
+const LIVE = /^\/api\/p\/([^/]+)\/runs\/([^/]+)\/events$/;
 
 const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> = [];
 
@@ -153,8 +156,15 @@ async function handle(opts: UiOptions, staticDir: string, server: http.Server, r
     }
   }
 
-  // 5. API.
+  // 5. API. The event stream owns its response, so it cannot be a route() handler,
+  //    but it still sits behind the Host check and the token like everything else.
   if (isApi) {
+    const live = method === "GET" ? LIVE.exec(url.pathname) : null;
+    if (live) {
+      const out = liveEvents(live[1], live[2], opts, url, req, res, SEC);
+      if (out) return sendJson(out.status, out.json);
+      return;
+    }
     for (const r of routes) {
       if (r.method !== method) continue;
       const m = r.pattern.exec(url.pathname);
