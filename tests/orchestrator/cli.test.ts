@@ -61,4 +61,28 @@ describe("agentos run / runs", () => {
   it("rejects path-like run ids", async () => {
     await expect(run("", { cwd: repo.root, status: "../x" })).rejects.toThrow("invalid run id");
   });
+
+  it("--limit keeps only the n newest runs", () => {
+    saveRun(repo.root, { ...seeded("old", "paused"), createdAt: "2026-01-01T00:00:00.000Z" });
+    saveRun(repo.root, { ...seeded("mid", "paused"), createdAt: "2026-01-02T00:00:00.000Z" });
+    saveRun(repo.root, { ...seeded("new", "paused"), createdAt: "2026-01-03T00:00:00.000Z" });
+    runs({ cwd: repo.root, limit: 2 });
+    const out = logs.join("\n");
+    expect(out).toContain("new");
+    expect(out).toContain("mid");
+    expect(out).not.toContain("old");
+  });
+
+  it("--limit applies to --json too", () => {
+    saveRun(repo.root, { ...seeded("j1", "paused"), createdAt: "2026-01-01T00:00:00.000Z" });
+    saveRun(repo.root, { ...seeded("j2", "paused"), createdAt: "2026-01-02T00:00:00.000Z" });
+    runs({ cwd: repo.root, json: true, limit: 1 });
+    const out = JSON.parse(logs.join("\n"));
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("j2");
+  });
+
+  it("rejects --limit 0", () => {
+    expect(() => runs({ cwd: repo.root, limit: 0 })).toThrow(/1 or more/);
+  });
 });
