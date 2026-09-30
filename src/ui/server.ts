@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRoutes } from "./api.js";
+import { actionRoutes, readRoutes } from "./api.js";
 import { liveEvents } from "./live.js";
 
 /**
@@ -59,6 +59,7 @@ export function route(method: string, pattern: RegExp, handler: RouteHandler): v
 }
 
 for (const r of readRoutes) route(r.method, r.pattern, r.handler);
+for (const r of actionRoutes) route(r.method, r.pattern, r.handler);
 
 /** Constant-time for equal lengths; timingSafeEqual throws on a length mismatch. */
 function sameToken(given: string, token: string): boolean {
