@@ -19,7 +19,8 @@ export type ApiHandler = (req: http.IncomingMessage, url: URL, body: unknown) =>
     status: number;
     json: unknown;
 }>;
-type RouteHandler = (m: RegExpMatchArray, url: URL, body: unknown) => Promise<{
+/** `routes` is module-global, so per-request options travel as an argument, not a closure. */
+export type RouteHandler = (m: RegExpMatchArray, url: URL, body: unknown, opts: UiOptions) => Promise<{
     status: number;
     json: unknown;
 }>;
@@ -33,4 +34,3 @@ export declare function startUi(opts: UiOptions & {
     port: number;
     url: string;
 }>;
-export {};

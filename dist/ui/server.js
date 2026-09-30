@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readRoutes } from "./api.js";
 const COOKIE = "agentos_ui";
 const MAX_BODY = 16 * 1024;
 /** No inline anything and no framing: the frontend is plain files from ui/. */
@@ -23,6 +24,8 @@ const routes = [];
 export function route(method, pattern, handler) {
     routes.push({ method: method.toUpperCase(), pattern, handler });
 }
+for (const r of readRoutes)
+    route(r.method, r.pattern, r.handler);
 /** Constant-time for equal lengths; timingSafeEqual throws on a length mismatch. */
 function sameToken(given, token) {
     const a = Buffer.from(given);
@@ -128,7 +131,7 @@ async function handle(opts, staticDir, server, req, res) {
             const m = r.pattern.exec(url.pathname);
             if (!m)
                 continue;
-            const out = await r.handler(m, url, body);
+            const out = await r.handler(m, url, body, opts);
             return sendJson(out.status, out.json);
         }
         return notFound();

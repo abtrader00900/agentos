@@ -21,6 +21,7 @@ import {
   mergeBranch, mergeInProgress, abortMerge, removeWorktree,
 } from "./workspace.js";
 import { prBody, prTitle } from "./report.js";
+import { usageFromLine } from "../ui/usage.js";
 
 export interface EngineDeps {
   runners: Record<AgentName, { read: Runner; write: Runner }>;
@@ -255,7 +256,11 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
       return await c.deps.runners[a][mode]({
         ...req,
         onSpawn: (p) => { pid = p; c.live.add(p); },
-        onLine: (line) => logEvent(c.root, c.s.id, { type: "agent", agent: a, line: redact(line).slice(0, 4000) }),
+        onLine: (line) => {
+          const u = usageFromLine(line);
+          if (u) logEvent(c.root, c.s.id, { type: "usage", agent: a, ...u });
+          logEvent(c.root, c.s.id, { type: "agent", agent: a, line: redact(line).slice(0, 4000) });
+        },
       });
     } finally {
       c.live.delete(pid);
