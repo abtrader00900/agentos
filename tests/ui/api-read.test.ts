@@ -75,4 +75,17 @@ describe("read API", () => {
     saveRun(repo.root, run("d2", { base }));
     expect((await get(`/api/p/${pid}/runs/d2/diff`)).status).toBe(404);
   });
+
+  it("404s a state.json that parses but is not a run", async () => {
+    const bogus = (id: string, text: string) => {
+      mkdirSync(path.join(repo.root, ".agentos", "runs", id), { recursive: true });
+      writeFileSync(path.join(repo.root, ".agentos", "runs", id, "state.json"), text);
+    };
+    bogus("bad1", JSON.stringify({ id: "other", status: "working", subtasks: [] }));
+    bogus("bad2", "[1,2]");
+    bogus("bad3", JSON.stringify({ id: "bad3", status: "working" }));
+    for (const id of ["bad1", "bad2", "bad3"]) {
+      expect(await get(`/api/p/${pid}/runs/${id}`)).toEqual({ status: 404, json: { error: "unreadable run" } });
+    }
+  });
 });
