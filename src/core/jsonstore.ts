@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 /**
@@ -48,16 +49,21 @@ export function retrying<T>(fn: () => T): T {
 /**
  * Run fn while holding `${file}.lock`, so concurrent processes serialise a
  * read-modify-write instead of overwriting each other. A lock left behind by a
- * process that died mid-write is cleared once it goes stale.
+ * process that died mid-write is cleared once it goes stale — so the lock file
+ * carries a token identifying its holder, and is only removed while it still
+ * holds ours (a slow holder must not delete the lock that took its place).
  */
 export function withLock<T>(file: string, fn: () => T): T {
   const lock = `${file}.lock`;
+  const token = randomUUID();
   mkdirSync(path.dirname(lock), { recursive: true });
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   let fd: number | undefined;
   for (let attempt = 0; fd === undefined; attempt++) {
     try {
-      fd = openSync(lock, "wx");
+      const opened = openSync(lock, "wx");
+      writeSync(opened, token); // stamped before we count as the holder
+      fd = opened;
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? "";
       if (!RETRYABLE.has(code)) throw e;
@@ -72,7 +78,8 @@ export function withLock<T>(file: string, fn: () => T): T {
     return fn();
   } finally {
     closeSync(fd);
-    try { unlinkSync(lock); } catch { /* best effort */ }
+    // gone, unreadable, or someone else's token: not ours to remove
+    try { if (readFileSync(lock, "utf8") === token) unlinkSync(lock); } catch { /* best effort */ }
   }
 }
 
