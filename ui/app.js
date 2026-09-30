@@ -276,17 +276,32 @@
     if (stale(seq)) return;
     if (!run) { clear(main); return; }
 
-    const ctx = { p: p, id: id, run: run, events: [], showAgent: false };
+    const ctx = { p: p, id: id, run: run, events: [], showAgent: false, seq: seq };
     clear(main);
-    main.appendChild(runHeader(ctx));
-    main.appendChild(stageBar(run));
-    main.appendChild(subtasksSection(run));
-    main.appendChild(verifySection(ctx));
-    const extra = [findingsSection(run), lessonsSection(run), planSection(run), prSection(run)];
-    for (const s of extra) if (s) main.appendChild(s);
+    ctx.summary = h("div", null);
+    main.appendChild(ctx.summary);
+    paintRun(ctx);
     main.appendChild(diffSection(ctx));
     main.appendChild(eventsSection(ctx));
     openStream(ctx);
+  }
+
+  function paintRun(ctx) {
+    const run = ctx.run;
+    clear(ctx.summary);
+    ctx.summary.appendChild(runHeader(ctx));
+    ctx.summary.appendChild(stageBar(run));
+    ctx.summary.appendChild(subtasksSection(run));
+    ctx.summary.appendChild(verifySection(ctx));
+    const extra = [findingsSection(run), lessonsSection(run), planSection(run), prSection(run)];
+    for (const s of extra) if (s) ctx.summary.appendChild(s);
+  }
+
+  async function refreshRun(ctx) {
+    const run = await api(runApi(ctx.p, ctx.id));
+    if (!run || stale(ctx.seq)) return;
+    ctx.run = run;
+    paintRun(ctx);
   }
 
   function runHeader(ctx) {
@@ -359,7 +374,7 @@
    */
   function verifySection(ctx) {
     ctx.verifyBox = h("div", null);
-    paintVerify(ctx, null);
+    paintVerify(ctx, ctx.verifyEvent || null);
     return section(L("run.verify"), ctx.verifyBox);
   }
 
@@ -498,8 +513,9 @@
       let e;
       try { e = JSON.parse(m.data); } catch (err) { return; }  // a half-written line is not an event
       if (!e || typeof e !== "object") return;
-      if (e.type === "verify") paintVerify(ctx, e);
+      if (e.type === "verify") { ctx.verifyEvent = e; paintVerify(ctx, e); }
       pushEvent(ctx, e);
+      if (e.type === "status" || e.type === "verify") refreshRun(ctx);
     };
   }
 
