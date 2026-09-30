@@ -12,6 +12,8 @@ export interface EngineDeps {
     onStatus?: (s: RunState) => void;
     /** PRD 2: lessons in prompts and learning after the run; absent = off */
     learning?: LearningConfig;
+    /** called with no argument when learning after the run starts, and with its outcome when it ends */
+    onLearning?: (learned?: "done" | "skipped" | "failed") => void;
 }
 /** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
 export declare function assertCleanCheckout(root: string): void;
@@ -19,6 +21,11 @@ export declare function assertCleanCheckout(root: string): void;
 export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string): Promise<RunState>;
 /** Continue a paused run, or one whose engine died mid-step. */
 export declare function resumeRun(root: string, id: string, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState>;
+/** Whether an engine holds the run's lock: "live" (its PID is running), "stale" (a dead engine's) or "free". */
+export declare function runLockState(root: string, id: string): {
+    state: "free" | "live" | "stale";
+    pid: number;
+};
 /** Ask a running engine to stop (it kills its own agents); a paused or dead run is marked at once. */
 export declare function cancelRun(root: string, id: string, waitMs?: number): Promise<RunState>;
 export declare function executeRun(root: string, s: RunState, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState>;

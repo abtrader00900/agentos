@@ -1,7 +1,7 @@
-import { type Fact } from "../mcp/memory/store.js";
+import { lessonKey, lessonStatus, type LessonStatus } from "./status.js";
+export { lessonKey, lessonStatus, type LessonStatus };
 export type Role = "planner" | "worker" | "reviewer" | "fixer";
 export declare const ROLES: readonly Role[];
-export type LessonStatus = "auto" | "pending" | "approved";
 export interface LessonMeta {
     status: LessonStatus;
     roles: Role[];
@@ -28,17 +28,13 @@ export declare const MAX_ACTIVE = 200;
 export declare const memoryFile: (root: string) => string;
 export declare const words: (s: string) => Set<string>;
 export declare function jaccard(a: string, b: string): number;
-export declare const lessonKey: (text: string) => string;
+/** longer text is rejected unchecked: several safety regexes backtrack quadratically on hostile input */
+export declare const MAX_CHECKED = 20000;
 /**
  * Lessons are written by a model that read repo content, so they can carry an injection. A secret is
  * dropped ("reject"). A URL, a pipe into a shell and the like can never be auto ("pending").
  */
 export declare function safetyCheck(text: string): "ok" | "pending" | "reject";
-/**
- * A lesson fact's status. agentos always stores a lesson under lessonKey(text); another key means the text
- * was swapped (memory_store keeps meta on an existing key), so it can never be auto or approved.
- */
-export declare function lessonStatus(f: Fact): LessonStatus;
 export declare function listLessons(root: string, opts?: {
     status?: LessonStatus[];
 }): Lesson[];

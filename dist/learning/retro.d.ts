@@ -20,7 +20,9 @@ export interface RetroResult {
     }>;
 }
 export declare function retroPrompt(input: RetroInput): string;
-export declare function retrospective(runner: Runner, input: RetroInput, cwd: string, timeoutMs: number): Promise<{
+export declare function retrospective(runner: Runner, input: RetroInput, cwd: string, 
+/** for both attempts together: the retry gets only what the first call left */
+timeoutMs: number, now?: () => number): Promise<{
     result?: RetroResult;
     error?: string;
     rateLimited?: boolean;

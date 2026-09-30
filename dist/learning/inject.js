@@ -12,14 +12,14 @@ export function lessonsFor(root, role, task, max) {
         .sort((a, b) => b.score - a.score || b.l.meta.seen - a.l.meta.seen)
         .slice(0, max)
         .map((x) => x.l);
-    if (!picked.length)
-        return { block: "", keys: [] };
     const store = new MemoryStore(memoryFile(root));
     const now = new Date().toISOString();
-    // ponytail: read-then-store outside the store lock, so two prompts built at once can lose a `uses` bump (a lost count only); upgrade: bump inside the store lock
-    for (const l of picked) {
-        store.store({ topic: "lessons", key: l.key, value: l.text, meta: { ...l.meta, uses: l.meta.uses + 1, lastUsed: now } });
-    }
-    return { block: `${LESSONS_HEADER}\n${picked.map((l) => `- ${l.text}`).join("\n")}`, keys: picked.map((l) => l.key) };
+    // bump the fact as it is now (never undoing an approval made meanwhile); a lesson forgotten since the read above is left out
+    const used = picked.filter((l) => store.patch("lessons", l.key, (f) => ({
+        meta: { ...f.meta, uses: (Number(f.meta?.uses) || 0) + 1, lastUsed: now },
+    })));
+    if (!used.length)
+        return { block: "", keys: [] };
+    return { block: `${LESSONS_HEADER}\n${used.map((l) => `- ${l.text}`).join("\n")}`, keys: used.map((l) => l.key) };
 }
 //# sourceMappingURL=inject.js.map

@@ -33,13 +33,16 @@ export function scanDiff(diff) {
     return [...new Set(hits)];
 }
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD/i;
-/** Replace the values of secret-looking environment variables with *** (values shorter than 6 are left). */
+/**
+ * Replace the values of secret-looking environment variables (values shorter than 6 are left) and every
+ * secret-pattern match (a token a test or an agent printed) with ***.
+ */
 export function redact(text, env = process.env) {
     let out = text;
     for (const [name, value] of Object.entries(env)) {
         if (value && value.length >= 6 && SECRET_NAME.test(name))
             out = out.split(value).join("***");
     }
-    return out;
+    return maskSecrets(out);
 }
 //# sourceMappingURL=safety.js.map

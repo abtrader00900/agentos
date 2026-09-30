@@ -1,9 +1,8 @@
 import { loadConfig } from "../core/loader.js";
 import { learningSchema } from "../core/schema.js";
 import { git } from "../orchestrator/workspace.js";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { listRuns, loadRun, runDir, TERMINAL } from "../orchestrator/run.js";
+import { listRuns, loadRun, TERMINAL } from "../orchestrator/run.js";
+import { runLockState } from "../orchestrator/engine.js";
 import { cliRunners } from "../orchestrator/runners.js";
 import { listLessons, approveLesson, forgetLesson, promoteLesson, ROLES } from "../learning/lessons.js";
 import { learnFromRun } from "../learning/learn-run.js";
@@ -59,19 +58,24 @@ export async function learnRuns(opts, runners) {
         const s = loadRun(root, opts.run); // throws `No run "<id>"`
         if (!TERMINAL.includes(s.status))
             throw new Error(`run ${s.id} is ${s.status}; learn it after it finishes`);
+        const lock = runLockState(root, s.id);
+        if (lock.state === "live")
+            throw new Error(`run ${s.id} is still held by agentos process ${lock.pid} (it learns from the run itself) — try again after it exits`);
     }
-    // a run whose engine still holds its lock is still being finished (and learned) by that engine
+    // a live lock: that engine is still finishing (and learning) the run. A dead engine's lock is taken over.
     const ids = opts.run
         ? [opts.run]
         : listRuns(root)
-            .filter((r) => TERMINAL.includes(r.status) && r.status !== "cancelled" && (!r.learned || r.learned === "failed") && !existsSync(path.join(runDir(root, r.id), "lock")))
+            .filter((r) => TERMINAL.includes(r.status) && r.status !== "cancelled" && (!r.learned || r.learned === "failed") && runLockState(root, r.id).state !== "live")
             .map((r) => r.id);
     if (!ids.length) {
         console.log("No runs to learn from.");
         return;
     }
-    for (const id of ids)
+    for (const id of ids) {
+        console.log(`→ learning ${id}…`);
         console.log(`${id}: ${await learnFromRun(root, id, learning, use, timeoutMs)}`);
+    }
 }
 export function skillDraftsCommand(cwd) {
     const drafts = listDrafts(repoRoot(cwd));
