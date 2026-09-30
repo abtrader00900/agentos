@@ -81,8 +81,9 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
 }
 
 /** agentos runs */
-export function runs(opts: { json?: boolean; cwd?: string }): void {
-  const all = listRuns(repoRoot(opts.cwd));
+export function runs(opts: { json?: boolean; cwd?: string; limit?: number }): void {
+  if (opts.limit !== undefined && !(Number.isInteger(opts.limit) && opts.limit >= 1)) throw new Error("--limit must be a whole number of 1 or more");
+  const all = listRuns(repoRoot(opts.cwd)).slice(0, opts.limit);
   if (opts.json) {
     console.log(JSON.stringify(all.map(({ id, status, task, prUrl, reason, createdAt }) => ({ id, status, task, prUrl, reason, createdAt })), null, 2));
     return;
