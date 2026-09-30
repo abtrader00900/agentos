@@ -98,6 +98,8 @@
   // ------------------------------------------------------------ formatting
 
   const money = (n) => "$" + (Number(n) || 0).toFixed(2);
+  /** Agent and verify output is coloured for a terminal; the escapes are noise here. */
+  const plain = (s) => String(s).replace(/\u001b\[[0-9;]*m/g, "");
   const pad = (n) => (n < 10 ? "0" + n : String(n));
   const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
   const count = (a) => (Array.isArray(a) ? a.length : 0);
@@ -395,9 +397,9 @@
     if (!ev && run.verifyOk === undefined) { box.appendChild(text("p", "muted", L("run.noVerify"))); return; }
     const ok = ev ? ev.ok : run.verifyOk;
     box.appendChild(text("p", ok ? "ok" : "bad", ok ? L("run.verifyOk") : L("run.verifyFailed")));
-    if (ev && ev.command) box.appendChild(text("p", "cmd", L("run.command") + ": " + ev.command));
+    if (ev && ev.command) box.appendChild(text("p", "cmd", L("run.command") + ": " + plain(ev.command)));
     const out = (ev && ev.output) || run.verifyOutput;
-    if (out) box.appendChild(h("pre", null, out));
+    if (out) box.appendChild(h("pre", null, plain(out)));
   }
 
   function findingsSection(run) {
@@ -478,9 +480,9 @@
   function eventRow(e) {
     const row = h("div", { className: "event" }, h("span", { className: "ev-time" }, clock(e.ts)));
     if (e.type === "agent") {
-      add(row, [h("span", { className: "ev-agent" }, String(e.agent || "")), h("span", { className: "ev-text" }, " · " + String(e.line || ""))]);
+      add(row, [h("span", { className: "ev-agent" }, String(e.agent || "")), h("span", { className: "ev-text" }, " · " + plain(e.line || ""))]);
     } else {
-      row.appendChild(h("span", { className: "ev-text" }, summarise(e)));
+      row.appendChild(h("span", { className: "ev-text" }, plain(summarise(e))));
     }
     return row;
   }
@@ -531,6 +533,138 @@
     };
   }
 
+  // ------------------------------------------------------------- lessons
+
+  const isPending = (l) => l.meta && l.meta.status === "pending";
+
+  async function renderLessons(main, p, seq) {
+    clear(main);
+    main.appendChild(text("p", "muted", L("common.loading")));
+    const rows = await api(projectApi(p) + "/lessons");
+    if (stale(seq)) return;
+    if (!rows) { clear(main); return; }
+    clear(main);
+    main.appendChild(h("h1", null, L("lessons.title")));
+    const group = (title, list, card) => section(title, list.length
+      ? h("div", { className: "lessons-list" }, list.map((l) => card(p, l)))
+      : text("p", "muted", L("lessons.empty")));
+    main.appendChild(group(L("lessons.pending"), rows.filter(isPending), pendingLesson));
+    main.appendChild(group(L("lessons.active"), rows.filter((l) => !isPending(l)), activeLesson));
+  }
+
+  function pendingLesson(p, l) {
+    const m = l.meta || {};
+    const evidence = m.evidence || [];
+    return h("div", { className: "lesson" },
+      text("p", "lesson-text", l.text),
+      l.safety !== "ok" ? text("p", "warn", "⚠ " + L("heldBySafety")) : null,
+      h("div", { className: "meta" },
+        (m.roles || []).length ? meta(L("lessons.roles"), m.roles.join(", ")) : null,
+        meta(L("lessons.seen"), String(m.seen || 0)),
+        meta(L("lessons.uses"), String(m.uses || 0))),
+      evidence.length ? h("div", { className: "evidence" },
+        h("span", { className: "m-k" }, L("lessons.evidence")),
+        h("ul", null, evidence.map((e) => h("li", null, e)))) : null,
+      h("div", { className: "acts" }, lessonButton(p, l.key, "approve"), lessonButton(p, l.key, "forget")));
+  }
+
+  function activeLesson(p, l) {
+    return h("div", { className: "lesson" },
+      text("p", "lesson-text", l.text),
+      h("div", { className: "meta" }, meta(L("lessons.uses"), String((l.meta && l.meta.uses) || 0))),
+      h("div", { className: "acts" }, lessonButton(p, l.key, "promote"), lessonButton(p, l.key, "forget")));
+  }
+
+  /** One lesson action, then a full re-render: the list and the sidebar counts both moved. */
+  function lessonButton(p, key, action) {
+    const gone = action === "forget";
+    const btn = h("button", { className: gone ? "btn danger" : "btn" }, action === "approve" ? L("approve") : gone ? L("forget") : L("promote"));
+    btn.onclick = async () => {
+      if (gone && !confirm(L("confirmForget"))) return;
+      btn.disabled = true;
+      const ok = await api(projectApi(p) + "/lessons/" + encodeURIComponent(key) + "/" + action, { method: "POST" });
+      btn.disabled = false;
+      if (ok) render();
+    };
+    return btn;
+  }
+
+  // -------------------------------------------------------------- drafts
+
+  async function renderDrafts(main, p, seq) {
+    clear(main);
+    main.appendChild(text("p", "muted", L("common.loading")));
+    const rows = await api(projectApi(p) + "/drafts");
+    if (stale(seq)) return;
+    if (!rows) { clear(main); return; }
+    clear(main);
+    main.appendChild(h("h1", null, L("drafts.title")));
+    if (!rows.length) { main.appendChild(text("p", "muted", L("drafts.empty"))); return; }
+    for (const d of rows) main.appendChild(draftCard(p, d));
+  }
+
+  function draftCard(p, d) {
+    const pre = h("pre", { className: "skill" });
+    pre.textContent = d.text || "";
+    return section(d.kind,
+      d.description ? text("p", "muted", d.description) : null,
+      pre,
+      h("div", { className: "acts" },
+        draftButton(p, d.kind, "approve", L("approve"), L("confirmApproveDraft")),
+        draftButton(p, d.kind, "reject", L("reject"), L("confirmRejectDraft"))));
+  }
+
+  function draftButton(p, kind, action, label, ask) {
+    const btn = h("button", { className: action === "reject" ? "btn danger" : "btn" }, label);
+    btn.onclick = async () => {
+      if (!confirm(ask)) return;
+      btn.disabled = true;
+      const ok = await api(projectApi(p) + "/drafts/" + encodeURIComponent(kind) + "/" + action, { method: "POST" });
+      btn.disabled = false;
+      if (ok) render();
+    };
+    return btn;
+  }
+
+  // ------------------------------------------------------------- new run
+
+  const TASK_MIN = 3;
+  const TASK_MAX = 2000;
+
+  async function renderNew(main, p, seq) {
+    clear(main);
+    main.appendChild(text("p", "muted", L("common.loading")));
+    const pre = await api(projectApi(p) + "/preflight");
+    if (stale(seq)) return;
+    if (!pre) { clear(main); return; }
+    const problems = pre.problems || [];
+    clear(main);
+    main.appendChild(h("h1", null, L("new.title")));
+
+    // a textarea is not one of h()'s props, so its value and handler are set here
+    const area = h("textarea", { className: "task" });
+    const counter = text("p", "note", "");
+    const start = h("button", { className: "btn" }, L("startRun"));
+    const sync = () => {
+      const v = area.value;
+      counter.textContent = v.length + " / " + TASK_MAX + " " + L("new.counter");
+      start.disabled = problems.length > 0 || v.trim().length < TASK_MIN || v.length > TASK_MAX;
+    };
+    area.oninput = sync;
+    start.onclick = async () => {
+      start.disabled = true;
+      const r = await api(projectApi(p) + "/runs", { method: "POST", body: { task: area.value.trim() } });
+      if (!r || !r.id) { sync(); return; }       // the banner says why; the task stays for a retry
+      location.hash = "#/p/" + encodeURIComponent(p) + "/runs/" + encodeURIComponent(r.id);
+    };
+
+    main.appendChild(section(L("new.task"), area, counter));
+    if (problems.length) main.appendChild(section(L("new.problems"), h("ul", { className: "problems" }, problems.map((s) => h("li", null, s)))));
+    main.appendChild(h("div", { className: "acts" }, start));
+    sync();
+    area.focus();
+  }
+
   // -------------------------------------------------------------- router
 
   let timer = null;                              // runs refresh or active-run elapsed tick
@@ -575,10 +709,9 @@
     if (r.screen === "runs" && r.id) await renderRun(main, r.p, r.id, seq);
     else if (r.screen === "runs") await renderRuns(main, r.p, seq);
     else if (r.screen === "home") await renderHome(main, projects || [], seq);
-    else {
-      clear(main);                               // Task 7 builds lessons, drafts and new run
-      main.appendChild(text("p", "placeholder", L("placeholder." + r.screen)));
-    }
+    else if (r.screen === "lessons") await renderLessons(main, r.p, seq);
+    else if (r.screen === "drafts") await renderDrafts(main, r.p, seq);
+    else await renderNew(main, r.p, seq);        // route() only leaves "new"
   }
 
   function boot() {

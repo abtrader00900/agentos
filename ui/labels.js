@@ -148,8 +148,31 @@ window.LABELS = {
 
   "common.loading": "Loading",
 
-  // Task 7 replaces these with the real screens
-  "placeholder.lessons": "Lessons review is coming soon",
-  "placeholder.drafts": "Skill draft review is coming soon",
-  "placeholder.new": "Starting a run from the browser is coming soon",
+  // lessons, skill drafts and new run: the buttons are undotted, they read as verbs
+  "approve": "Approve",
+  "forget": "Forget",
+  "promote": "Promote",
+  "reject": "Reject",
+  "startRun": "Start run",
+  "heldBySafety": "Held by the safety check — read it before approving",
+  "confirmForget": "Forget this lesson?",
+  "confirmApproveDraft": "Install this skill?",
+  "confirmRejectDraft": "Reject and delete this draft?",
+
+  "lessons.title": "Lessons",
+  "lessons.pending": "Pending",
+  "lessons.active": "Active",
+  "lessons.empty": "Nothing here yet",
+  "lessons.roles": "Roles",
+  "lessons.evidence": "Evidence",
+  "lessons.seen": "Seen",
+  "lessons.uses": "Uses",
+
+  "drafts.title": "Skill drafts",
+  "drafts.empty": "No skill drafts waiting",
+
+  "new.title": "New run",
+  "new.task": "Task",
+  "new.counter": "characters (3 minimum)",
+  "new.problems": "Cannot start a run yet",
 };
