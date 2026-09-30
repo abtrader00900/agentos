@@ -4,6 +4,7 @@ import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdir
 import { MemoryStore } from "../mcp/memory/store.js";
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import { lessonsFor } from "../learning/inject.js";
+import { learnFromRun } from "../learning/learn-run.js";
 import type { Role } from "../learning/lessons.js";
 import type { AgentName, Runner, RunnerRequest, Subtask } from "./types.js";
 import {
@@ -191,6 +192,12 @@ async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: E
     }
   } finally {
     clearInterval(watcher);
+  }
+  if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
+    // best effort: learning reads the run's record and never changes its status
+    await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
+    const learned = loadRun(root, s.id);
+    Object.assign(s, { learned: learned.learned, kind: learned.kind, draft: learned.draft });
   }
   if (s.status === "pr_open") cleanup(c);
   return s;
