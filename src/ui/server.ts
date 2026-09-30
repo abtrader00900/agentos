@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readRoutes } from "./api.js";
 
 /**
  * The dashboard's HTTP server.
@@ -25,7 +26,8 @@ export interface UiOptions {
 
 export type ApiHandler = (req: http.IncomingMessage, url: URL, body: unknown) => Promise<{ status: number; json: unknown }>;
 
-type RouteHandler = (m: RegExpMatchArray, url: URL, body: unknown) => Promise<{ status: number; json: unknown }>;
+/** `routes` is module-global, so per-request options travel as an argument, not a closure. */
+export type RouteHandler = (m: RegExpMatchArray, url: URL, body: unknown, opts: UiOptions) => Promise<{ status: number; json: unknown }>;
 
 const COOKIE = "agentos_ui";
 const MAX_BODY = 16 * 1024;
@@ -52,6 +54,8 @@ const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> 
 export function route(method: string, pattern: RegExp, handler: RouteHandler): void {
   routes.push({ method: method.toUpperCase(), pattern, handler });
 }
+
+for (const r of readRoutes) route(r.method, r.pattern, r.handler);
 
 /** Constant-time for equal lengths; timingSafeEqual throws on a length mismatch. */
 function sameToken(given: string, token: string): boolean {
@@ -155,7 +159,7 @@ async function handle(opts: UiOptions, staticDir: string, server: http.Server, r
       if (r.method !== method) continue;
       const m = r.pattern.exec(url.pathname);
       if (!m) continue;
-      const out = await r.handler(m, url, body);
+      const out = await r.handler(m, url, body, opts);
       return sendJson(out.status, out.json);
     }
     return notFound();
