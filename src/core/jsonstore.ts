@@ -45,6 +45,37 @@ export function retrying<T>(fn: () => T): T {
   }
 }
 
+/**
+ * Run fn while holding `${file}.lock`, so concurrent processes serialise a
+ * read-modify-write instead of overwriting each other. A lock left behind by a
+ * process that died mid-write is cleared once it goes stale.
+ */
+export function withLock<T>(file: string, fn: () => T): T {
+  const lock = `${file}.lock`;
+  mkdirSync(path.dirname(lock), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let fd: number | undefined;
+  for (let attempt = 0; fd === undefined; attempt++) {
+    try {
+      fd = openSync(lock, "wx");
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? "";
+      if (!RETRYABLE.has(code)) throw e;
+      try {
+        if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS) unlinkSync(lock);
+      } catch { /* someone else cleared it */ }
+      if (Date.now() > deadline) throw new Error(`${file} is locked by another process (${lock})`);
+      sleep(Math.min(50, 2 + attempt));
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try { unlinkSync(lock); } catch { /* best effort */ }
+  }
+}
+
 interface Stamp { mtimeMs: number; size: number }
 
 export class JsonStore {
@@ -125,31 +156,12 @@ export class JsonStore {
    * this.table(...), and the result is saved before the lock is released.
    */
   update<R>(fn: () => R): R {
-    const lock = `${this.file}.lock`;
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
-    let fd: number | undefined;
-    for (let attempt = 0; fd === undefined; attempt++) {
-      try {
-        fd = openSync(lock, "wx");
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code ?? "";
-        if (!RETRYABLE.has(code)) throw e;
-        try {
-          if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS) unlinkSync(lock);
-        } catch { /* someone else cleared it */ }
-        if (Date.now() > deadline) throw new Error(`${this.file} is locked by another process (${lock})`);
-        sleep(Math.min(50, 2 + attempt));
-      }
-    }
-    try {
+    return withLock(this.file, () => {
       this.load();
       const result = fn();
       this.save();
       return result;
-    } finally {
-      closeSync(fd);
-      try { unlinkSync(lock); } catch { /* best effort */ }
-    }
+    });
   }
 
   /** Every mutation already saves; closing must not rewrite the file on a read-only open. */
