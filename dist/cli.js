@@ -8,9 +8,11 @@ import { skillList, skillInstall, skillSearch, skillTest } from "./commands/skil
 import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
 import { learn } from "./commands/learn.js";
+import { run, runs } from "./commands/run.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
+import { createOrchestratorServer } from "./mcp/orchestrator/server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ALL_HARNESSES } from "./core/schema.js";
 import { VERSION } from "./version.js";
@@ -101,6 +103,13 @@ mcp
     const server = createCodegraphServer();
     await server.connect(new StdioServerTransport());
 });
+mcp
+    .command("orchestrator")
+    .description("Run the orchestrator MCP server over stdio (run_task / run_status / run_cancel)")
+    .action(async () => {
+    const server = createOrchestratorServer();
+    await server.connect(new StdioServerTransport());
+});
 const skill = program.command("skill").description("Manage AgentOS skills");
 skill
     .command("list")
@@ -171,6 +180,35 @@ program
     .description("Print the latest handoff bundle")
     .action(() => { try {
     handoffShow();
+}
+catch (e) {
+    fail(e);
+} });
+program
+    .command("run [task...]")
+    .description("Hand a task to the agent team: plan → parallel agents → tests + cross-model review → pull request")
+    .option("--resume <id>", "continue a paused or interrupted run")
+    .option("--cancel <id>", "stop a run (its worktrees are kept)")
+    .option("--status <id>", "print a run's full state as JSON")
+    .option("--id <id>", "use this run id (used by the orchestrator MCP server)")
+    .action(async (words, opts) => {
+    try {
+        const task = words.join(" ").trim();
+        if (!task && !opts.resume && !opts.cancel && !opts.status) {
+            fail(new Error('Give a task: agentos run "add a discount field to customers"'));
+        }
+        process.exitCode = await run(task, opts);
+    }
+    catch (e) {
+        fail(e);
+    }
+});
+program
+    .command("runs")
+    .description("List orchestrator runs, newest first")
+    .option("--json", "machine-readable JSON output")
+    .action((opts) => { try {
+    runs({ json: opts.json });
 }
 catch (e) {
     fail(e);

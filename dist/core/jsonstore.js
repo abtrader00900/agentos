@@ -29,7 +29,7 @@ function sleep(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 /** Run fn, retrying transient Windows file-sharing errors for up to ~1s. */
-function retrying(fn) {
+export function retrying(fn) {
     for (let attempt = 0;; attempt++) {
         try {
             return fn();

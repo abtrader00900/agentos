@@ -1,0 +1,14 @@
+export declare const ORCHESTRATOR_SNIPPET = "orchestrator:\n  verify: [npm test]          # commands that must pass before a PR opens\n  workers: [claude, codex]    # agent CLIs that write code (your subscriptions)\n  reviewer: codex             # reviews every diff\n  maxWorkers: 2";
+/** agentos run: start, resume, cancel or inspect a run. Returns the exit code. */
+export declare function run(task: string, opts: {
+    resume?: string;
+    cancel?: string;
+    status?: string;
+    id?: string;
+    cwd?: string;
+}): Promise<number>;
+/** agentos runs */
+export declare function runs(opts: {
+    json?: boolean;
+    cwd?: string;
+}): void;
