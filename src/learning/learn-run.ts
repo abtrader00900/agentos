@@ -10,14 +10,19 @@ import { redact } from "../orchestrator/safety.js";
 
 const LEARNABLE: RunState["status"][] = ["pr_open", "needs_human", "failed"];
 
-/** Learn from one finished run. It never throws: the outcome lands in state.learned and the event log. */
+/**
+ * Learn from one finished run. It never throws: the outcome lands in state.learned and the event log.
+ * budgetMs is one deadline for every agent call it makes (the retrospective, its retry, the skill draft).
+ */
 export async function learnFromRun(
   root: string,
   runId: string,
   learning: LearningConfig,
   runners: Record<AgentName, { read: Runner; write: Runner }>,
-  timeoutMs: number,
+  budgetMs: number,
+  now: () => number = Date.now,
 ): Promise<"done" | "skipped" | "failed"> {
+  const end = now() + budgetMs;
   const record = (learned: "done" | "skipped" | "failed", extra: Partial<RunState> & { reason?: string; lessons?: string[] } = {}) => {
     try {
       const cur = loadRun(root, runId);
@@ -40,7 +45,7 @@ export async function learnFromRun(
       .map((x) => x.l);
     // reusing a kind keeps skillDue counting; listRuns is most recent first
     const kinds = [...new Set(listRuns(root).map((r) => r.kind).filter((k): k is string => !!k))].slice(0, 30);
-    const r = await retrospective(runners[learning.retroAgent].read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing, kinds }, root, timeoutMs);
+    const r = await retrospective(runners[learning.retroAgent].read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing, kinds }, root, end - now(), now);
     if (!r.result) return record("failed", { reason: r.rateLimited ? "rate limit" : r.error });
     const kind = r.result.kind;
     const cur = loadRun(root, runId);
@@ -52,8 +57,12 @@ export async function learnFromRun(
       // the lessons are saved already: a draft error is logged, never turned into learned: "failed"
       try {
         const runs = skillDue(root, kind, learning.skillAfterRuns);
-        if (runs) {
-          const d = await draftSkill(root, kind, runs, runners[learning.retroAgent].read, timeoutMs);
+        const left = end - now();
+        if (runs && left < 60_000) {
+          // not a rejection: no tombstone, so a later run drafts it
+          logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: "no time left for the draft" });
+        } else if (runs) {
+          const d = await draftSkill(root, kind, runs, runners[learning.retroAgent].read, left);
           if (d.ok) draft = kind;
           else logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: d.reason });
         }

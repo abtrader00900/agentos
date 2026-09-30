@@ -11,7 +11,7 @@
   - Skill drafts: after `skillAfterRuns` successful runs of one task kind, agentos drafts `.agentos/skill-drafts/<kind>/SKILL.md`. A draft contains no test file. It installs only with `agentos skill approve <kind>`. A rejected draft, or one that fails validation or the safety filter, leaves a tombstone so that kind is never re-drafted.
   - `agentos learn --run <id>` and `--pending-runs`. A learning failure is logged as the `learn-failed` event and never changes the run.
 - `handoff` bundles skip pending lessons.
-- Memory facts gain an optional `meta` field, and `memory_recall` marks pending lessons.
+- Memory facts gain an optional `meta` field, and `memory_recall`, `memory_get` and `memory_export` mark pending lessons.
 - Run events gain the verify failure output, the files each fix round changed, the fallback error line, `conflict-resolved` and `planner-retry`.
 - The PR body lists the lessons a run used.
 - `doctor` warns (`lessons:count`) above 200 active lessons.

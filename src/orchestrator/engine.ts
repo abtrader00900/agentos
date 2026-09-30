@@ -30,6 +30,8 @@ export interface EngineDeps {
   onStatus?: (s: RunState) => void;
   /** PRD 2: lessons in prompts and learning after the run; absent = off */
   learning?: LearningConfig;
+  /** called with no argument when learning after the run starts, and with its outcome when it ends */
+  onLearning?: (learned?: "done" | "skipped" | "failed") => void;
 }
 
 interface Ctx {
@@ -128,6 +130,14 @@ function lockRun(root: string, id: string): () => void {
   }
 }
 
+/** Whether an engine holds the run's lock: "live" (its PID is running), "stale" (a dead engine's) or "free". */
+export function runLockState(root: string, id: string): { state: "free" | "live" | "stale"; pid: number } {
+  const file = path.join(runDir(root, id), "lock");
+  if (!existsSync(file)) return { state: "free", pid: 0 };
+  const pid = lockPid(file);
+  return { state: alive(pid) ? "live" : "stale", pid };
+}
+
 /** the PID a lock file holds; 0 (stale) when it is empty, malformed or gone */
 function lockPid(file: string): number {
   try {
@@ -193,15 +203,18 @@ async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: E
   } finally {
     clearInterval(watcher);
   }
-  if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
-    // best effort: learning reads the run's record and never changes its status
-    await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
-    try {
-      const learned = loadRun(root, s.id);
-      Object.assign(s, { learned: learned.learned, kind: learned.kind, draft: learned.draft });
-    } catch { /* keep s as it is: learning never makes drive() throw */ }
-  }
+  // learning reads only the run's events and state: the worktrees go first, not after minutes of retro
   if (s.status === "pr_open") cleanup(c);
+  if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
+    // best effort: learning reads the run's record and never changes its status. One subtaskMinutes for all of it.
+    deps.onLearning?.();
+    const learned = await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
+    try {
+      const saved = loadRun(root, s.id);
+      Object.assign(s, { learned: saved.learned, kind: saved.kind, draft: saved.draft });
+    } catch { /* keep s as it is: learning never makes drive() throw */ }
+    deps.onLearning?.(learned);
+  }
   return s;
 }
 

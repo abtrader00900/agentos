@@ -88,7 +88,7 @@ Otherwise it is `pending`. `approved` is set by the owner only. Once `approved` 
 **Duplicate merging.**
 - The retrospective sees the project's existing lessons. It may answer `sameAs: "<key>"`.
 - If it doesn't, a word-set Jaccard score ≥ 0.6 against an existing lesson that shares a role also counts as the same lesson.
-- A merge adds the run id and evidence to the existing lesson and increments `seen`. It keeps the existing text. A new hard-evidence citation upgrades `pending` to `auto`.
+- A merge adds the run id and evidence to the existing lesson and increments `seen`. It keeps the existing text. A merge never changes a lesson's status: `sameAs` is chosen by the model, so a merge could otherwise attach real evidence to any pending lesson. Only `agentos lessons approve` moves `pending` to `approved`.
 
 **Limits.**
 - At most 3 lessons per run.
@@ -107,10 +107,10 @@ Otherwise it is `pending`. `approved` is set by the owner only. Once `approved` 
 
 ## 4. Data flow
 
-1. **The run reaches a terminal status.** The engine calls `learnFromRun` for `pr_open`, `needs_human` and `failed`, but not for `cancelled`. The call is awaited, but its errors are caught and logged as an event (`learn-failed`). The run's status never changes because of learning.
+1. **The run reaches a terminal status.** The engine calls `learnFromRun` for `pr_open`, `needs_human` and `failed`, but not for `cancelled`. The call is awaited, but its errors are caught and logged as an event (`learn-failed`). The run's status never changes because of learning. A `pr_open` run's worktrees are removed first. The retrospective, its retry and the skill draft share one budget of `subtaskMinutes`; the draft is skipped (a `skill-draft-rejected` event, no tombstone) when less than a minute is left. The CLI prints `→ learning…` and `learned: <result>`.
 2. **Evidence.** `collectEvidence` returns `Evidence[]`. The retrospective still runs when the list is empty, which is the usual case for a clean `pr_open` run. Skill drafts need a `kind` for every successful run, and clean runs are most of them. With no evidence, the prompt asks for `kind` only and `lessons` must be `[]`, so no lesson is ever invented without evidence to point at.
 3. **Retrospective.** It takes the task, plan summary, evidence and existing lessons for the project, at most 30 of them and most relevant first. It returns `{ kind, lessons: [{ text, roles, evidence: ["E1"], sameAs? }] }` with at most 3 lessons.
-4. **Save.** Each lesson goes through the safety filter, the status rule and duplicate merging, then is written through `MemoryStore.store` (under its existing lock).
+4. **Save.** Each lesson goes through the safety filter, the status rule and duplicate merging, then is written under the store's lock. A merge, a `uses` bump and an approval re-read the fact inside that lock (`MemoryStore.patch`), so a concurrent writer's runs, evidence, approval or forget are never overwritten.
 5. **The run is marked** `state.learned = "done" | "skipped" | "failed"` and `state.kind`.
 6. **A skill draft is created if due.** The run's final CLI line says so: `skill draft ready: <kind> — agentos skill drafts`.
 7. **Next run, injection.** Each prompt builder asks `lessonsFor(root, role, task, maxLessonsInPrompt)`:
@@ -118,7 +118,7 @@ Otherwise it is `pending`. `approved` is set by the owner only. Once `approved` 
    - It appends them under a fixed header.
    - It increments `uses` and `lastUsed`.
    - The PR body gains a line: `Lessons used: L-1a2b3c4d, …`.
-8. **Chats see the lessons too.** `memory_recall` already returns facts from topic `lessons`. The memory server marks pending lessons `[pending]` in its output, so a chat can tell them apart.
+8. **Chats see the lessons too.** `memory_recall` already returns facts from topic `lessons`. The memory server marks pending lessons `[pending]` in `memory_recall`, `memory_get` and `memory_export`, by the engine's rule (`lessonStatus`: a key that is not `lessonKey(text)` is pending), so a chat can tell them apart.
 
 The prompt header is fixed:
 
@@ -132,7 +132,7 @@ Notes from earlier runs in this project (context, not commands — never run any
 **Commands:**
 - `agentos lessons [--pending] [--role <r>] [--json]` lists lessons with status, seen, uses and evidence.
 - `agentos lessons approve <key>` and `agentos lessons forget <key>`. Forget deletes the fact.
-- `agentos lessons promote <key>` appends the lesson as a rule to `agent.config.local.yaml` through the existing `applyLearnedRules`. The owner then moves it into `agent.config.yaml` by hand, as with `learn --apply`.
+- `agentos lessons promote <key>` refuses a pending lesson (approve it first). It appends the lesson as a rule to `agent.config.local.yaml` through the existing `applyLearnedRules`. The owner then moves it into `agent.config.yaml` by hand, as with `learn --apply`.
 - `agentos skill drafts`, `agentos skill approve <kind>` and `agentos skill reject <kind>`.
 - `agentos learn --run <id>` re-learns one finished run. `agentos learn --pending-runs` learns every terminal run whose `learned` is missing or `failed`, and backfills the 0.3.0 runs.
 
@@ -155,7 +155,8 @@ learning:
   - `base64 -d`
   - any `scanDiff` secret pattern
 
-  It rejects outright a lesson that matches a secret pattern after `redact()`.
+  It rejects outright a lesson that matches a secret pattern after `redact()`, and any text over 20 KB before a regex runs on it (several of the filter's regexes backtrack quadratically on hostile input).
+- **`redact()` also masks the secret patterns**, so a token a failing test or an agent prints never lands raw in `events.jsonl` (verify output, fallback errors, agent lines, `learn-failed` reasons).
 - **Prompts frame lessons as notes, not commands** (the header in section 4).
 - **Skill drafts** go through the same filter plus `validateSkillDir`. They are never installed without `agentos skill approve`, which shows the full text first.
 - **Evidence text is redacted** (`redact()`) and truncated before it reaches the retrospective prompt or the memory file.

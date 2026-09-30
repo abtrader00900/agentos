@@ -261,7 +261,7 @@ After every `agentos run`, agentos records what went wrong and how it was fixed:
 ```bash
 agentos lessons                      # list (status, seen, used) with each lesson's evidence
 agentos lessons --pending            # waiting for you
-agentos lessons approve <key>        # or: forget <key> | promote <key> (→ agent.config.local.yaml rule)
+agentos lessons approve <key>        # or: forget <key> | promote <key> (auto/approved only → agent.config.local.yaml rule)
 agentos skill drafts                 # a skill drafted after a kind of task succeeded 3 times
 agentos skill approve <kind>         # prints it, then installs it; or: agentos skill reject <kind>
 agentos learn --pending-runs         # learn from finished runs that were not learned yet

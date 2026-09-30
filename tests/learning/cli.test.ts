@@ -101,6 +101,21 @@ describe("lessons CLI", () => {
     expect(loadRun(repo.root, "free").learned).toBe("done");
   });
 
+  it("learn --run refuses a run whose lock is held by a live process", async () => {
+    saveRun(repo.root, runOf("held", "pr_open"));
+    writeFileSync(path.join(runDir(repo.root, "held"), "lock"), String(process.pid));
+    await expect(learnRuns({ cwd: repo.root, run: "held" }, fakeRunners())).rejects.toThrow(`run held is still held by agentos process ${process.pid}`);
+    expect(loadRun(repo.root, "held").learned).toBeUndefined();
+  });
+
+  it("learn --pending-runs takes over a run whose lock holder is dead", async () => {
+    saveRun(repo.root, runOf("orphan", "needs_human"));
+    writeFileSync(path.join(runDir(repo.root, "orphan"), "lock"), "999999"); // never a live PID (and not a multiple of 4, so never one on Windows)
+    await learnRuns({ cwd: repo.root, pendingRuns: true }, fakeRunners());
+    expect(logs.join("\n")).toMatch(/^orphan: done$/m);
+    expect(loadRun(repo.root, "orphan").learned).toBe("done");
+  });
+
   it("skill approve prints the full draft before installing it", async () => {
     const GOOD = "---\nname: erp-report\ndescription: Build a new ERP report page. Use when the owner asks for a report over ledger or stock data.\n---\n\n# ERP report\n\n## Workflow\n1. Add the query in a service class.\n\n## Rules\n- Eager load relations.\n"
     const r = await draftSkill(repo.root, "erp-report", [], async () => reply(GOOD), 1000);

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { makeRepo } from "../orchestrator/helpers.js";
+import { makeRepo, sh } from "../orchestrator/helpers.js";
 import { startRun, type EngineDeps } from "../../src/orchestrator/engine.js";
 import { loadRun, saveRun, type RunState } from "../../src/orchestrator/run.js";
 import { learnFromRun } from "../../src/learning/learn-run.js";
@@ -109,6 +109,20 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     expect(existsSync(path.join(draftsDir(repo.root), "file-add"))).toBe(false);
   });
 
+  it("cleans up the run's worktrees and subtask branches before the retrospective, and reports learning start and end", async () => {
+    let seen: { run: boolean; sub: boolean; branches: string } | undefined;
+    const learning: Array<string | undefined> = [];
+    const d = deps(() => {
+      const s = loadRun(repo.root, "lr10");
+      seen = { run: existsSync(s.runWorktree), sub: existsSync(s.subtasks[0].worktree), branches: sh(repo.root, ["branch", "--list", "agentos/run-lr10-*"]) };
+      return reply(JSON.stringify({ kind: "file-add", lessons: [] }));
+    }, { onLearning: (r) => learning.push(r) });
+    const s = await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr10");
+    expect(s.status).toBe("pr_open");
+    expect(seen).toEqual({ run: false, sub: false, branches: "" });
+    expect(learning).toEqual([undefined, "done"]);
+  });
+
   it("a needs_human run still learns, but never drafts a skill", async () => {
     const d = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })), { learning: learningSchema.parse({ skillAfterRuns: 2 }) });
     await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr8");
@@ -140,6 +154,47 @@ describe("learnFromRun inputs", () => {
     expect(prompt).toContain("Run the migration before the seed step");
     expect(prompt).not.toContain("Maybe split views"); // pending text never reaches a prompt
     expect(prompt).toContain("Kinds this project already uses (reuse one when it fits): erp-report, bug-fix\n");
+  });
+
+  it("one learning budget: the retro retry and the draft get only the time left", async () => {
+    saveRun(repo.root, runOf("prev1", "file-add", 5)); // skillAfterRuns is at least 2
+    saveRun(repo.root, runOf("b1", undefined, 6));
+    let clock = 0;
+    const timeouts: Array<[string, number]> = [];
+    const retro = [reply("not json"), reply(JSON.stringify({ kind: "file-add", lessons: [] }))];
+    const read: Runner = async (req) => {
+      const draft = req.prompt.includes("Write a SKILL.md");
+      timeouts.push([draft ? "draft" : "retro", req.timeoutMs]);
+      clock += 4 * 60_000; // each call takes 4 minutes
+      return draft ? reply(SKILL) : retro.shift()!;
+    };
+    expect(await learnFromRun(repo.root, "b1", learningSchema.parse({ skillAfterRuns: 2 }), runners(read), 10 * 60_000, () => clock)).toBe("done");
+    expect(timeouts).toEqual([["retro", 600_000], ["retro", 360_000], ["draft", 120_000]]);
+    expect(loadRun(repo.root, "b1").draft).toBe("file-add");
+  });
+
+  it("skips the draft when less than a minute of the learning budget is left", async () => {
+    saveRun(repo.root, runOf("prev2", "file-add", 5));
+    saveRun(repo.root, runOf("b2", undefined, 7));
+    let clock = 0;
+    const calls: string[] = [];
+    const read: Runner = async (req) => {
+      calls.push(req.prompt.includes("Write a SKILL.md") ? "draft" : "retro");
+      clock += 9.5 * 60_000;
+      return reply(JSON.stringify({ kind: "file-add", lessons: [] }));
+    };
+    expect(await learnFromRun(repo.root, "b2", learningSchema.parse({ skillAfterRuns: 2 }), runners(read), 10 * 60_000, () => clock)).toBe("done");
+    expect(calls).toEqual(["retro"]);
+    expect(readEvents(repo.root, "b2").some((e) => e.type === "skill-draft-rejected" && e.reason === "no time left for the draft")).toBe(true);
+    expect(existsSync(path.join(draftsDir(repo.root), "file-add"))).toBe(false); // no tombstone: a later run may still draft it
+  });
+
+  it("the learn-failed reason masks a pattern secret", async () => {
+    const token = "gh" + "p_" + "B".repeat(36);
+    saveRun(repo.root, runOf("boom2", undefined, 8));
+    const read: Runner = async () => { throw new Error(`bad token ${token}`); };
+    expect(await learnFromRun(repo.root, "boom2", learningSchema.parse({}), runners(read), 1000)).toBe("failed");
+    expect(readEvents(repo.root, "boom2").find((e) => e.type === "learn-failed")!.reason).toBe("bad token ***");
   });
 
   it("the learn-failed reason is redacted and capped at 300 chars", async () => {

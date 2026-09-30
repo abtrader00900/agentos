@@ -66,6 +66,7 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
     gh,
     learning: learningOf(root),
     onStatus: (s) => console.log(`→ ${s.status}${s.reason ? `: ${s.reason.split("\n")[0]}` : ""}`),
+    onLearning: (r) => console.log(r ? `learned: ${r}` : "→ learning…"),
   });
   let s;
   if (opts.resume) {

@@ -50,13 +50,18 @@ export async function retrospective(
   runner: Runner,
   input: RetroInput,
   cwd: string,
+  /** for both attempts together: the retry gets only what the first call left */
   timeoutMs: number,
+  now: () => number = Date.now,
 ): Promise<{ result?: RetroResult; error?: string; rateLimited?: boolean }> {
   const described = new Map(input.evidence.map((e) => [e.id, describeEvidence(e)]));
+  const end = now() + timeoutMs;
   let prompt = retroPrompt(input);
   let error = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await runner({ prompt, cwd, timeoutMs });
+    const left = end - now();
+    if (left <= 0) break; // no time for the retry: the first reply's error stands
+    const res = await runner({ prompt, cwd, timeoutMs: left });
     if (res.rateLimited) return { rateLimited: true };
     // spec §7: one retry only after invalid JSON, not after an agent failure or timeout
     if (!res.ok) return { error: `the retrospective agent failed${res.timedOut ? " (timeout)" : ""}` };
