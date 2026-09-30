@@ -1,3 +1,5 @@
+/** Run fn, retrying transient Windows file-sharing errors for up to ~1s. */
+export declare function retrying<T>(fn: () => T): T;
 export declare class JsonStore {
     private data;
     private file;

@@ -1,0 +1,93 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { loadConfig } from "../core/loader.js";
+import type { OrchestratorConfig } from "../core/schema.js";
+import { git } from "../orchestrator/workspace.js";
+import { startRun, resumeRun, cancelRun, assertCleanCheckout, type EngineDeps } from "../orchestrator/engine.js";
+import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/run.js";
+import { CLI_RUNNERS } from "../orchestrator/runners.js";
+import { runLine } from "../orchestrator/report.js";
+import { isCommandOnPath } from "./doctor.js";
+
+export const ORCHESTRATOR_SNIPPET = `orchestrator:
+  verify: [npm test]          # commands that must pass before a PR opens
+  workers: [claude, codex]    # agent CLIs that write code (your subscriptions)
+  reviewer: codex             # reviews every diff
+  maxWorkers: 2`;
+
+const repoRoot = (cwd = process.cwd()) => git(cwd, ["rev-parse", "--show-toplevel"]);
+
+const gh = (cwd: string, args: string[]) =>
+  execFileSync("gh", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+
+/** Everything a run needs before it starts; throws the reason. The MCP server runs it before launching a background run. */
+export function preflight(root: string, ghCli = gh): OrchestratorConfig {
+  const cfg = loadConfig(root).config.orchestrator;
+  if (!cfg) throw new Error(`agent.config.yaml has no orchestrator block. Add one, for example:\n\n${ORCHESTRATOR_SNIPPET}`);
+  const missing = [...new Set([cfg.planner, cfg.reviewer, ...cfg.workers])].filter((a) => !isCommandOnPath(a));
+  if (missing.length) throw new Error(`not on PATH: ${missing.join(", ")} — install it, or remove it from orchestrator planner/reviewer/workers`);
+  assertCleanCheckout(root);
+  ghCli(root, ["auth", "status"]);
+  return cfg;
+}
+
+/** A background run (started with --id) that fails before its first save still leaves a record run_status can show. */
+function recordFailedStart(root: string, id: string, task: string, e: Error): void {
+  try {
+    if (existsSync(path.join(runDir(root, id), "state.json"))) return; // never overwrite a real run
+  } catch {
+    return; // invalid id: nothing to record under it
+  }
+  const now = new Date().toISOString();
+  saveRun(root, {
+    id, task, status: "failed", reason: `could not start: ${e.message}`, baseBranch: "", base: "", branch: `agentos/run-${id}`,
+    runWorktree: "", createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [],
+  });
+  logEvent(root, id, { type: "status", status: "failed", reason: e.message });
+}
+
+/** agentos run: start, resume, cancel or inspect a run. Returns the exit code. */
+export async function run(task: string, opts: { resume?: string; cancel?: string; status?: string; id?: string; cwd?: string }): Promise<number> {
+  const root = repoRoot(opts.cwd);
+  if (opts.status) {
+    console.log(JSON.stringify(loadRun(root, opts.status), null, 2));
+    return 0;
+  }
+  if (opts.cancel) {
+    console.log(runLine(await cancelRun(root, opts.cancel)));
+    return 0;
+  }
+  const deps: EngineDeps = {
+    runners: CLI_RUNNERS,
+    gh,
+    onStatus: (s) => console.log(`→ ${s.status}${s.reason ? `: ${s.reason.split("\n")[0]}` : ""}`),
+  };
+  let s;
+  if (opts.resume) {
+    s = await resumeRun(root, opts.resume, preflight(root), deps);
+  } else {
+    try {
+      s = await startRun(root, task, preflight(root), deps, opts.id);
+    } catch (e) {
+      if (opts.id) recordFailedStart(root, opts.id, task, e as Error);
+      throw e;
+    }
+  }
+  console.log(runLine(s));
+  return s.status === "pr_open" ? 0 : 1;
+}
+
+/** agentos runs */
+export function runs(opts: { json?: boolean; cwd?: string }): void {
+  const all = listRuns(repoRoot(opts.cwd));
+  if (opts.json) {
+    console.log(JSON.stringify(all.map(({ id, status, task, prUrl, reason, createdAt }) => ({ id, status, task, prUrl, reason, createdAt })), null, 2));
+    return;
+  }
+  if (!all.length) {
+    console.log('No runs yet. Start one: agentos run "<task>"');
+    return;
+  }
+  for (const s of all) console.log(runLine(s));
+}

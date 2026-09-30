@@ -225,19 +225,23 @@ export function sameCodexPath(a, b, platform = process.platform) {
  * also fixes Windows, where the old `which` fallback does not exist and
  * executables are resolved through PATHEXT (.cmd shims for npx/npm).
  */
-function isCommandOnPath(cmd) {
+export function isCommandOnPath(cmd) {
+    return resolveOnPath(cmd) !== undefined;
+}
+/** The file a command resolves to on PATH (PATHEXT on Windows), or undefined. The current directory is never searched. */
+export function resolveOnPath(cmd) {
     if (cmd.includes("/") || cmd.includes("\\"))
-        return existsSync(cmd);
+        return existsSync(cmd) ? cmd : undefined;
     const exts = process.platform === "win32"
         ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
         : [""];
     for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
         for (const ext of exts) {
             if (existsSync(path.join(dir, cmd + ext)))
-                return true;
+                return path.join(dir, cmd + ext);
         }
     }
-    return false;
+    return undefined;
 }
 function report(checks, options) {
     const ok = !checks.some((c) => c.status === "fail");

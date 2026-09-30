@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased (0.3.0)
+
+### Added
+- `agentos run "<task>"`: a planner splits the task, and Claude Code / Codex workers run in parallel git worktrees. Each finished subtask merges into a run branch. Verify commands run, a different model reviews the diff, and a fixer loops until both pass (up to `maxFixRounds`). A pull request opens at the end.
+- `agentos runs`, plus `agentos run --resume | --cancel | --status <id>`. A run pauses on a rate limit instead of failing, and resumes where it stopped.
+- An `orchestrator` MCP server (`run_task`, `run_status`, `run_cancel`) so a chat can hand work to agentos.
+- Safety:
+  - agents work only in worktrees (writes to your checkout stop the run)
+  - the default branch is never pushed
+  - there are no skip-permission flags
+  - a secret scan runs before every push
+  - secret-looking env values are redacted from logs
+
 ## 0.2.2 — 2026-09-29
 
 Fixes from two days of agentos on a real project. Every fix is pinned by a test in `tests/regressions-0.2.2.test.ts`.

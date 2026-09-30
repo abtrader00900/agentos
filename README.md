@@ -217,6 +217,37 @@ agentos handoff --clear && agentos sync
 
 The receiving agent gets: task state, files in progress, pending decisions, open questions, memory snapshot (each fact with its last-updated date), git state. `doctor` and `sync` warn once the handoff is older than 3 days or HEAD moved more than 20 commits past it (`staleAfter`). Spec: `RFC/handoff-protocol.md`.
 
+## `agentos run` — hand a task to the agent team
+
+Add an `orchestrator` block to `agent.config.yaml`:
+
+```yaml
+orchestrator:
+  verify: [npm test, npx tsc --noEmit]   # must pass before a PR opens
+  workers: [claude, codex]               # agent CLIs that write code — your subscriptions, no API keys
+  reviewer: codex                        # reviews the diff (swapped if it wrote everything)
+  maxWorkers: 2                          # parallel agents, each in its own git worktree
+  link: [node_modules]                   # installed deps shared from your checkout into worktrees
+```
+
+```bash
+agentos run "add a discount field to customers"   # plan → parallel agents → tests + review → PR
+agentos runs                                        # list runs
+agentos run --resume <id>                           # continue after a rate limit or a crash
+agentos run --cancel <id>
+```
+
+A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
+
+To hand work over from inside a Claude Code or Codex chat, register the MCP server and call `run_task`:
+
+```yaml
+mcpServers:
+  - name: orchestrator
+    command: npx
+    args: ["-y", "@basit0090/agent-os@0.3.0", "mcp", "orchestrator"]
+```
+
 ## Storage
 
 Zero native dependencies — `npm install` never compiles anything. Memory and graph persist as atomic-writes JSON in `.agentos/`. A SQLite backend can plug in behind the same interface later if a project outgrows it.

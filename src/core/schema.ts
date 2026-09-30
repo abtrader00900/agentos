@@ -29,6 +29,35 @@ export const mcpServerRefSchema = z.object({
   env: z.record(z.string()).optional(),
 });
 
+export const agentNameSchema = z.enum(["claude", "codex"]);
+export type AgentName = z.infer<typeof agentNameSchema>;
+
+/** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
+export const orchestratorSchema = z.object({
+  /** how far a run may go on its own; merge/deploy come in a later release */
+  autonomy: z
+    .enum(["pr", "merge", "deploy"])
+    .default("pr")
+    .refine((a) => a === "pr", { message: "only autonomy: pr is available in this version (merge and deploy come in a later release)" }),
+  maxWorkers: z.number().int().min(1).max(8).default(2),
+  maxFixRounds: z.number().int().min(0).max(10).default(3),
+  /** the whole run, per engine session */
+  maxMinutes: z.number().positive().default(90),
+  /** one agent call */
+  subtaskMinutes: z.number().positive().default(20),
+  planner: agentNameSchema.default("claude"),
+  workers: z.array(agentNameSchema).min(1).default(["claude", "codex"]),
+  /** reviews the diff; swapped for the other CLI when it wrote every subtask */
+  reviewer: agentNameSchema.default("codex"),
+  /** shell commands that must pass before a PR opens, run in the run worktree */
+  verify: z.array(z.string().min(1)).default([]),
+  /** a second worker only starts while this much memory is free */
+  minFreeMemoryMb: z.number().nonnegative().default(1500),
+  /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
+  link: z.array(z.string().min(1)).default(["node_modules"]),
+});
+export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
+
 export const agentConfigSchema = z.object({
   /** Project display name */
   project: z.object({
@@ -56,6 +85,8 @@ export const agentConfigSchema = z.object({
       pinnedFactDays: z.number().positive().default(14),
     })
     .default({}),
+  /** agentos run — absent means the command explains how to add it */
+  orchestrator: orchestratorSchema.optional(),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
