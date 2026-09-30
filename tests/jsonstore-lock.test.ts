@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { withLock } from "../src/core/jsonstore.js";
+import { dropLock, withLock } from "../src/core/jsonstore.js";
 
 let dir: string;
 
@@ -31,5 +31,39 @@ describe("withLock", () => {
 
     expect(withLock(file, () => 42)).toBe(42);
     expect(existsSync(`${file}.lock`)).toBe(false);
+  });
+});
+
+describe("dropLock", () => {
+  let lock = "";
+  let taken = "";
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "agentos-lock-"));
+    lock = path.join(dir, "store.json.lock");
+    taken = `${lock}.mine`;
+  });
+
+  it("deletes the file it took, never whatever holds the path by then", () => {
+    writeFileSync(lock, "mine");
+
+    // the interleaving a plain check-then-unlink gets wrong: while we are deciding,
+    // another process finds the path free and installs its own lock there
+    dropLock(lock, taken, p => {
+      writeFileSync(lock, "other-process-token");
+      return readFileSync(p, "utf8") === "mine";
+    });
+
+    expect(readFileSync(lock, "utf8")).toBe("other-process-token");
+    expect(existsSync(taken)).toBe(false);
+  });
+
+  it("hands back a lock that turns out to be someone else's", () => {
+    writeFileSync(lock, "other-process-token");
+
+    dropLock(lock, taken, p => readFileSync(p, "utf8") === "mine");
+
+    expect(readFileSync(lock, "utf8")).toBe("other-process-token");
+    expect(existsSync(taken)).toBe(false);
   });
 });

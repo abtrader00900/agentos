@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, writeSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -47,6 +47,23 @@ export function retrying<T>(fn: () => T): T {
 }
 
 /**
+ * Remove the lock file, but only the one `mine` recognises.
+ *
+ * Checking the file and then unlinking the path is racy: a lock can change hands
+ * in between and the wrong one gets deleted. rename has exactly one winner, so
+ * moving the file to a path only this caller knows hands us the file itself —
+ * and whatever we then inspect is the thing we delete. A lock that turns out to
+ * belong to someone else goes straight back.
+ */
+export function dropLock(lock: string, to: string, mine: (taken: string) => boolean): void {
+  try { renameSync(lock, to); } catch { return; } // already gone, or another process won it
+  try {
+    if (mine(to)) unlinkSync(to);
+    else renameSync(to, lock);
+  } catch { /* best effort */ }
+}
+
+/**
  * Run fn while holding `${file}.lock`, so concurrent processes serialise a
  * read-modify-write instead of overwriting each other. A lock left behind by a
  * process that died mid-write is cleared once it goes stale — so the lock file
@@ -56,6 +73,10 @@ export function retrying<T>(fn: () => T): T {
 export function withLock<T>(file: string, fn: () => T): T {
   const lock = `${file}.lock`;
   const token = randomUUID();
+  const taken = `${lock}.${token}`; // no other holder ever touches this path
+  const stale = (p: string) => {
+    try { return Date.now() - statSync(p).mtimeMs > STALE_LOCK_MS; } catch { return false; }
+  };
   mkdirSync(path.dirname(lock), { recursive: true });
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   let fd: number | undefined;
@@ -67,9 +88,7 @@ export function withLock<T>(file: string, fn: () => T): T {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? "";
       if (!RETRYABLE.has(code)) throw e;
-      try {
-        if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS) unlinkSync(lock);
-      } catch { /* someone else cleared it */ }
+      if (stale(lock)) dropLock(lock, taken, stale); // re-checked on the file we took
       if (Date.now() > deadline) throw new Error(`${file} is locked by another process (${lock})`);
       sleep(Math.min(50, 2 + attempt));
     }
@@ -78,8 +97,12 @@ export function withLock<T>(file: string, fn: () => T): T {
     return fn();
   } finally {
     closeSync(fd);
-    // gone, unreadable, or someone else's token: not ours to remove
-    try { if (readFileSync(lock, "utf8") === token) unlinkSync(lock); } catch { /* best effort */ }
+    // a lock already taken over is left alone entirely; dropLock settles the rest
+    try {
+      if (readFileSync(lock, "utf8") === token) {
+        dropLock(lock, taken, p => readFileSync(p, "utf8") === token);
+      }
+    } catch { /* gone or unreadable: nothing of ours to clean up */ }
   }
 }
 
