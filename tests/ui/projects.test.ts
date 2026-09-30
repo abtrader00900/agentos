@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { registerProject, listProjects, getProject, removeProject, projectId, registryFile } from "../../src/ui/projects.js";
@@ -9,6 +9,7 @@ import { run } from "../../src/commands/run.js";
 let home: string;
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(path.join(tmpdir(), p)); dirs.push(d); return d; };
+const real = (p: string) => realpathSync.native(p);
 beforeEach(() => { home = tmp("agentos-home-"); });
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); delete process.env.AGENTOS_HOME; });
 
@@ -19,7 +20,7 @@ describe("project registry", () => {
     registerProject(a, home);
     const all = listProjects(home);
     expect(all).toHaveLength(1);
-    expect(all[0]).toMatchObject({ path: path.resolve(a), missing: false, name: path.basename(a) });
+    expect(all[0]).toMatchObject({ path: real(a), missing: false, name: path.basename(a) });
     expect(all[0].id).toMatch(/^[a-z0-9-]{1,24}-[0-9a-f]{4}$/);
   });
 
@@ -27,8 +28,17 @@ describe("project registry", () => {
     const a = tmp("proj-b-");
     expect(projectId(a)).toBe(projectId(a));
     const p = registerProject(a, home);
-    expect(getProject(p.id, home)?.path).toBe(path.resolve(a));
+    expect(getProject(p.id, home)?.path).toBe(real(a));
     expect(getProject("nope-0000", home)).toBeUndefined();
+  });
+
+  it("registers the same existing folder through different spellings once", () => {
+    const a = tmp("proj-spelling-");
+    registerProject(a, home);
+    registerProject(`${a}${path.sep}`, home);
+    if (process.platform === "win32") registerProject(a.toUpperCase(), home);
+    expect(listProjects(home)).toHaveLength(1);
+    expect(listProjects(home)[0].path).toBe(real(a));
   });
 
   it("marks a deleted folder missing; remove drops the entry", () => {
@@ -54,6 +64,6 @@ describe("project registry", () => {
     dirs.push(repo.tmp);
     process.env.AGENTOS_HOME = home;
     await expect(run("", { cwd: repo.root, status: "missing-run" })).rejects.toThrow();
-    expect(listProjects(home).map((p) => p.path)).toContain(path.resolve(repo.root));
+    expect(listProjects(home).map((p) => p.path)).toContain(real(repo.root));
   });
 });

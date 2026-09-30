@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync, renameSync, linkSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 /**
  * Zero-dependency persistent JSON store.
@@ -40,6 +41,110 @@ export function retrying(fn) {
                 throw e;
             sleep(10 + attempt * 5);
         }
+    }
+}
+/**
+ * Remove the lock file, but only the one `mine` recognises.
+ *
+ * Checking the file and then unlinking the path is racy: a lock can change hands
+ * in between and the wrong one gets deleted. rename has exactly one winner, so
+ * moving the file to a path only this caller knows hands us the file itself —
+ * and whatever we then inspect is the thing we delete. A lock that turns out to
+ * belong to someone else goes back by link, not rename: rename would replace a
+ * lock somebody acquired in the meantime, link fails instead — and a lock path
+ * that is occupied again makes the file we took obsolete, so it just goes.
+ */
+export function dropLock(lock, to, mine) {
+    try {
+        renameSync(lock, to);
+    }
+    catch {
+        return;
+    } // already gone, or another process won it
+    let ours = false;
+    try {
+        ours = mine(to);
+    }
+    catch { /* unreadable: treat as someone else's */ }
+    if (!ours) {
+        try {
+            retrying(() => linkSync(to, lock));
+        }
+        catch (e) {
+            // EEXIST means the path holds a live lock again, so the file we took is obsolete.
+            // Any other failure (no hard links on this filesystem, I/O error) means we could
+            // not give the lock back — keep the file rather than delete another holder's lock.
+            if (e.code !== "EEXIST")
+                return;
+        }
+    }
+    try {
+        unlinkSync(to);
+    }
+    catch { /* best effort */ }
+}
+/**
+ * Run fn while holding `${file}.lock`, so concurrent processes serialise a
+ * read-modify-write instead of overwriting each other. A lock left behind by a
+ * process that died mid-write is cleared once it goes stale — so the lock file
+ * carries a token identifying its holder, and is only removed while it still
+ * holds ours (a slow holder must not delete the lock that took its place).
+ */
+export function withLock(file, fn) {
+    const lock = `${file}.lock`;
+    const token = randomUUID();
+    const taken = `${lock}.${token}`; // no other holder ever touches this path
+    const stale = (p) => {
+        try {
+            return Date.now() - statSync(p).mtimeMs > STALE_LOCK_MS;
+        }
+        catch {
+            return false;
+        }
+    };
+    mkdirSync(path.dirname(lock), { recursive: true });
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    let fd;
+    for (let attempt = 0; fd === undefined; attempt++) {
+        try {
+            const opened = openSync(lock, "wx");
+            try {
+                writeSync(opened, token); // stamped before we count as the holder
+            }
+            catch (e) {
+                // an unstamped lock is ours and nobody else's business: take it with us
+                closeSync(opened);
+                try {
+                    unlinkSync(lock);
+                }
+                catch { /* best effort */ }
+                throw e;
+            }
+            fd = opened;
+        }
+        catch (e) {
+            const code = e.code ?? "";
+            if (!RETRYABLE.has(code))
+                throw e;
+            if (stale(lock))
+                dropLock(lock, taken, stale); // re-checked on the file we took
+            if (Date.now() > deadline)
+                throw new Error(`${file} is locked by another process (${lock})`);
+            sleep(Math.min(50, 2 + attempt));
+        }
+    }
+    try {
+        return fn();
+    }
+    finally {
+        closeSync(fd);
+        // a lock already taken over is left alone entirely; dropLock settles the rest
+        try {
+            if (readFileSync(lock, "utf8") === token) {
+                dropLock(lock, taken, p => readFileSync(p, "utf8") === token);
+            }
+        }
+        catch { /* gone or unreadable: nothing of ours to clean up */ }
     }
 }
 export class JsonStore {
@@ -124,40 +229,12 @@ export class JsonStore {
      * this.table(...), and the result is saved before the lock is released.
      */
     update(fn) {
-        const lock = `${this.file}.lock`;
-        const deadline = Date.now() + LOCK_TIMEOUT_MS;
-        let fd;
-        for (let attempt = 0; fd === undefined; attempt++) {
-            try {
-                fd = openSync(lock, "wx");
-            }
-            catch (e) {
-                const code = e.code ?? "";
-                if (!RETRYABLE.has(code))
-                    throw e;
-                try {
-                    if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS)
-                        unlinkSync(lock);
-                }
-                catch { /* someone else cleared it */ }
-                if (Date.now() > deadline)
-                    throw new Error(`${this.file} is locked by another process (${lock})`);
-                sleep(Math.min(50, 2 + attempt));
-            }
-        }
-        try {
+        return withLock(this.file, () => {
             this.load();
             const result = fn();
             this.save();
             return result;
-        }
-        finally {
-            closeSync(fd);
-            try {
-                unlinkSync(lock);
-            }
-            catch { /* best effort */ }
-        }
+        });
     }
     /** Every mutation already saves; closing must not rewrite the file on a read-only open. */
     close() { }

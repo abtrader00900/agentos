@@ -45,6 +45,8 @@ export const orchestratorSchema = z.object({
     reviewer: agentNameSchema.default("codex"),
     /** shell commands that must pass before a PR opens, run in the run worktree */
     verify: z.array(z.string().min(1)).default([]),
+    /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
+    build: z.array(z.string().min(1)).default([]),
     /** a second worker only starts while this much memory is free */
     minFreeMemoryMb: z.number().nonnegative().default(1500),
     /** folders linked from the checkout into each worktree (installed deps the verify commands need) */

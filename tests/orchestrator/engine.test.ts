@@ -83,6 +83,23 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
     expect(prCalls(d)).toHaveLength(0);
   });
 
+  it("commits the build commands' output into the pushed branch", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const build = [`node -e "require('fs').writeFileSync('built.txt','ok')"`];
+    const s = await startRun(repo.root, "build before the PR", cfg({ build }), d);
+    expect(s.status).toBe("pr_open");
+    expect(sh(repo.remote, ["show", `${s.branch}:built.txt`])).toBe("ok");
+  });
+
+  it("stops at needs_human when a build command fails", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const build = [`node -e "console.error('boom'); process.exit(1)"`];
+    const s = await startRun(repo.root, "build breaks", cfg({ build }), d);
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("boom");
+    expect(prCalls(d)).toHaveLength(0);
+  });
+
   it("sends blocking review findings to a fixer", async () => {
     const reviews = [JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue: "a.txt must say hello" }]), "[]"];
     let fixPrompt = "";

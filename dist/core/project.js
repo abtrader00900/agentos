@@ -15,17 +15,22 @@ catch {
  *
  * ~/.agentos is the GLOBAL config directory, not a project marker — treating it
  * as one made every MCP server launched outside a project index the whole home.
+ * The real home is excluded as well as the passed one, because `from` is often a
+ * temp directory that lives *under* the home: walking out of it must not land on
+ * the global directory just because this call was given a different home.
  */
 export function projectRoot(from = process.cwd(), home = homedir()) {
     const env = process.env.AGENTOS_PROJECT?.trim();
     if (env && isDir(path.resolve(env)))
         return path.resolve(env);
     const start = path.resolve(from);
+    const key = (p) => process.platform === "win32" ? p.toLowerCase() : p;
+    const global = new Set([key(path.resolve(home)), key(path.resolve(homedir()))]);
     let dir = start;
     for (;;) {
         if (existsSync(path.join(dir, "agent.config.yaml")))
             return dir;
-        if (dir !== path.resolve(home) && isDir(path.join(dir, ".agentos")))
+        if (!global.has(key(dir)) && isDir(path.join(dir, ".agentos")))
             return dir;
         const parent = path.dirname(dir);
         if (parent === dir)

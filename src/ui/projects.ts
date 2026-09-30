@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { retrying, withLock } from "../core/jsonstore.js";
@@ -17,9 +17,14 @@ export const agentosHome = (): string => process.env.AGENTOS_HOME || os.homedir(
 
 export const registryFile = (home = agentosHome()): string => path.join(home, ".agentos", "projects.json");
 
+/** the real folder behind a path: on win32 the same folder may arrive as an 8.3 short name */
+const canonical = (root: string): string => {
+  try { return realpathSync.native(root); } catch { return path.resolve(root); }
+};
+
 /** identity of a folder: on win32 two paths differing only in case are the same folder */
 const key = (root: string): string => {
-  const abs = path.resolve(root);
+  const abs = canonical(root);
   return process.platform === "win32" ? abs.toLowerCase() : abs;
 };
 
@@ -80,11 +85,12 @@ function update<T>(home: string, fn: (projects: Project[]) => T): T {
 
 /** Add the folder if it is new, otherwise just refresh lastSeen. Returns the stored entry. */
 export function registerProject(root: string, home = agentosHome()): Project {
-  const dir = path.resolve(root);
+  const dir = canonical(root);
   return update(home, (projects) => {
     const now = new Date().toISOString();
     let entry = projects.find((p) => key(p.path) === key(dir));
     if (entry) {
+      entry.path = dir;
       entry.lastSeen = now;
     } else {
       entry = { id: projectId(dir), name: path.basename(dir), path: dir, addedAt: now, lastSeen: now };

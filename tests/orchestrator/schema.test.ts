@@ -11,7 +11,7 @@ describe("orchestrator config", () => {
   it("fills every default from an empty block", () => {
     expect(agentConfigSchema.parse({ ...base, orchestrator: {} }).orchestrator).toEqual({
       autonomy: "pr", maxWorkers: 2, maxFixRounds: 3, maxMinutes: 90, subtaskMinutes: 20,
-      planner: "claude", workers: ["claude", "codex"], reviewer: "codex", verify: [],
+      planner: "claude", workers: ["claude", "codex"], reviewer: "codex", verify: [], build: [],
       minFreeMemoryMb: 1500, link: ["node_modules"], models: {},
     });
   });

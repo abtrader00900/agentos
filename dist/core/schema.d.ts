@@ -68,6 +68,8 @@ export declare const orchestratorSchema: z.ZodObject<{
     reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
     /** shell commands that must pass before a PR opens, run in the run worktree */
     verify: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
+    build: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
     /** a second worker only starts while this much memory is free */
     minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
     /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
@@ -93,6 +95,7 @@ export declare const orchestratorSchema: z.ZodObject<{
     workers: ("codex" | "claude")[];
     reviewer: "codex" | "claude";
     verify: string[];
+    build: string[];
     minFreeMemoryMb: number;
     link: string[];
     models: {
@@ -109,6 +112,7 @@ export declare const orchestratorSchema: z.ZodObject<{
     workers?: ("codex" | "claude")[] | undefined;
     reviewer?: "codex" | "claude" | undefined;
     verify?: string[] | undefined;
+    build?: string[] | undefined;
     minFreeMemoryMb?: number | undefined;
     link?: string[] | undefined;
     models?: {
@@ -237,6 +241,8 @@ export declare const agentConfigSchema: z.ZodObject<{
         reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
         /** shell commands that must pass before a PR opens, run in the run worktree */
         verify: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
+        build: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         /** a second worker only starts while this much memory is free */
         minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
         /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
@@ -262,6 +268,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         workers: ("codex" | "claude")[];
         reviewer: "codex" | "claude";
         verify: string[];
+        build: string[];
         minFreeMemoryMb: number;
         link: string[];
         models: {
@@ -278,6 +285,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         workers?: ("codex" | "claude")[] | undefined;
         reviewer?: "codex" | "claude" | undefined;
         verify?: string[] | undefined;
+        build?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {
@@ -343,6 +351,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         workers: ("codex" | "claude")[];
         reviewer: "codex" | "claude";
         verify: string[];
+        build: string[];
         minFreeMemoryMb: number;
         link: string[];
         models: {
@@ -394,6 +403,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         workers?: ("codex" | "claude")[] | undefined;
         reviewer?: "codex" | "claude" | undefined;
         verify?: string[] | undefined;
+        build?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {

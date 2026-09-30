@@ -494,6 +494,14 @@ async function gate(c) {
         s.base = latest;
         return move(c, "verifying"); // the tests must pass on the new base too
     }
+    // built output goes in before the scan, so it is scanned too, and before the push, so it reaches the branch
+    if (c.cfg.build.length) {
+        const b = runVerify(s.runWorktree, c.cfg.build, minutes(c.cfg.subtaskMinutes));
+        logEvent(root, s.id, { type: "build", ok: b.ok, output: excerpt(redact(b.output), 600) });
+        if (!b.ok)
+            return move(c, "needs_human", `build command failed: ${excerpt(redact(b.output), 600)}`);
+        commitAll(s.runWorktree, "agentos: build");
+    }
     // every commit is pushed, so scan each one: a key a fixer removed later is still in the history.
     // --cc adds each merge commit's own lines (what a conflict resolution wrote) without re-listing
     // the lines it took from the base branch, which are already public

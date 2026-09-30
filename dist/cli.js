@@ -9,6 +9,7 @@ import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
 import { learn } from "./commands/learn.js";
 import { run, runs } from "./commands/run.js";
+import { ui } from "./commands/ui.js";
 import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "./commands/lessons.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
@@ -232,6 +233,17 @@ program
     .option("--limit <n>", "show only the n newest runs", Number)
     .action((opts) => { try {
     runs({ json: opts.json, limit: opts.limit });
+}
+catch (e) {
+    fail(e);
+} });
+program
+    .command("ui")
+    .description("Open the local agentos dashboard")
+    .option("--port <n>", "dashboard port", Number, 4455)
+    .option("--no-open", "do not open the browser")
+    .action(async (opts) => { try {
+    await ui({ port: opts.port, open: opts.open });
 }
 catch (e) {
     fail(e);
