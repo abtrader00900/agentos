@@ -35,6 +35,12 @@ describe("frontend", () => {
     expect(used.filter((k) => !(k in labels))).toEqual([]);
   });
 
+  it("part 2 screens exist and use labels", () => {
+    const app = read("app.js");
+    for (const route of ["#/p/", "/lessons", "/drafts", "/new"]) expect(app).toContain(route);
+    for (const k of ["approve", "forget", "promote", "reject", "startRun", "heldBySafety", "confirmForget"]) expect(app).toContain(`L("${k}")`);
+  });
+
   it("serves the app files with the right types", async () => {
     t = await startTestServer();
     for (const [f, type] of [["/", /text\/html/], ["/app.js", /javascript/], ["/labels.js", /javascript/], ["/style.css", /text\/css/]] as const) {
