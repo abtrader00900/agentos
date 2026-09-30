@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { projectRoot } from "../core/project.js";
+import { git } from "../orchestrator/workspace.js";
 import { registerProject } from "../ui/projects.js";
 import { startUi } from "../ui/server.js";
 
 export async function ui(opts: { port: number; open?: boolean }): Promise<void> {
-  try { registerProject(projectRoot()); } catch { /* dashboard works without the registry */ }
+  // The same root `agentos run` registers, so both dedupe to one entry. Outside a
+  // git repo rev-parse throws and nothing is registered: the dashboard lists the
+  // projects runs have visited, not whichever folder `agentos ui` was typed in.
+  try { registerProject(git(process.cwd(), ["rev-parse", "--show-toplevel"])); } catch { /* dashboard works without the registry */ }
 
   const token = randomBytes(32).toString("hex");
   const { url } = await startUi({ token, port: opts.port });
