@@ -12,6 +12,7 @@ import { run, runs } from "./commands/run.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
+import { createOrchestratorServer } from "./mcp/orchestrator/server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ALL_HARNESSES } from "./core/schema.js";
 import type { HarnessName } from "./core/schema.js";
@@ -92,6 +93,14 @@ mcp
   .description("Run the codegraph MCP server over stdio (dependency graph + impact analysis)")
   .action(async () => {
     const server = createCodegraphServer();
+    await server.connect(new StdioServerTransport());
+  });
+
+mcp
+  .command("orchestrator")
+  .description("Run the orchestrator MCP server over stdio (run_task / run_status / run_cancel)")
+  .action(async () => {
+    const server = createOrchestratorServer();
     await server.connect(new StdioServerTransport());
   });
 
