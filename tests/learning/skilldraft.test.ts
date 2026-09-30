@@ -58,6 +58,14 @@ describe("skill drafts", { timeout: 30_000 }, () => {
     expect(existsSync(path.join(draftsDir(repo.root), "erp-report"))).toBe(false);
   });
 
+  it("rejects a 100 KB hostile draft fast (the safety regexes never see more than 20 KB)", async () => {
+    const t = Date.now();
+    const r = await draftSkill(repo.root, "erp-report", [], async () => reply(GOOD + "|".repeat(100_000)), 1000);
+    expect(Date.now() - t).toBeLessThan(500);
+    expect(r.ok).toBe(false);
+    expect(existsSync(path.join(draftsDir(repo.root), "erp-report", "SKILL.md"))).toBe(false);
+  });
+
   it("discards an invalid or unsafe draft", async () => {
     const bad = await draftSkill(repo.root, "erp-report", [], async () => reply("# no frontmatter"), 1000);
     expect(bad.ok).toBe(false);

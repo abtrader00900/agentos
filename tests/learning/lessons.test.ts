@@ -40,14 +40,42 @@ describe("lessons", () => {
     expect(all[0].meta.status).toBe("pending"); // it has evidence, but the text is risky
   });
 
-  it("merges a repeated lesson (sameAs or similar wording) instead of adding it", () => {
+  it("merges a repeated lesson (sameAs or similar wording) instead of adding it; the merge keeps its status", () => {
     const [key] = saveLessons(root, "r1", "k", [{ text: "Eager load customer relations in report queries", roles: ["worker"], evidence: [] }]);
     saveLessons(root, "r2", "k", [{ text: "Eager load the customer relations in report queries", roles: ["worker"], evidence: EV }]);
     saveLessons(root, "r3", "k", [{ text: "anything", roles: ["worker"], evidence: [], sameAs: key }]);
     const all = listLessons(root);
     expect(all).toHaveLength(1);
-    expect(all[0].meta).toMatchObject({ status: "auto", runs: ["r1", "r2", "r3"], seen: 3 });
+    // the evidence is added, but only the owner's approve moves a pending lesson on
+    expect(all[0].meta).toMatchObject({ status: "pending", runs: ["r1", "r2", "r3"], seen: 3, evidence: EV });
     expect(all[0].text).toBe("Eager load customer relations in report queries");
+  });
+
+  it("a sameAs merge with real evidence never launders a pending lesson into auto", () => {
+    const [key] = saveLessons(root, "r1", undefined, [{ text: "Maybe split views into their own subtask", roles: ["worker"], evidence: [] }]);
+    saveLessons(root, "r2", undefined, [{ text: "Unrelated safe lesson that cites real evidence", roles: ["worker"], evidence: EV, sameAs: key }]);
+    const all = listLessons(root);
+    expect(all).toHaveLength(1);
+    expect(all[0].meta).toMatchObject({ status: "pending", runs: ["r1", "r2"], evidence: EV });
+    expect(listLessons(root, { status: ["auto", "approved"] })).toEqual([]);
+  });
+
+  it("promote refuses a pending lesson", () => {
+    const [key] = saveLessons(root, "r1", undefined, [{ text: "Maybe split views into their own subtask", roles: ["worker"], evidence: [] }]);
+    expect(() => promoteLesson(root, key)).toThrow(`lesson ${key} is pending — approve it first`);
+    expect(existsSync(path.join(root, "agent.config.local.yaml"))).toBe(false);
+    // a swapped text is pending too, whatever its meta says
+    const [auto] = saveLessons(root, "r2", undefined, [{ text: "Run the migration before the seed step", roles: ["worker"], evidence: EV }]);
+    new MemoryStore(path.join(root, ".agentos", "memory.json")).store({ topic: "lessons", key: auto, value: "Swapped in by memory_store later" });
+    expect(() => promoteLesson(root, auto)).toThrow(/is pending/);
+  });
+
+  it("a 100 KB hostile text is rejected fast (the safety regexes never see more than 20 KB)", () => {
+    const hostile = "|".repeat(100_000);
+    const t = Date.now();
+    expect(safetyCheck(hostile)).toBe("reject");
+    expect(saveLessons(root, "r1", undefined, [{ text: hostile, roles: ["worker"], evidence: EV }])).toEqual([]);
+    expect(Date.now() - t).toBeLessThan(500);
   });
 
   it("keeps at most 3 lessons from one run and caps text at 300 chars", () => {

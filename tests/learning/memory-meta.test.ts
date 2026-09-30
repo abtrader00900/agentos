@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { MemoryStore } from "../../src/mcp/memory/store.js";
 import { createMemoryServer } from "../../src/mcp/memory/server.js";
+import { lessonKey } from "../../src/learning/lessons.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), "agentos-meta-")); });
@@ -29,18 +30,35 @@ describe("fact meta", () => {
     expect(s.get("t", "k")?.meta).toBeUndefined();
   });
 
-  it("memory_recall marks pending lessons", async () => {
+  it("memory_recall, memory_get and memory_export mark pending lessons by the engine's rule", async () => {
     const file = path.join(dir, "memory.json");
     const s = new MemoryStore(file);
-    s.store({ topic: "lessons", key: "L-a", value: "approved lesson", meta: { status: "auto" } });
-    s.store({ topic: "lessons", key: "L-b", value: "guessed lesson", meta: { status: "pending" } });
+    const AUTO = "auto lesson with its own key";
+    const GUESS = "guessed lesson";
+    const SWAPPED = "swapped text under an auto key";
+    const swappedKey = lessonKey("the text that was approved");
+    s.store({ topic: "lessons", key: lessonKey(AUTO), value: AUTO, meta: { status: "auto" } });
+    s.store({ topic: "lessons", key: lessonKey(GUESS), value: GUESS, meta: { status: "pending" } });
+    s.store({ topic: "lessons", key: swappedKey, value: SWAPPED, meta: { status: "auto" } }); // key ≠ lessonKey(value)
     const server = createMemoryServer(file);
     const [a, b] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "t", version: "0" });
     await Promise.all([client.connect(a), server.connect(b)]);
-    const text = ((await client.callTool({ name: "memory_recall", arguments: { topic: "lessons" } })).content as { text: string }[])[0].text;
-    expect(text).toContain("[lessons/L-b] [pending] guessed lesson");
-    expect(text).not.toContain("[lessons/L-a] [pending]");
+    const call = async (name: string, args: Record<string, unknown> = {}) =>
+      ((await client.callTool({ name, arguments: args })).content as { text: string }[])[0].text;
+
+    const recall = await call("memory_recall", { topic: "lessons" });
+    expect(recall).toContain(`[lessons/${lessonKey(GUESS)}] [pending] ${GUESS}`);
+    expect(recall).toContain(`[lessons/${swappedKey}] [pending] ${SWAPPED}`);
+    expect(recall).toContain(`[lessons/${lessonKey(AUTO)}] ${AUTO}`);
+
+    expect(await call("memory_get", { topic: "lessons", key: swappedKey })).toBe(`[pending] ${SWAPPED}`);
+    expect(await call("memory_get", { topic: "lessons", key: lessonKey(AUTO) })).toBe(AUTO);
+
+    const md = await call("memory_export");
+    expect(md).toContain(`- **${swappedKey}** [pending]: ${SWAPPED}`);
+    expect(md).toContain(`- **${lessonKey(GUESS)}** [pending]: ${GUESS}`);
+    expect(md).toContain(`- **${lessonKey(AUTO)}**: ${AUTO}`);
     await client.close();
   });
 });

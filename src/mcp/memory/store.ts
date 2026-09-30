@@ -1,4 +1,5 @@
 import { JsonStore } from "../../core/jsonstore.js";
+import { isPendingLesson } from "../../learning/status.js";
 
 /**
  * FR-3.x: persistent project memory.
@@ -41,6 +42,27 @@ export class MemoryStore {
   store(input: FactInput): Fact {
     // under the store lock: two harnesses writing at once must not drop each other's facts
     return this.db.update(() => this.upsert(input));
+  }
+
+  /**
+   * Read-modify-write one fact under the store lock: fn sees the fact as it is on disk now, and returns the
+   * changes. A different key moves the fact (source and pinned kept) in the same write. Returns undefined,
+   * changing nothing, when the fact no longer exists: a forgotten fact is never re-created.
+   */
+  patch(topic: string, key: string, fn: (f: Fact) => { key?: string; value?: string; meta?: Record<string, unknown> }): Fact | undefined {
+    return this.db.update(() => {
+      const facts = this.db.table<Fact>("facts");
+      const i = facts.findIndex((f) => f.topic === topic && f.key === key);
+      if (i < 0) return undefined;
+      const cur = facts[i];
+      const next = fn(structuredClone(cur));
+      const newKey = next.key ?? key;
+      if (newKey !== key) facts.splice(i, 1);
+      return this.upsert({
+        topic, key: newKey, value: next.value ?? cur.value, meta: next.meta ?? cur.meta,
+        ...(newKey !== key ? { source: cur.source ?? undefined, pinned: !!cur.pinned } : {}),
+      });
+    });
   }
 
   private upsert(input: FactInput): Fact {
@@ -133,7 +155,7 @@ export class MemoryStore {
       }
       const pin = f.pinned ? " 📌" : "";
       const src = f.source ? ` _(source: ${oneLine(f.source)})_` : "";
-      lines.push(`- **${oneLine(f.key)}**${pin}: ${oneLine(f.value)}${src}`);
+      lines.push(`- **${oneLine(f.key)}**${pin}${isPendingLesson(f) ? " [pending]" : ""}: ${oneLine(f.value)}${src}`);
     }
     return lines.join("\n") + "\n";
   }

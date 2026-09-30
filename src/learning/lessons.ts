@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { MemoryStore, oneLine, type Fact } from "../mcp/memory/store.js";
 import { secretHits, redact } from "../orchestrator/safety.js";
 import { applyLearnedRules } from "../commands/learn.js";
+import { lessonKey, lessonStatus, type LessonStatus } from "./status.js";
 
+export { lessonKey, lessonStatus, type LessonStatus };
 export type Role = "planner" | "worker" | "reviewer" | "fixer";
 export const ROLES: readonly Role[] = ["planner", "worker", "reviewer", "fixer"];
-export type LessonStatus = "auto" | "pending" | "approved";
 
 export interface LessonMeta {
   status: LessonStatus;
@@ -38,8 +38,8 @@ export function jaccard(a: string, b: string): number {
   return both / (A.size + B.size - both);
 }
 
-export const lessonKey = (text: string) =>
-  `L-${createHash("sha1").update(text.toLowerCase().replace(/\s+/g, " ").trim()).digest("hex").slice(0, 8)}`;
+/** longer text is rejected unchecked: several safety regexes backtrack quadratically on hostile input */
+export const MAX_CHECKED = 20_000;
 
 const INTERP = "(?:sh|bash|zsh|pwsh|powershell|python\\d*|node|perl|ruby)";
 const RISKY = [
@@ -58,17 +58,8 @@ const RISKY = [
  * dropped ("reject"). A URL, a pipe into a shell and the like can never be auto ("pending").
  */
 export function safetyCheck(text: string): "ok" | "pending" | "reject" {
-  if (secretHits(text).length || redact(text) !== text) return "reject";
+  if (text.length > MAX_CHECKED || secretHits(text).length || redact(text) !== text) return "reject";
   return RISKY.some((r) => r.test(text)) ? "pending" : "ok";
-}
-
-/**
- * A lesson fact's status. agentos always stores a lesson under lessonKey(text); another key means the text
- * was swapped (memory_store keeps meta on an existing key), so it can never be auto or approved.
- */
-export function lessonStatus(f: Fact): LessonStatus {
-  const status = (f.meta as Partial<LessonMeta> | undefined)?.status;
-  return status && f.key === lessonKey(f.value) ? status : "pending";
 }
 
 function toLesson(f: Fact): Lesson {
@@ -95,11 +86,10 @@ export function saveLessons(root: string, runId: string, kind: string | undefine
   const store = new MemoryStore(memoryFile(root));
   const existing = listLessons(root);
   const touched: string[] = [];
-  // ponytail: read-modify-write outside the store lock, so a concurrent `uses` bump (made when a lesson goes
-  // into a prompt) can be lost; upgrade path: do the whole merge inside one MemoryStore update.
   for (const d of drafts.slice(0, PER_RUN)) {
-    // check the whole text first: a secret straddling the 300-char cut must never be stored partially
-    const full = oneLine(d.text);
+    // check the whole text first: a secret straddling the 300-char cut must never be stored partially.
+    // Over MAX_CHECKED it is rejected before any regex (oneLine's included) runs on it.
+    const full = d.text.length > MAX_CHECKED ? "" : oneLine(d.text);
     const safety = full ? safetyCheck(full) : "reject";
     if (safety === "reject") continue;
     const text = full.slice(0, 300);
@@ -120,18 +110,23 @@ export function saveLessons(root: string, runId: string, kind: string | undefine
     }
     same ??= existing.find((l) => l.key === lessonKey(text)); // identical text always merges: a fresh store would overwrite it
     if (same) {
-      const m = same.meta;
-      // upgrade only when the stored text is itself safe: a risky lesson never turns auto through a safe twin
-      const upgraded = m.status === "pending" && status === "auto" && safetyCheck(same.text) === "ok" ? "auto" : m.status;
-      const meta: LessonMeta = {
-        ...m, status: upgraded,
-        evidence: [...new Set([...m.evidence, ...evidence])].slice(-10),
-        runs: [...new Set([...m.runs, runId])].slice(-20),
-        seen: m.seen + 1,
-      };
-      store.store({ topic: TOPIC, key: same.key, value: same.text, meta: { ...meta } });
-      same.meta = meta;
-      touched.push(same.key);
+      // a merge adds evidence, never changes the status: sameAs is model-chosen, so it could attach real
+      // evidence to any pending lesson. It works on the fact as it is now, not on the snapshot above.
+      const merged = store.patch(TOPIC, same.key, (f) => {
+        const m = toLesson(f).meta;
+        return {
+          meta: {
+            ...f.meta,
+            evidence: [...new Set([...m.evidence, ...evidence])].slice(-10),
+            runs: [...new Set([...m.runs, runId])].slice(-20),
+            seen: m.seen + 1,
+          },
+        };
+      });
+      if (merged) { // undefined: forgotten meanwhile, and a merge never brings it back
+        same.meta = toLesson(merged).meta;
+        touched.push(same.key);
+      }
       continue;
     }
     const key = lessonKey(text);
@@ -151,13 +146,14 @@ function find(root: string, key: string): Lesson {
 
 /** The owner approves the text they see; a swapped text is re-keyed so the approval sticks. */
 export function approveLesson(root: string, key: string): Lesson {
-  const l = find(root, key);
-  const meta = { ...l.meta, status: "approved" as const };
-  const store = new MemoryStore(memoryFile(root));
-  const newKey = lessonKey(l.text);
-  store.store({ topic: TOPIC, key: newKey, value: l.text, meta: { ...meta } });
-  if (newKey !== key) store.forget(TOPIC, key);
-  return { key: newKey, text: l.text, meta };
+  find(root, key);
+  // one locked write: the approval keeps runs merged meanwhile, and the re-key cannot resurrect a forgotten lesson
+  const f = new MemoryStore(memoryFile(root)).patch(TOPIC, key, (cur) => ({
+    key: lessonKey(cur.value),
+    meta: { ...toLesson(cur).meta, status: "approved" },
+  }));
+  if (!f) throw new Error(`No lesson "${key}"`);
+  return toLesson(f);
 }
 
 export const forgetLesson = (root: string, key: string) => new MemoryStore(memoryFile(root)).forget(TOPIC, key);
@@ -165,5 +161,6 @@ export const forgetLesson = (root: string, key: string) => new MemoryStore(memor
 /** Append the lesson as a rule to agent.config.local.yaml (review, then move it to agent.config.yaml). */
 export function promoteLesson(root: string, key: string): number {
   const l = find(root, key);
+  if (l.meta.status === "pending") throw new Error(`lesson ${key} is pending — approve it first`);
   return applyLearnedRules(root, [{ id: `lesson-${key.slice(2)}`, text: l.text, evidence: l.meta.evidence.join("; ") }]);
 }
