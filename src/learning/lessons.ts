@@ -44,8 +44,11 @@ export const lessonKey = (text: string) =>
 const INTERP = "(?:sh|bash|zsh|pwsh|powershell|python\\d*|node|perl|ruby)";
 const RISKY = [
   /https?:\/\//i, /\bwww\./i, /\biex\b/i, /invoke-expression/i, /base64\s+(-d|--decode)/i,
-  new RegExp(`(?:\\||&&|;)\\s*(?:sudo\\s+)?${INTERP}\\b`, "i"), // a pipe or chain into an interpreter
+  // a pipe or chain into an interpreter, also via sudo (with flags), env or a path: `| sudo -E /bin/bash`
+  new RegExp(`(?:\\||&&|;)\\s*(?:sudo(?:\\s+-\\S+)*\\s+)?(?:env\\s+)?(?:\\S*[\\/])?${INTERP}\\b`, "i"),
   /\b(ba)?sh\s+-c\b/i,
+  /\b(?:pwsh|powershell)(?:\.exe)?\b.*\s-e(?:nc|ncodedcommand)?\b/i,
+  /\b(?:zsh|python\d*|node|perl|ruby)\s+-(?:c|e)\b/i,
   /\b(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/i,
   /rm\s+-[a-z]*(rf|fr)/i,
 ];
@@ -59,13 +62,22 @@ export function safetyCheck(text: string): "ok" | "pending" | "reject" {
   return RISKY.some((r) => r.test(text)) ? "pending" : "ok";
 }
 
+/**
+ * A lesson fact's status. agentos always stores a lesson under lessonKey(text); another key means the text
+ * was swapped (memory_store keeps meta on an existing key), so it can never be auto or approved.
+ */
+export function lessonStatus(f: Fact): LessonStatus {
+  const status = (f.meta as Partial<LessonMeta> | undefined)?.status;
+  return status && f.key === lessonKey(f.value) ? status : "pending";
+}
+
 function toLesson(f: Fact): Lesson {
   const m = (f.meta ?? {}) as Partial<LessonMeta>;
   return {
     key: f.key,
     text: f.value,
     meta: {
-      status: m.status ?? "pending", roles: m.roles ?? [...ROLES], kind: m.kind, evidence: m.evidence ?? [],
+      status: lessonStatus(f), roles: m.roles ?? [...ROLES], kind: m.kind, evidence: m.evidence ?? [],
       runs: m.runs ?? [], seen: m.seen ?? 1, uses: m.uses ?? 0, lastUsed: m.lastUsed,
     },
   };
@@ -137,11 +149,15 @@ function find(root: string, key: string): Lesson {
   return l;
 }
 
+/** The owner approves the text they see; a swapped text is re-keyed so the approval sticks. */
 export function approveLesson(root: string, key: string): Lesson {
   const l = find(root, key);
   const meta = { ...l.meta, status: "approved" as const };
-  new MemoryStore(memoryFile(root)).store({ topic: TOPIC, key, value: l.text, meta: { ...meta } });
-  return { ...l, meta };
+  const store = new MemoryStore(memoryFile(root));
+  const newKey = lessonKey(l.text);
+  store.store({ topic: TOPIC, key: newKey, value: l.text, meta: { ...meta } });
+  if (newKey !== key) store.forget(TOPIC, key);
+  return { key: newKey, text: l.text, meta };
 }
 
 export const forgetLesson = (root: string, key: string) => new MemoryStore(memoryFile(root)).forget(TOPIC, key);

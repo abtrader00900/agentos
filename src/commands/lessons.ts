@@ -15,7 +15,7 @@ export function lessonsCommand(action: string | undefined, key: string | undefin
   const root = repoRoot(opts.cwd);
   if (action) {
     if (!key) throw new Error(`Usage: agentos lessons ${action} <key>`);
-    if (action === "approve") { const l = approveLesson(root, key); console.log(`✓ approved ${key}: ${l.text}`); return; }
+    if (action === "approve") { const l = approveLesson(root, key); console.log(`✓ approved ${l.key}: ${l.text}`); return; }
     if (action === "forget") { if (!forgetLesson(root, key)) throw new Error(`No lesson "${key}"`); console.log(`✓ forgot ${key}`); return; }
     if (action === "promote") {
       const n = promoteLesson(root, key);

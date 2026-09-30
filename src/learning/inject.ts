@@ -17,6 +17,7 @@ export function lessonsFor(root: string, role: Role, task: string, max: number):
   if (!picked.length) return { block: "", keys: [] };
   const store = new MemoryStore(memoryFile(root));
   const now = new Date().toISOString();
+  // ponytail: read-then-store outside the store lock, so two prompts built at once can lose a `uses` bump (a lost count only); upgrade: bump inside the store lock
   for (const l of picked) {
     store.store({ topic: "lessons", key: l.key, value: l.text, meta: { ...l.meta, uses: l.meta.uses + 1, lastUsed: now } });
   }
