@@ -41,14 +41,17 @@ export function parseFindings(text) {
     return null;
 }
 export const blocking = (findings) => findings.filter((f) => f.severity !== "low");
-export function reviewPrompt(task, diff) {
+export function reviewPrompt(task, diff, notes = "") {
     return [
         "You are reviewing a change another AI agent made. Do not edit any files.",
         `The task was: ${task}`,
         "Report real problems only: wrong behaviour, crashes, security holes, data loss, or parts of the task left undone. Ignore style.",
         'Reply with ONLY a JSON array, for example [{"severity":"high","file":"src/a.ts","line":12,"issue":"what breaks and when"}]. Use [] when you find nothing. severity is high, medium or low.',
+        notes,
         "The diff:",
         diff.length > 150_000 ? `${diff.slice(0, 150_000)}\n…(diff truncated)` : diff,
-    ].join("\n\n");
+    ]
+        .filter(Boolean)
+        .join("\n\n");
 }
 //# sourceMappingURL=verify.js.map

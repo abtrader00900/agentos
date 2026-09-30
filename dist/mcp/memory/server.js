@@ -43,7 +43,7 @@ export function createMemoryServer(dbPath = resolveDbPath()) {
         if (!facts.length)
             return { content: [{ type: "text", text: "No matching facts." }] };
         const out = facts
-            .map((f) => `[${f.topic}/${f.key}]${f.pinned ? " 📌" : ""} ${f.value}${f.source ? ` (src: ${f.source})` : ""} — ${f.updated_at}`)
+            .map((f) => `[${f.topic}/${f.key}]${f.pinned ? " 📌" : ""}${f.meta?.status === "pending" ? " [pending]" : ""} ${f.value}${f.source ? ` (src: ${f.source})` : ""} — ${f.updated_at}`)
             .join("\n");
         return { content: [{ type: "text", text: out }] };
     });

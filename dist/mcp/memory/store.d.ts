@@ -12,6 +12,8 @@ export interface Fact {
     pinned: number;
     created_at: string;
     updated_at: string;
+    /** structured extras (lessons: status, roles, evidence …); absent on plain facts */
+    meta?: Record<string, unknown>;
 }
 export interface FactInput {
     topic: string;
@@ -19,6 +21,7 @@ export interface FactInput {
     value: string;
     source?: string;
     pinned?: boolean;
+    meta?: Record<string, unknown>;
 }
 /** a fact is one list item: newlines in it would start new headings/items in the export */
 export declare const oneLine: (s: string) => string;

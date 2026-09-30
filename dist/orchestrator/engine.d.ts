@@ -1,4 +1,4 @@
-import type { OrchestratorConfig } from "../core/schema.js";
+import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import type { AgentName, Runner } from "./types.js";
 import { type RunState } from "./run.js";
 export interface EngineDeps {
@@ -10,6 +10,8 @@ export interface EngineDeps {
     gh: (cwd: string, args: string[]) => string;
     freeMemMb?: () => number;
     onStatus?: (s: RunState) => void;
+    /** PRD 2: lessons in prompts and learning after the run; absent = off */
+    learning?: LearningConfig;
 }
 /** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
 export declare function assertCleanCheckout(root: string): void;

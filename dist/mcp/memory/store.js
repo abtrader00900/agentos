@@ -21,6 +21,8 @@ export class MemoryStore {
                 existing.source = input.source;
             if (input.pinned !== undefined)
                 existing.pinned = input.pinned ? 1 : 0;
+            if (input.meta !== undefined)
+                existing.meta = input.meta;
             existing.updated_at = now;
             return { ...existing };
         }
@@ -31,6 +33,7 @@ export class MemoryStore {
             value: input.value,
             source: input.source ?? null,
             pinned: input.pinned ? 1 : 0,
+            ...(input.meta !== undefined ? { meta: input.meta } : {}),
             created_at: now,
             updated_at: now,
         };
