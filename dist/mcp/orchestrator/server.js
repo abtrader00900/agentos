@@ -7,6 +7,7 @@ import { VERSION } from "../../version.js";
 import { listRuns, loadRun, newRunId } from "../../orchestrator/run.js";
 import { cancelRun } from "../../orchestrator/engine.js";
 import { runLine } from "../../orchestrator/report.js";
+import { preflight } from "../../commands/run.js";
 /**
  * `agentos run --id <id> -- <task>` as a detached process: the run outlives the chat that asked for it.
  * No shell, so the task text is never parsed; "--" keeps a task that starts with a dash from being read as an option.
@@ -16,9 +17,17 @@ export function spawnDetachedRun(root, id, task) {
     spawn(process.execPath, [cli, "run", "--id", id, "--", task], { cwd: root, detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
 const text = (t) => ({ content: [{ type: "text", text: t }] });
-export function createOrchestratorServer(root = projectRoot(), launch = spawnDetachedRun) {
+export function createOrchestratorServer(root = projectRoot(), launch = spawnDetachedRun, 
+/** runs before launching: the detached process has no one to tell why it could not start */
+check = preflight) {
     const server = new McpServer({ name: "agentos-orchestrator", version: VERSION });
     server.tool("run_task", "Hand a coding task to the agentos team: plan → parallel agents in git worktrees → tests + cross-model review → pull request. Returns a run id at once; the run continues in the background.", { task: z.string().min(3).describe("What to build or fix, in plain words") }, async ({ task }) => {
+        try {
+            check(root);
+        }
+        catch (e) {
+            return { ...text(`Not started: ${e.message}`), isError: true };
+        }
         const id = newRunId();
         launch(root, id, task);
         return text(`Started run ${id}. Check it with run_status {"id":"${id}"}; it ends with a pull request or a reason it needs you.`);

@@ -19,7 +19,8 @@ export function makeRepo(files: Record<string, string> = {}) {
   sh(tmp, ["init", "-q", "--bare", "-b", "main", remote]);
   mkdirSync(root);
   sh(root, ["init", "-q", "-b", "main"]);
-  const all: Record<string, string> = { "README.md": "# test\n", ".gitignore": ".agentos/memory.json*\n", ...files };
+  // no .gitignore for .agentos: the engine itself must keep its files out of `git status`
+  const all: Record<string, string> = { "README.md": "# test\n", ...files };
   for (const [p, c] of Object.entries(all)) {
     mkdirSync(path.dirname(path.join(root, p)), { recursive: true });
     writeFileSync(path.join(root, p), c);

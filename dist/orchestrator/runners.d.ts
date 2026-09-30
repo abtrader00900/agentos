@@ -5,6 +5,8 @@ export declare function killTree(pid: number): void;
 /**
  * A runner for one agent CLI. argv is fixed and the prompt goes through stdin,
  * so the Windows shell (needed to start npm's .cmd shims) never sees user text.
+ * On Windows the command is resolved to an absolute path first: cmd.exe looks in the
+ * current directory before PATH, so a claude.cmd an agent wrote into a worktree would run.
  */
 export declare function spawnRunner(command: string, args: string[]): Runner;
 /** The agent's final message from Claude stream-json or Codex --json output, else the output's tail. */

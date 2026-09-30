@@ -45,6 +45,19 @@ describe("agentos run / runs", () => {
     expect(loadRun(repo.root, "r3").status).toBe("cancelled");
   });
 
+  it("records a background (--id) start that fails preflight, so run_status can explain it", async () => {
+    await expect(run("do x", { cwd: repo.root, id: "bg1" })).rejects.toThrow(/orchestrator block/);
+    const s = loadRun(repo.root, "bg1");
+    expect(s.status).toBe("failed");
+    expect(s.reason).toContain("orchestrator block");
+  });
+
+  it("never overwrites an existing run when a start with its id fails", async () => {
+    saveRun(repo.root, seeded("r5", "paused"));
+    await expect(run("do x", { cwd: repo.root, id: "r5" })).rejects.toThrow();
+    expect(loadRun(repo.root, "r5")).toMatchObject({ status: "paused", task: "task r5" });
+  });
+
   it("rejects path-like run ids", async () => {
     await expect(run("", { cwd: repo.root, status: "../x" })).rejects.toThrow("invalid run id");
   });

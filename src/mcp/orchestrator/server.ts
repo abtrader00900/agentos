@@ -7,6 +7,7 @@ import { VERSION } from "../../version.js";
 import { listRuns, loadRun, newRunId } from "../../orchestrator/run.js";
 import { cancelRun } from "../../orchestrator/engine.js";
 import { runLine } from "../../orchestrator/report.js";
+import { preflight } from "../../commands/run.js";
 
 /**
  * `agentos run --id <id> -- <task>` as a detached process: the run outlives the chat that asked for it.
@@ -19,7 +20,12 @@ export function spawnDetachedRun(root: string, id: string, task: string): void {
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
-export function createOrchestratorServer(root = projectRoot(), launch = spawnDetachedRun): McpServer {
+export function createOrchestratorServer(
+  root = projectRoot(),
+  launch = spawnDetachedRun,
+  /** runs before launching: the detached process has no one to tell why it could not start */
+  check: (root: string) => unknown = preflight,
+): McpServer {
   const server = new McpServer({ name: "agentos-orchestrator", version: VERSION });
 
   server.tool(
@@ -27,6 +33,11 @@ export function createOrchestratorServer(root = projectRoot(), launch = spawnDet
     "Hand a coding task to the agentos team: plan → parallel agents in git worktrees → tests + cross-model review → pull request. Returns a run id at once; the run continues in the background.",
     { task: z.string().min(3).describe("What to build or fix, in plain words") },
     async ({ task }) => {
+      try {
+        check(root);
+      } catch (e) {
+        return { ...text(`Not started: ${(e as Error).message}`), isError: true };
+      }
       const id = newRunId();
       launch(root, id, task);
       return text(`Started run ${id}. Check it with run_status {"id":"${id}"}; it ends with a pull request or a reason it needs you.`);

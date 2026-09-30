@@ -6,8 +6,8 @@ export function prBody(s) {
         `**Task:** ${s.task}`,
         s.plan ? `**Plan:** ${s.plan.summary}` : "",
         `| Subtask | Agent | Status | Summary |\n|---|---|---|---|\n${rows}`,
-        `**Verify:** ${s.verifyOk ? "passed" : "not run"} · **Fix rounds:** ${s.fixRound} · **Time:** ${minutes} min`,
-        s.verifyOutput ? `<details><summary>Verify output</summary>\n\n\`\`\`\n${s.verifyOutput}\n\`\`\`\n</details>` : "",
+        // verify output stays out of the PR: test logs can hold connection strings and keys that redact() does not know
+        `**Verify:** ${s.verifyOk ? "passed" : "not run"} · **Fix rounds:** ${s.fixRound} · **Time:** ${minutes} min · full log: \`.agentos/runs/${s.id}/state.json\``,
         s.findings.length
             ? `**Review notes (non-blocking):**\n${s.findings.map((f) => `- [${f.severity}] ${f.file}${f.line ? `:${f.line}` : ""} ${f.issue}`).join("\n")}`
             : "**Review:** no findings",

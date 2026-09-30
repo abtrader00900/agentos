@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { makeRepo, sh } from "./helpers.js";
 import { startRun, resumeRun, type EngineDeps } from "../../src/orchestrator/engine.js";
-import { requestCancel } from "../../src/orchestrator/run.js";
+import { requestCancel, runDir, loadRun } from "../../src/orchestrator/run.js";
 import { statusOf } from "../../src/orchestrator/workspace.js";
 import { orchestratorSchema } from "../../src/core/schema.js";
 import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
@@ -20,11 +21,12 @@ const sub = (id: string, over: Record<string, unknown> = {}) =>
 const planOf = (...subtasks: object[]) => ({ summary: "test plan", subtasks });
 
 type Work = (cwd: string, prompt: string) => void | RunnerResult | Promise<void | RunnerResult>;
-function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: () => string }) {
+function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: () => string | RunnerResult }) {
+  const reviewed = (r: string | RunnerResult) => (typeof r === "string" ? reply(r) : r);
   const read: Runner = async (req) =>
     req.prompt.includes("You are the planner")
       ? typeof f.plan === "function" ? (f.plan as () => RunnerResult)() : reply(JSON.stringify(f.plan))
-      : reply(f.review ? f.review() : "[]");
+      : reviewed(f.review ? f.review() : "[]");
   const write: Runner = async (req) => (await f.work?.(req.cwd, req.prompt)) ?? reply();
   const gh = vi.fn((_cwd: string, args: string[]) => (args[0] === "pr" ? "https://github.com/o/r/pull/7\n" : ""));
   const d: EngineDeps = { runners: { claude: { read, write }, codex: { read, write } }, gh, freeMemMb: () => 1e6 };
@@ -196,5 +198,132 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
     const s = await startRun(repo.root, "vague", cfg(), deps({ plan: () => reply("I cannot plan this"), work: creates }));
     expect(s.status).toBe("needs_human");
     expect(s.reason).toContain("planner:");
+  });
+});
+
+describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
+  const fakeKey = () => "AKIA" + "Q".repeat(16); // built at runtime: this file holds no key-shaped string
+  const remoteHas = (branch: string) => sh(repo.remote, ["branch", "--list", branch]) !== "";
+
+  it("blocks the PR when an earlier commit added a secret that a fixer removed later", async () => {
+    const reviews = [JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue: "remove the hard-coded key" }]), "[]"];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => reviews.shift() ?? "[]",
+      work: (cwd, p) => writeFileSync(path.join(cwd, "a.txt"), p.includes("does not pass yet") ? "clean\n" : `key=${fakeKey()}\n`),
+    });
+    const s = await startRun(repo.root, "leaky history", cfg(), d);
+    expect(s.fixRound).toBe(1); // the final diff is clean; only the history holds the key
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("secret scan");
+    expect(prCalls(d)).toHaveLength(0);
+    expect(remoteHas(s.branch)).toBe(false);
+  });
+
+  it("aborts a half-finished merge left by a dead engine instead of committing it on resume", async () => {
+    let bCalls = 0;
+    const d = deps({
+      plan: planOf(sub("a"), sub("b")),
+      work: (cwd, p) => {
+        if (p.includes("stopped with conflicts")) return writeFileSync(path.join(cwd, "a.txt"), "resolved\n");
+        if (p.includes("create b.txt") && ++bCalls === 1) return LIMIT;
+        creates(cwd, p);
+      },
+    });
+    const c = cfg({ maxWorkers: 1 });
+    const paused = await startRun(repo.root, "crash mid-merge", c, d, "sm1");
+    expect(paused.status).toBe("paused");
+    // what a crash inside resolveConflicts leaves behind: a merge stopped on conflicts
+    const stray = path.join(repo.tmp, "stray");
+    sh(repo.root, ["worktree", "add", "-q", "-b", "stray", stray, paused.base]);
+    writeFileSync(path.join(stray, "a.txt"), "stray\n");
+    sh(stray, ["add", "-A"]);
+    sh(stray, ["commit", "-qm", "stray"]);
+    expect(() => sh(paused.runWorktree, ["merge", "stray"])).toThrow();
+    const s = await resumeRun(repo.root, "sm1", c, d);
+    expect(s.status).toBe("pr_open");
+    expect(sh(repo.root, ["show", `${s.branch}:b.txt`])).toBe("b.txt");
+    expect(sh(repo.root, ["show", `${s.branch}:a.txt`])).toBe("a.txt");
+    expect(() => sh(repo.root, ["merge-base", "--is-ancestor", "stray", s.branch])).toThrow();
+  });
+
+  it("hands the run to a human when the reviewer fails, and pushes nothing", async () => {
+    const failed: RunnerResult = { ok: false, output: "reviewer crashed\n", rateLimited: false, timedOut: false };
+    const d = deps({ plan: planOf(sub("a")), work: creates, review: () => failed });
+    const s = await startRun(repo.root, "unreviewed", cfg(), d);
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("reviewer");
+    expect(prCalls(d)).toHaveLength(0);
+    expect(remoteHas(s.branch)).toBe(false);
+  });
+
+  it("does not push when a cancel arrives during the review", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates, review: () => { requestCancel(repo.root, "cr1"); return "[]"; } });
+    const s = await startRun(repo.root, "cancel in review", cfg(), d, "cr1");
+    expect(s.status).toBe("cancelled");
+    expect(prCalls(d)).toHaveLength(0);
+    expect(remoteHas(s.branch)).toBe(false);
+  });
+
+  it("keeps verify output out of the PR body", async () => {
+    const verify = [`node -e "console.log('DATABASE_URL=postgres://app:pw@db/prod')"`];
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const s = await startRun(repo.root, "quiet body", cfg({ verify }), d, "vb1");
+    expect(s.status).toBe("pr_open");
+    const args = prCalls(d)[0][1] as string[];
+    const body = args[args.indexOf("--body") + 1];
+    expect(body).not.toContain("postgres://");
+    expect(body).toContain("passed");
+    expect(body).toContain(".agentos/runs/vb1/state.json");
+  });
+
+  it("refuses a second engine on a run whose engine is alive, and takes over a dead engine's lock", async () => {
+    const replies = [LIMIT, reply(JSON.stringify(planOf(sub("a"))))];
+    const d = deps({ plan: () => replies.shift()!, work: creates });
+    expect((await startRun(repo.root, "locked", cfg(), d, "lk1")).status).toBe("paused");
+    const lock = path.join(runDir(repo.root, "lk1"), "lock");
+    expect(existsSync(lock)).toBe(false); // released when the engine stopped
+    writeFileSync(lock, String(process.pid)); // this process is alive
+    await expect(resumeRun(repo.root, "lk1", cfg(), d)).rejects.toThrow(/already being driven by agentos process/);
+    expect(loadRun(repo.root, "lk1").status).toBe("paused");
+    writeFileSync(lock, String(spawnSync(process.execPath, ["-e", ""]).pid)); // a process that has exited
+    expect((await resumeRun(repo.root, "lk1", cfg(), d)).status).toBe("pr_open");
+    expect(readFileSync(path.join(runDir(repo.root, "lk1"), "events.jsonl"), "utf8")).toContain('"stale-lock"');
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("keeps the checkout clean after storing the run in memory, so the next run can start", async () => {
+    expect((await startRun(repo.root, "first", cfg(), deps({ plan: planOf(sub("a")), work: creates }))).status).toBe("pr_open");
+    expect(existsSync(path.join(repo.root, ".agentos", "memory.json"))).toBe(true);
+    expect(statusOf(repo.root)).toBe("");
+    expect((await startRun(repo.root, "second", cfg(), deps({ plan: planOf(sub("b")), work: creates }))).status).toBe("pr_open");
+  });
+
+  it("refuses to reuse the id of an existing run", async () => {
+    const d = deps({ plan: () => LIMIT, work: creates });
+    expect((await startRun(repo.root, "original", cfg(), d, "dup1")).status).toBe("paused");
+    await expect(startRun(repo.root, "impostor", cfg(), d, "dup1")).rejects.toThrow(/already exists/);
+    expect(loadRun(repo.root, "dup1").task).toBe("original");
+  });
+
+  it("pauses when the conflict fixer hits a rate limit, and resolves on resume", async () => {
+    let fixerCalls = 0;
+    const d = deps({
+      plan: planOf(sub("a"), sub("b")),
+      work: (cwd, p) => {
+        if (p.includes("stopped with conflicts")) {
+          if (++fixerCalls === 1) return LIMIT;
+          return writeFileSync(path.join(cwd, "shared.txt"), "a and b\n");
+        }
+        writeFileSync(path.join(cwd, "shared.txt"), `${p.includes("create a.txt") ? "a" : "b"}\n`);
+      },
+    });
+    const c = cfg(); // two parallel workers start from the same base, so the second merge conflicts
+    const paused = await startRun(repo.root, "limited fixer", c, d, "cf1");
+    expect(paused.status).toBe("paused");
+    expect(paused.resumeFrom).toBe("working");
+    const s = await resumeRun(repo.root, "cf1", c, d);
+    expect(s.status).toBe("pr_open");
+    expect(sh(repo.remote, ["show", `${s.branch}:shared.txt`])).toBe("a and b");
   });
 });

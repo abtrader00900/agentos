@@ -11,6 +11,8 @@ export interface EngineDeps {
     freeMemMb?: () => number;
     onStatus?: (s: RunState) => void;
 }
+/** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
+export declare function assertCleanCheckout(root: string): void;
 /** Preflight, create the run record, and drive it until it ends or pauses. */
 export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string): Promise<RunState>;
 /** Continue a paused run, or one whose engine died mid-step. */

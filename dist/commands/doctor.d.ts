@@ -29,4 +29,6 @@ export declare function sameCodexPath(a: string, b: string, platform?: string): 
  * executables are resolved through PATHEXT (.cmd shims for npx/npm).
  */
 export declare function isCommandOnPath(cmd: string): boolean;
+/** The file a command resolves to on PATH (PATHEXT on Windows), or undefined. The current directory is never searched. */
+export declare function resolveOnPath(cmd: string): string | undefined;
 export {};

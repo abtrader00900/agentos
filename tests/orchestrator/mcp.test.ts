@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createOrchestratorServer } from "../../src/mcp/orchestrator/server.js";
 import { saveRun, loadRun, type RunState } from "../../src/orchestrator/run.js";
+import { makeRepo } from "./helpers.js";
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "agentos-orch-mcp-")); });
@@ -16,8 +17,8 @@ const seeded = (id: string, status: RunState["status"]): RunState => ({
   createdAt: new Date().toISOString(), updatedAt: "", subtasks: [], fixRound: 0, findings: [],
 });
 
-async function connect(launch = (_r: string, _i: string, _t: string) => {}) {
-  const server = createOrchestratorServer(root, launch);
+async function connect(launch = (_r: string, _i: string, _t: string) => {}, check: (root: string) => unknown = () => undefined) {
+  const server = createOrchestratorServer(root, launch, check);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "t", version: "0" });
   await Promise.all([client.connect(a), server.connect(b)]);
@@ -36,6 +37,24 @@ describe("orchestrator MCP server", () => {
     expect(launched[0][2]).toBe("add a discount field");
     expect(text).toContain(launched[0][1]);
     await client.close();
+  });
+
+  it("run_task reports a failed preflight instead of launching a run that dies unseen", async () => {
+    const repo = makeRepo({ "agent.config.yaml": "project: { name: t }\n" }); // no orchestrator block
+    try {
+      const launched: string[] = [];
+      const server = createOrchestratorServer(repo.root, (_r, i) => launched.push(i));
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "t", version: "0" });
+      await Promise.all([client.connect(a), server.connect(b)]);
+      const r = await client.callTool({ name: "run_task", arguments: { task: "add a discount field" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as { text: string }[])[0].text).toMatch(/Not started: .*orchestrator block/);
+      expect(launched).toHaveLength(0);
+      await client.close();
+    } finally {
+      repo.cleanup();
+    }
   });
 
   it("run_status lists recent runs, or shows one", async () => {

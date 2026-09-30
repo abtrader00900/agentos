@@ -237,7 +237,7 @@ agentos run --resume <id>                           # continue after a rate limi
 agentos run --cancel <id>
 ```
 
-A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when the diff adds a secret. Run state and logs are kept in `.agentos/runs/<id>/`.
+A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
 
 To hand work over from inside a Claude Code or Codex chat, register the MCP server and call `run_task`:
 

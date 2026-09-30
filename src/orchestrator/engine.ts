@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdirSync } from "node:fs";
 import { MemoryStore } from "../mcp/memory/store.js";
 import type { OrchestratorConfig } from "../core/schema.js";
 import type { AgentName, Runner, RunnerRequest, Subtask } from "./types.js";
@@ -41,11 +41,17 @@ const other = (a: AgentName): AgentName => (a === "claude" ? "codex" : "claude")
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const memoryFile = (root: string) => path.join(root, ".agentos", "memory.json");
 
+/** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
+export function assertCleanCheckout(root: string): void {
+  ensureExcluded(root, "/.agentos/runs/");
+  ensureExcluded(root, "/.agentos/memory.json*");
+  if (statusOf(root)) throw new Error("Your checkout has uncommitted changes — commit or stash them first (a run starts from a clean base).");
+}
+
 /** Preflight, create the run record, and drive it until it ends or pauses. */
 export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId()): Promise<RunState> {
-  runDir(root, id); // validates the id
-  ensureExcluded(root, "/.agentos/runs/");
-  if (statusOf(root)) throw new Error("Your checkout has uncommitted changes — commit or stash them first (a run starts from a clean base).");
+  if (existsSync(path.join(runDir(root, id), "state.json"))) throw new Error(`run ${id} already exists — pick another id, or resume it`);
+  assertCleanCheckout(root);
   deps.gh(root, ["auth", "status"]);
   const baseBranch = defaultBranch(root);
   const now = new Date().toISOString();
@@ -64,13 +70,48 @@ export async function startRun(root: string, task: string, cfg: OrchestratorConf
 export async function resumeRun(root: string, id: string, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState> {
   const s = loadRun(root, id);
   if (TERMINAL.includes(s.status)) throw new Error(`run ${id} is ${s.status}; there is nothing to resume`);
-  if (s.status === "paused") {
-    s.status = s.resumeFrom ?? "planning";
-    s.resumeFrom = undefined;
-    saveRun(root, s);
-    logEvent(root, id, { type: "resume", status: s.status });
+  const unlock = lockRun(root, id); // before touching the state: another engine may still own it
+  try {
+    if (s.status === "paused") {
+      s.status = s.resumeFrom ?? "planning";
+      s.resumeFrom = undefined;
+      saveRun(root, s);
+      logEvent(root, id, { type: "resume", status: s.status });
+    }
+    return await drive(root, s, cfg, deps);
+  } finally {
+    unlock();
   }
-  return executeRun(root, s, cfg, deps);
+}
+
+const alive = (pid: number) => {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+/** One engine per run: an exclusive lock file holding the engine's PID. A dead engine's lock is taken over. */
+function lockRun(root: string, id: string): () => void {
+  const file = path.join(runDir(root, id), "lock");
+  mkdirSync(path.dirname(file), { recursive: true });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const fd = openSync(file, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => rmSync(file, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST" || attempt > 0) throw e;
+      const pid = Number(readFileSync(file, "utf8").trim());
+      if (alive(pid)) throw new Error(`run ${id} is already being driven by agentos process ${pid} — wait for it, or cancel the run`);
+      logEvent(root, id, { type: "stale-lock", pid });
+      rmSync(file, { force: true });
+    }
+  }
 }
 
 /** Ask a running engine to stop (it kills its own agents); a paused or dead run is marked at once. */
@@ -90,9 +131,23 @@ export async function cancelRun(root: string, id: string, waitMs = 15_000): Prom
 }
 
 export async function executeRun(root: string, s: RunState, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState> {
+  const unlock = lockRun(root, s.id);
+  try {
+    return await drive(root, s, cfg, deps);
+  } finally {
+    unlock();
+  }
+}
+
+async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState> {
   const c: Ctx = { root, s, cfg, deps, live: new Set() };
   s.enginePid = process.pid;
   for (const t of s.subtasks) if (t.status === "running") t.status = "pending";
+  // an engine that died while a fixer resolved conflicts left the merge half done: start that merge over
+  if (existsSync(s.runWorktree) && mergeInProgress(s.runWorktree)) {
+    abortMerge(s.runWorktree);
+    logEvent(root, s.id, { type: "abort-stale-merge" });
+  }
   saveRun(root, s);
   const watcher = setInterval(() => {
     if (cancelRequested(root, s.id)) for (const pid of c.live) killTree(pid);
@@ -133,7 +188,8 @@ async function step(c: Ctx): Promise<void> {
 }
 
 function move(c: Ctx, status: RunStatus, reason?: string): void {
-  if (status !== "cancelled" && cancelRequested(c.root, c.s.id)) {
+  // a PR that exists is recorded as open, even when a cancel arrived while gh created it
+  if (status !== "cancelled" && status !== "pr_open" && cancelRequested(c.root, c.s.id)) {
     status = "cancelled";
     reason = "cancelled by the owner";
   }
@@ -232,7 +288,15 @@ async function work(c: Ctx): Promise<void> {
     if (ok) {
       const next = merges.then(() => integrate(c, t, sub));
       merges = next.catch(() => undefined);
-      ok = await next;
+      const merged = await next;
+      if (merged === "paused") {
+        // the worker's commits stay on its branch; the merge is retried on resume
+        paused = true;
+        t.status = "pending";
+        saveRun(root, s);
+        return false;
+      }
+      ok = merged === "ok";
     }
     if (!ok) t.summary = `${t.summary}\n${!res.ok ? "the agent failed" : !changed ? "the agent changed nothing" : "merging its work failed"}`.trim();
     t.status = ok ? "done" : "failed";
@@ -244,9 +308,11 @@ async function work(c: Ctx): Promise<void> {
   return move(c, "verifying");
 }
 
-async function integrate(c: Ctx, t: SubtaskState, sub: Subtask): Promise<boolean> {
+type Merged = "ok" | "failed" | "paused";
+
+async function integrate(c: Ctx, t: SubtaskState, sub: Subtask): Promise<Merged> {
   const m = mergeBranch(c.s.runWorktree, t.branch, `agentos: merge ${t.id}`);
-  return m.ok || resolveConflicts(c, m.conflicts, sub.agent);
+  return m.ok ? "ok" : resolveConflicts(c, m.conflicts, sub.agent);
 }
 
 function conflictPrompt(s: RunState, files: string[]): string {
@@ -257,9 +323,18 @@ function conflictPrompt(s: RunState, files: string[]): string {
   ].join("\n\n");
 }
 
-async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Promise<boolean> {
+async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Promise<Merged> {
   const cwd = c.s.runWorktree;
+  // a merge that failed without stopping on conflicts (or a stale one) is not the fixer's to commit
+  if (!files.length || !mergeInProgress(cwd)) {
+    abortMerge(cwd);
+    return "failed";
+  }
   const res = await agentRunner(c, agent, "write")({ prompt: conflictPrompt(c.s, files), cwd, timeoutMs: minutes(c.cfg.subtaskMinutes) });
+  if (res.rateLimited) {
+    abortMerge(cwd);
+    return "paused";
+  }
   const markers = files.some((f) => {
     try {
       return /^(<{7}|>{7}|={7})(\s|$)/m.test(readFileSync(path.join(cwd, f), "utf8"));
@@ -269,14 +344,14 @@ async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Prom
   });
   if (!res.ok || markers) {
     abortMerge(cwd);
-    return false;
+    return "failed";
   }
   git(cwd, ["add", "-A"]);
   if (!tryGit(cwd, ["commit", "-q", "--no-edit"]).ok || mergeInProgress(cwd)) {
     abortMerge(cwd);
-    return false;
+    return "failed";
   }
-  return true;
+  return "ok";
 }
 
 async function verify(c: Ctx): Promise<void> {
@@ -292,7 +367,9 @@ async function verify(c: Ctx): Promise<void> {
     const diff = git(s.runWorktree, ["diff", `${s.base}..HEAD`]);
     const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
     if (res.rateLimited) return pause(c, "verifying");
-    s.findings = (res.ok && parseFindings(finalText(res.output))) || [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
+    // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so
+    if (!res.ok) return move(c, "needs_human", `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}`);
+    s.findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
   }
   saveRun(c.root, s);
   logEvent(c.root, s.id, { type: "verify", ok: v.ok, findings: s.findings });
@@ -338,20 +415,27 @@ function guardOutside(c: Ctx): void {
 
 async function gate(c: Ctx): Promise<void> {
   const { s, root } = c;
+  const cancelled = () => cancelRequested(root, s.id);
+  if (cancelled()) return move(c, "cancelled", "cancelled by the owner");
   guardOutside(c);
   const fetched = tryGit(root, ["fetch", "-q", "origin", s.baseBranch]).ok;
   const latest = git(root, ["rev-parse", fetched ? `origin/${s.baseBranch}` : s.baseBranch]);
   if (!tryGit(s.runWorktree, ["merge-base", "--is-ancestor", latest, "HEAD"]).ok) {
     const m = mergeBranch(s.runWorktree, latest, `agentos: merge ${s.baseBranch}`);
-    if (!m.ok && !(await resolveConflicts(c, m.conflicts, s.subtasks[0]?.agent ?? c.cfg.workers[0]))) {
-      return move(c, "needs_human", `${s.baseBranch} moved during the run and merging it conflicted`);
-    }
+    const merged = m.ok ? "ok" : await resolveConflicts(c, m.conflicts, s.subtasks[0]?.agent ?? c.cfg.workers[0]);
+    if (merged === "paused") return pause(c, "verifying");
+    if (merged === "failed") return move(c, "needs_human", `${s.baseBranch} moved during the run and merging it conflicted`);
     s.base = latest;
     return move(c, "verifying"); // the tests must pass on the new base too
   }
-  const hits = scanDiff(git(s.runWorktree, ["diff", `${s.base}..HEAD`]));
+  // every commit is pushed, so scan each one: a key a fixer removed later is still in the history
+  // (the final diff too, for what a conflict resolution added inside a merge commit)
+  const history = git(s.runWorktree, ["log", "-p", "--no-merges", "--format=", `${s.base}..HEAD`]);
+  const hits = [...new Set([...scanDiff(history), ...scanDiff(git(s.runWorktree, ["diff", `${s.base}..HEAD`]))])];
   if (hits.length) return move(c, "needs_human", `secret scan blocked the PR: ${hits.join("; ")}`);
+  if (cancelled()) return move(c, "cancelled", "cancelled by the owner");
   git(s.runWorktree, ["push", "-q", "-u", "origin", s.branch]);
+  if (cancelled()) return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
   const out = c.deps.gh(s.runWorktree, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", `agentos: ${s.task.slice(0, 60)}`, "--body", prBody(s)]);
   s.prUrl = out.trim().split("\n").pop();
   move(c, "pr_open", s.prUrl);

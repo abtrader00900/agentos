@@ -1,5 +1,6 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
+import { resolveOnPath } from "../commands/doctor.js";
 import type { AgentName, Runner, RunnerResult } from "./types.js";
 
 export const RATE_LIMIT_RE = /rate[ _-]?limit|usage limit|quota (?:exceeded|reached)|too many requests|\b429\b/i;
@@ -21,6 +22,8 @@ const quote = (s: string) => (/\s/.test(s) ? `"${s}"` : s);
 /**
  * A runner for one agent CLI. argv is fixed and the prompt goes through stdin,
  * so the Windows shell (needed to start npm's .cmd shims) never sees user text.
+ * On Windows the command is resolved to an absolute path first: cmd.exe looks in the
+ * current directory before PATH, so a claude.cmd an agent wrote into a worktree would run.
  */
 export function spawnRunner(command: string, args: string[]): Runner {
   return (req) =>
@@ -28,8 +31,13 @@ export function spawnRunner(command: string, args: string[]): Runner {
       let output = "";
       let timedOut = false;
       let settled = false;
+      const exe = WIN ? resolveOnPath(command) : command;
+      if (!exe) {
+        resolve({ ok: false, output: `${command}: not found on PATH\n`, rateLimited: false, timedOut: false });
+        return;
+      }
       const child = WIN
-        ? spawn([command, ...args].map(quote).join(" "), { cwd: req.cwd, shell: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
+        ? spawn([exe, ...args].map(quote).join(" "), { cwd: req.cwd, shell: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
         : spawn(command, args, { cwd: req.cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
       const timer = setTimeout(() => {
         timedOut = true;
