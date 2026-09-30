@@ -6,7 +6,7 @@ import { preflight as realPreflight } from "../commands/run.js";
 import { listLessons, safetyCheck } from "../learning/lessons.js";
 import { listDrafts, readDraft } from "../learning/skilldraft.js";
 import { runLockState } from "../orchestrator/engine.js";
-import { listRuns, loadRun, runDir, runsDir, TERMINAL, type RunState, type RunStatus } from "../orchestrator/run.js";
+import { listRuns, loadRun, runDir, runsDir, RUN_STATUSES, TERMINAL, type RunState, type RunStatus } from "../orchestrator/run.js";
 import { tryGit } from "../orchestrator/workspace.js";
 import { getProject, listProjects } from "./projects.js";
 import { runUsage } from "./usage.js";
@@ -26,7 +26,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DIFF_CAP = 300_000;
 
 /** a status the handler wants instead of 200 */
-class Http extends Error {
+export class Http extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
@@ -52,7 +52,7 @@ function rootOf(id: string, opts: UiOptions): string {
 }
 
 /** An id runDir rejects never reaches the filesystem; a run that is not there is a 404. */
-function runOf(root: string, id: string): RunState {
+export function runOf(root: string, id: string): RunState {
   try {
     runDir(root, id);
   } catch {
@@ -68,7 +68,7 @@ function runOf(root: string, id: string): RunState {
   // the caller reads run.id/status/subtasks. That is the file's problem, not a
   // server bug, so it reads as an unreadable run rather than a 500.
   const r: Partial<RunState> | null = run;
-  if (!r || typeof r !== "object" || Array.isArray(r) || r.id !== id || typeof r.status !== "string" || !Array.isArray(r.subtasks)) {
+  if (!r || typeof r !== "object" || Array.isArray(r) || r.id !== id || !RUN_STATUSES.includes(r.status as RunStatus) || !Array.isArray(r.subtasks)) {
     throw new Http(404, "unreadable run");
   }
   return run;

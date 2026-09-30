@@ -1,6 +1,8 @@
 // tests/ui/live.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import http from "node:http";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { startTestServer, TOKEN } from "./helpers.js";
 import { makeRepo } from "../orchestrator/helpers.js";
 import { registerProject } from "../../src/ui/projects.js";
@@ -51,8 +53,27 @@ describe("live events", () => {
     expect(b).not.toContain("id: 2\n");
   });
 
+  it("restarts at id 1 when the event log shrinks", async () => {
+    setTimeout(() => writeFileSync(path.join(repo.root, ".agentos", "runs", "s1", "events.jsonl"), '{"type":"new"}\n'), 800);
+    const text = await stream(`/api/p/${pid}/runs/s1/events`, {}, (s) => s.includes('data: {"type":"new"}'));
+    expect(text).toContain('id: 1\ndata: {"type":"new"}');
+  });
+
   it("404s for an unknown run", async () => {
     const status = await new Promise<number>((r) => http.get({ host: "127.0.0.1", port: t.port, path: `/api/p/${pid}/runs/zzz/events`, headers: { host: `127.0.0.1:${t.port}`, cookie: `agentos_ui=${TOKEN}` } }, (res) => { r(res.statusCode!); res.resume(); }));
     expect(status).toBe(404);
+  });
+
+  it("404s an unreadable run without opening a stream", async () => {
+    const dir = path.join(repo.root, ".agentos", "runs", "bad");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "state.json"), JSON.stringify({ id: "bad", status: "working" }));
+    const out = await new Promise<{ status: number; body: string }>((resolve) => http.get({ host: "127.0.0.1", port: t.port, path: `/api/p/${pid}/runs/bad/events`, headers: { host: `127.0.0.1:${t.port}`, cookie: `agentos_ui=${TOKEN}` } }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (d) => (body += d));
+      res.on("end", () => resolve({ status: res.statusCode!, body }));
+    }));
+    expect(out).toEqual({ status: 404, body: JSON.stringify({ error: "unreadable run" }) });
   });
 });

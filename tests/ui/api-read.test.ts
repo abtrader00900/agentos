@@ -84,7 +84,8 @@ describe("read API", () => {
     bogus("bad1", JSON.stringify({ id: "other", status: "working", subtasks: [] }));
     bogus("bad2", "[1,2]");
     bogus("bad3", JSON.stringify({ id: "bad3", status: "working" }));
-    for (const id of ["bad1", "bad2", "bad3"]) {
+    bogus("bad4", JSON.stringify({ id: "bad4", status: "sleeping", subtasks: [] }));
+    for (const id of ["bad1", "bad2", "bad3", "bad4"]) {
       expect(await get(`/api/p/${pid}/runs/${id}`)).toEqual({ status: 404, json: { error: "unreadable run" } });
     }
   });
