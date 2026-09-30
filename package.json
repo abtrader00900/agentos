@@ -35,6 +35,7 @@
   "license": "MIT",
   "files": [
     "dist",
+    "ui",
     "skills",
     "RFC",
     "README.md",
