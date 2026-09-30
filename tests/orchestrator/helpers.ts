@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -13,7 +13,9 @@ export const sh = (cwd: string, args: string[]) =>
 
 /** a repo on branch main with one commit, pushed to a bare "origin" beside it */
 export function makeRepo(files: Record<string, string> = {}) {
-  const tmp = mkdtempSync(path.join(tmpdir(), "agentos-orch-"));
+  // canonical from the start: the registry stores realpaths, so a short 8.3 temp
+  // dir (Windows CI) would otherwise be a second spelling of the same repo
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), "agentos-orch-")));
   const root = path.join(tmp, "repo");
   const remote = path.join(tmp, "remote.git");
   sh(tmp, ["init", "-q", "--bare", "-b", "main", remote]);
