@@ -8,6 +8,7 @@ import { startRun, resumeRun, cancelRun, assertCleanCheckout } from "../orchestr
 import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/run.js";
 import { cliRunners } from "../orchestrator/runners.js";
 import { runLine } from "../orchestrator/report.js";
+import { registerProject } from "../ui/projects.js";
 import { isCommandOnPath } from "./doctor.js";
 export const ORCHESTRATOR_SNIPPET = `orchestrator:
   verify: [npm test]          # commands that must pass before a PR opens
@@ -49,6 +50,10 @@ function recordFailedStart(root, id, task, e) {
 /** agentos run: start, resume, cancel or inspect a run. Returns the exit code. */
 export async function run(task, opts) {
     const root = repoRoot(opts.cwd);
+    try {
+        registerProject(root);
+    }
+    catch { /* a registry problem never blocks a run */ }
     if (opts.status) {
         console.log(JSON.stringify(loadRun(root, opts.status), null, 2));
         return 0;
