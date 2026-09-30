@@ -77,6 +77,9 @@ function update(home, fn) {
 /** Add the folder if it is new, otherwise just refresh lastSeen. Returns the stored entry. */
 export function registerProject(root, home = agentosHome()) {
     const dir = canonical(root);
+    // Run worktrees are temporary implementation details, not dashboard projects.
+    if (/[\\/]\.agentos[\\/]runs[\\/]/i.test(dir))
+        return undefined;
     return update(home, (projects) => {
         const now = new Date().toISOString();
         let entry = projects.find((p) => key(p.path) === key(dir));
