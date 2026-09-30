@@ -12,6 +12,7 @@ import { scanDiff, redact } from "./safety.js";
 import { finalText, killTree } from "./runners.js";
 import { git, tryGit, head, defaultBranch, statusOf, ensureExcluded, addWorktree, linkDeps, commitAll, mergeBranch, mergeInProgress, abortMerge, removeWorktree, } from "./workspace.js";
 import { prBody, prTitle } from "./report.js";
+import { usageFromLine } from "../ui/usage.js";
 const minutes = (m) => m * 60_000;
 const other = (a) => (a === "claude" ? "codex" : "claude");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -244,7 +245,12 @@ function agentRunner(c, agent, mode) {
             return await c.deps.runners[a][mode]({
                 ...req,
                 onSpawn: (p) => { pid = p; c.live.add(p); },
-                onLine: (line) => logEvent(c.root, c.s.id, { type: "agent", agent: a, line: redact(line).slice(0, 4000) }),
+                onLine: (line) => {
+                    const u = usageFromLine(line);
+                    if (u)
+                        logEvent(c.root, c.s.id, { type: "usage", agent: a, ...u });
+                    logEvent(c.root, c.s.id, { type: "agent", agent: a, line: redact(line).slice(0, 4000) });
+                },
             });
         }
         finally {
