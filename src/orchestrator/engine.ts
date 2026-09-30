@@ -240,7 +240,8 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
     if (res.ok || res.rateLimited || cancelRequested(c.root, c.s.id)) return res;
     const alt = other(agent);
     if (!c.cfg.workers.includes(alt)) return res;
-    logEvent(c.root, c.s.id, { type: "fallback", from: agent, to: alt, why: res.timedOut ? "timeout" : "error" });
+    const lastLine = res.output.trim().split("\n").filter(Boolean).pop() ?? "";
+    logEvent(c.root, c.s.id, { type: "fallback", from: agent, to: alt, why: res.timedOut ? "timeout" : "error", error: redact(lastLine).slice(0, 200) });
     return call(alt, req);
   };
 }
@@ -260,6 +261,7 @@ async function plan(c: Ctx): Promise<void> {
   const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers }, s.runWorktree, minutes(cfg.subtaskMinutes));
   if (r.rateLimited) return pause(c, "planning");
   if (!r.plan) return move(c, "needs_human", `planner: ${r.error}`);
+  if (r.rejected) logEvent(root, s.id, { type: "planner-retry", error: r.rejected.slice(0, 300) });
   s.plan = r.plan;
   s.subtasks = r.plan.subtasks.map((t) => ({
     id: t.id, agent: t.agent, status: "pending", branch: `${s.branch}-${t.id}`,
@@ -370,6 +372,7 @@ async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Prom
     abortMerge(cwd);
     return "failed";
   }
+  logEvent(c.root, c.s.id, { type: "conflict-resolved", files });
   return "ok";
 }
 
@@ -391,7 +394,10 @@ async function verify(c: Ctx): Promise<void> {
     s.findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
   }
   saveRun(c.root, s);
-  logEvent(c.root, s.id, { type: "verify", ok: v.ok, findings: s.findings });
+  logEvent(c.root, s.id, {
+    type: "verify", ok: v.ok, findings: s.findings,
+    ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(v.output)?.[1] ?? "", output: s.verifyOutput.slice(-600) }),
+  });
   if (v.ok && blocking(s.findings).length === 0) return gate(c);
   if (s.fixRound >= cfg.maxFixRounds) {
     return move(c, "needs_human", `still failing after ${s.fixRound} fix round(s): ${v.ok ? `${blocking(s.findings).length} blocking review finding(s)` : "verify commands fail"}`);
@@ -421,7 +427,9 @@ async function fix(c: Ctx): Promise<void> {
     s.fixRound--;
     return pause(c, "fixing");
   }
-  commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
+  const committed = commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
+  const files = committed ? git(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]).split("\n").filter(Boolean) : [];
+  logEvent(c.root, s.id, { type: "fix", round: s.fixRound, files });
   return move(c, "verifying");
 }
 

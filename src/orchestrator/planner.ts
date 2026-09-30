@@ -43,23 +43,26 @@ export async function makePlan(
   input: PlannerInput,
   cwd: string,
   timeoutMs: number,
-): Promise<{ plan?: Plan; error?: string; rateLimited?: boolean }> {
+): Promise<{ plan?: Plan; error?: string; rateLimited?: boolean; rejected?: string }> {
   let prompt = plannerPrompt(input);
   let error = "";
+  let firstError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await runner({ prompt, cwd, timeoutMs });
     if (res.rateLimited) return { rateLimited: true };
     if (!res.ok) {
       error = `the planner failed${res.timedOut ? " (timeout)" : ""}: ${res.output.slice(-500)}`;
+      if (attempt === 0) firstError = error;
       continue;
     }
     try {
       const v = validatePlan(extractJson(finalText(res.output)), input.workers);
-      if (v.plan) return { plan: v.plan };
+      if (v.plan) return { plan: v.plan, ...(attempt > 0 ? { rejected: firstError } : {}) };
       error = v.error!;
     } catch (e) {
       error = (e as Error).message;
     }
+    if (attempt === 0) firstError = error;
     prompt = `${plannerPrompt(input)}\n\nYour previous plan was rejected: ${error}\nReturn the corrected JSON only.`;
   }
   return { error };
