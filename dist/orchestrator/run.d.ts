@@ -1,5 +1,6 @@
 import type { AgentName, Finding, Plan } from "./types.js";
-export type RunStatus = "queued" | "planning" | "working" | "verifying" | "fixing" | "paused" | "pr_open" | "needs_human" | "failed" | "cancelled";
+export declare const RUN_STATUSES: readonly ["queued", "planning", "working", "verifying", "fixing", "paused", "pr_open", "needs_human", "failed", "cancelled"];
+export type RunStatus = (typeof RUN_STATUSES)[number];
 export declare const TERMINAL: readonly RunStatus[];
 export interface SubtaskState {
     id: string;

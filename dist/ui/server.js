@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRoutes } from "./api.js";
+import { actionRoutes, readRoutes } from "./api.js";
 import { liveEvents } from "./live.js";
 const COOKIE = "agentos_ui";
 const MAX_BODY = 16 * 1024;
@@ -27,6 +27,8 @@ export function route(method, pattern, handler) {
     routes.push({ method: method.toUpperCase(), pattern, handler });
 }
 for (const r of readRoutes)
+    route(r.method, r.pattern, r.handler);
+for (const r of actionRoutes)
     route(r.method, r.pattern, r.handler);
 /** Constant-time for equal lengths; timingSafeEqual throws on a length mismatch. */
 function sameToken(given, token) {

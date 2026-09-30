@@ -1,20 +1,24 @@
+import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath } from "node:url";
 import { preflight as realPreflight } from "../commands/run.js";
-import { listLessons, safetyCheck } from "../learning/lessons.js";
-import { listDrafts, readDraft } from "../learning/skilldraft.js";
-import { runLockState } from "../orchestrator/engine.js";
-import { listRuns, loadRun, runDir, runsDir, TERMINAL } from "../orchestrator/run.js";
+import { approveLesson, forgetLesson, listLessons, promoteLesson, safetyCheck } from "../learning/lessons.js";
+import { approveDraft, listDrafts, readDraft, rejectDraft } from "../learning/skilldraft.js";
+import { spawnDetachedRun } from "../mcp/orchestrator/server.js";
+import { cancelRun, runLockState } from "../orchestrator/engine.js";
+import { listRuns, loadRun, newRunId, runDir, runsDir, RUN_STATUSES, TERMINAL } from "../orchestrator/run.js";
 import { tryGit } from "../orchestrator/workspace.js";
-import { getProject, listProjects } from "./projects.js";
+import { getProject, listProjects, removeProject } from "./projects.js";
 import { runUsage } from "./usage.js";
 /**
- * Everything the dashboard reads. Nothing here writes or starts anything.
+ * What the dashboard reads (readRoutes) and what it does (actionRoutes).
  *
- * The table is exported rather than registered from here: server.ts imports it
- * and calls route() itself, so this module never imports server.ts at runtime.
+ * The tables are exported rather than registered from here: server.ts imports
+ * them and calls route() itself, so this module never imports server.ts at
+ * runtime.
  */
 const RUNNING = ["queued", "planning", "working", "verifying", "fixing"];
 const NEEDS_YOU = ["needs_human", "failed"];
@@ -22,7 +26,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 /** a diff past this is for reading in an editor, not in a browser tab */
 const DIFF_CAP = 300_000;
 /** a status the handler wants instead of 200 */
-class Http extends Error {
+export class Http extends Error {
     status;
     constructor(status, message) {
         super(message);
@@ -51,7 +55,7 @@ function rootOf(id, opts) {
     return p.path;
 }
 /** An id runDir rejects never reaches the filesystem; a run that is not there is a 404. */
-function runOf(root, id) {
+export function runOf(root, id) {
     try {
         runDir(root, id);
     }
@@ -69,7 +73,7 @@ function runOf(root, id) {
     // the caller reads run.id/status/subtasks. That is the file's problem, not a
     // server bug, so it reads as an unreadable run rather than a 500.
     const r = run;
-    if (!r || typeof r !== "object" || Array.isArray(r) || r.id !== id || typeof r.status !== "string" || !Array.isArray(r.subtasks)) {
+    if (!r || typeof r !== "object" || Array.isArray(r) || r.id !== id || !RUN_STATUSES.includes(r.status) || !Array.isArray(r.subtasks)) {
         throw new Http(404, "unreadable run");
     }
     return run;
@@ -199,5 +203,114 @@ export const readRoutes = [
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/lessons$/, handler: read((root) => lessons(root)) },
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/drafts$/, handler: read((root) => drafts(root)) },
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/preflight$/, handler: read((root, _m, opts) => preflightReport(root, opts)) },
+];
+/** `agentos run --resume <id>` as a detached process, the way spawnDetachedRun starts a new run. */
+export function spawnDetachedResume(root, id) {
+    const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
+    spawn(process.execPath, [cli, "run", "--resume", id], { cwd: root, detached: true, stdio: "ignore", windowsHide: true }).unref();
+}
+/**
+ * The library errors an owner can act on, and the status each reads as. Anything
+ * else is a bug in here and must keep bubbling to the server's 500, rather than
+ * being reported as the owner's fault.
+ */
+const KNOWN = [
+    [/^No lesson "/, 404],
+    [/^No skill draft "/, 404],
+    [/^lesson .* is pending/, 409],
+    [/^run .* is already /, 409],
+    [/ is already installed/, 409],
+];
+/** The action sibling of read(): same project lookup, but the handler may write and is awaited. */
+const act = (fn) => async (m, _url, body, opts) => {
+    try {
+        return await fn(rootOf(m[1], opts), m, body, opts);
+    }
+    catch (e) {
+        if (e instanceof Http)
+            return { status: e.status, json: { error: e.message } };
+        const message = e?.message ?? "";
+        const known = KNOWN.find(([re]) => re.test(message));
+        if (!known)
+            throw e;
+        return { status: known[1], json: { error: message } };
+    }
+};
+/** Anchored patterns: /runs/:id must not swallow /runs/:id/cancel. */
+export const actionRoutes = [
+    {
+        method: "POST",
+        pattern: /^\/api\/p\/([^/]+)\/runs$/,
+        handler: act(async (root, _m, body, opts) => {
+            const task = body?.task;
+            if (typeof task !== "string" || task.trim().length < 3 || task.length > 2000)
+                throw new Http(400, "task must be 3-2000 characters");
+            // the detached run has no one to tell why it could not start, so the reason is reported here
+            try {
+                (opts.preflight ?? realPreflight)(root);
+            }
+            catch (e) {
+                throw new Http(409, e.message);
+            }
+            const id = newRunId();
+            (opts.spawnRun ?? spawnDetachedRun)(root, id, task);
+            return { status: 201, json: { id } };
+        }),
+    },
+    {
+        method: "POST",
+        pattern: /^\/api\/p\/([^/]+)\/runs\/([^/]+)\/cancel$/,
+        handler: act(async (root, m) => {
+            const run = runOf(root, m[2]);
+            // short wait: a browser is holding the request open, and the engine marks the run itself
+            const s = await cancelRun(root, run.id, 5000);
+            return { status: 200, json: { status: s.status } };
+        }),
+    },
+    {
+        method: "POST",
+        pattern: /^\/api\/p\/([^/]+)\/runs\/([^/]+)\/resume$/,
+        handler: act(async (root, m, _body, opts) => {
+            const run = runOf(root, m[2]);
+            if (TERMINAL.includes(run.status))
+                throw new Http(409, `run ${run.id} is already ${run.status}`);
+            if (runLockState(root, run.id).state === "live")
+                throw new Http(409, `run ${run.id} is already running`);
+            (opts.spawnResume ?? spawnDetachedResume)(root, run.id);
+            return { status: 202, json: { ok: true } };
+        }),
+    },
+    {
+        method: "POST",
+        pattern: /^\/api\/p\/([^/]+)\/lessons\/([^/]+)\/(approve|forget|promote)$/,
+        handler: act(async (root, m) => {
+            const key = m[2];
+            if (m[3] === "approve")
+                approveLesson(root, key);
+            else if (m[3] === "promote")
+                promoteLesson(root, key);
+            else if (!forgetLesson(root, key))
+                throw new Http(404, `No lesson "${key}"`);
+            return { status: 200, json: { ok: true } };
+        }),
+    },
+    {
+        method: "POST",
+        pattern: /^\/api\/p\/([^/]+)\/drafts\/([^/]+)\/(approve|reject)$/,
+        handler: act(async (root, m) => {
+            if (m[3] === "approve")
+                approveDraft(root, m[2]);
+            else if (!rejectDraft(root, m[2]))
+                throw new Http(404, `No skill draft "${m[2]}"`);
+            return { status: 200, json: { ok: true } };
+        }),
+    },
+    // registry only: the project's folder stays exactly as it is, and one that is
+    // already gone must still be removable, so this never resolves a root.
+    {
+        method: "DELETE",
+        pattern: /^\/api\/projects\/([^/]+)$/,
+        handler: async (m, _url, _body, opts) => removeProject(m[1], opts.home) ? { status: 200, json: { ok: true } } : { status: 404, json: { error: `no such project: ${m[1]}` } },
+    },
 ];
 //# sourceMappingURL=api.js.map

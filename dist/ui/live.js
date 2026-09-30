@@ -1,7 +1,8 @@
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { loadRun, runDir } from "../orchestrator/run.js";
+import { runDir } from "../orchestrator/run.js";
+import { Http, runOf } from "./api.js";
 import { getProject } from "./projects.js";
 /**
  * `events.jsonl` as an SSE stream.
@@ -32,16 +33,18 @@ export function liveEvents(projectId, runId, opts, url, req, res, sec) {
     let dir;
     try {
         dir = runDir(project.path, runId);
-        loadRun(project.path, runId);
+        runOf(project.path, runId);
     }
-    catch {
-        return { status: 404, json: { error: `no such run: ${runId}` } };
+    catch (e) {
+        if (e instanceof Http)
+            return { status: e.status, json: { error: e.message } };
+        throw e;
     }
     res.writeHead(200, { ...sec, "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
     const file = path.join(dir, "events.jsonl");
-    const since = startFrom(url, req);
+    let since = startFrom(url, req);
     const buf = Buffer.allocUnsafe(CHUNK);
-    const decoder = new StringDecoder("utf8");
+    let decoder = new StringDecoder("utf8");
     let offset = 0;
     let partial = "";
     let seen = 0;
@@ -57,6 +60,14 @@ export function liveEvents(projectId, runId, opts, url, req, res, sec) {
             return; // the first logEvent has not created it yet
         }
         try {
+            if (fstatSync(fd).size < offset) {
+                // A replaced or truncated log starts a new sequence from its first line.
+                offset = 0;
+                partial = "";
+                decoder = new StringDecoder("utf8");
+                seen = 0;
+                since = 0;
+            }
             for (;;) {
                 const n = readSync(fd, buf, 0, buf.length, offset);
                 if (!n)

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, appendFileSync, exi
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { retrying } from "../core/jsonstore.js";
+export const RUN_STATUSES = ["queued", "planning", "working", "verifying", "fixing", "paused", "pr_open", "needs_human", "failed", "cancelled"];
 export const TERMINAL = ["pr_open", "needs_human", "failed", "cancelled"];
 export const runsDir = (root) => path.join(root, ".agentos", "runs");
 export function runDir(root, id) {
