@@ -230,7 +230,7 @@ export function sameCodexPath(a: string, b: string, platform: string = process.p
  * also fixes Windows, where the old `which` fallback does not exist and
  * executables are resolved through PATHEXT (.cmd shims for npx/npm).
  */
-function isCommandOnPath(cmd: string): boolean {
+export function isCommandOnPath(cmd: string): boolean {
   if (cmd.includes("/") || cmd.includes("\\")) return existsSync(cmd);
 
   const exts =
