@@ -281,6 +281,7 @@
     ctx.summary = h("div", null);
     main.appendChild(ctx.summary);
     paintRun(ctx);
+    if (run.active) timer = setInterval(() => { ctx.elapsedValue.textContent = elapsed(ctx.run); }, 1000);
     main.appendChild(diffSection(ctx));
     main.appendChild(eventsSection(ctx));
     openStream(ctx);
@@ -302,6 +303,7 @@
     if (!run || stale(ctx.seq)) return;
     ctx.run = run;
     paintRun(ctx);
+    if (!run.active && timer) { clearInterval(timer); timer = null; }
   }
 
   function runHeader(ctx) {
@@ -313,10 +315,15 @@
         statusSpan(run.status),
         run.reason ? text("span", "reason", run.reason) : null,
         run.fixRound ? meta(L("run.round"), String(run.fixRound)) : null,
-        meta(L("run.elapsed"), elapsed(run)),
+        elapsedMeta(ctx),
         meta(L("run.cost"), money(run.usage && run.usage.costUsd)),
         agents.length ? meta(L("run.agents"), agents.join(", ")) : null,
         actionButton(ctx)));
+  }
+
+  function elapsedMeta(ctx) {
+    ctx.elapsedValue = h("span", { className: "m-v" }, elapsed(ctx.run));
+    return h("span", { className: "m" }, h("span", { className: "m-k" }, L("run.elapsed")), ctx.elapsedValue);
   }
 
   /** Who worked on the run: the subtasks name them, and usage catches the planner and reviewer too. */
@@ -515,13 +522,13 @@
       if (!e || typeof e !== "object") return;
       if (e.type === "verify") { ctx.verifyEvent = e; paintVerify(ctx, e); }
       pushEvent(ctx, e);
-      if (e.type === "status" || e.type === "verify") refreshRun(ctx);
+      if (e.type === "status" || e.type === "verify" || e.type === "agent" || e.type === "usage") refreshRun(ctx);
     };
   }
 
   // -------------------------------------------------------------- router
 
-  let timer = null;                              // the runs table's 5 s refresh
+  let timer = null;                              // runs refresh or active-run elapsed tick
   let stream = null;                             // the run detail's EventSource
   let seqNo = 0;                                 // a render in flight when the route changed must not paint
   const stale = (seq) => seq !== seqNo;
