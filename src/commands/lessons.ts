@@ -1,7 +1,9 @@
 import { loadConfig } from "../core/loader.js";
 import { learningSchema } from "../core/schema.js";
 import { git } from "../orchestrator/workspace.js";
-import { listRuns, loadRun, TERMINAL } from "../orchestrator/run.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { listRuns, loadRun, runDir, TERMINAL } from "../orchestrator/run.js";
 import { cliRunners } from "../orchestrator/runners.js";
 import type { AgentName, Runner } from "../orchestrator/types.js";
 import { listLessons, approveLesson, forgetLesson, promoteLesson, ROLES, type Role } from "../learning/lessons.js";
@@ -43,10 +45,16 @@ export async function learnRuns(
   const learning = config.learning ?? learningSchema.parse({});
   const timeoutMs = (config.orchestrator?.subtaskMinutes ?? 20) * 60_000;
   const use = runners ?? cliRunners(config.orchestrator?.models ?? {});
-  if (opts.run) loadRun(root, opts.run); // throws `No run "<id>"`
+  if (opts.run) {
+    const s = loadRun(root, opts.run); // throws `No run "<id>"`
+    if (!TERMINAL.includes(s.status)) throw new Error(`run ${s.id} is ${s.status}; learn it after it finishes`);
+  }
+  // a run whose engine still holds its lock is still being finished (and learned) by that engine
   const ids = opts.run
     ? [opts.run]
-    : listRuns(root).filter((r) => TERMINAL.includes(r.status) && r.status !== "cancelled" && (!r.learned || r.learned === "failed")).map((r) => r.id);
+    : listRuns(root)
+        .filter((r) => TERMINAL.includes(r.status) && r.status !== "cancelled" && (!r.learned || r.learned === "failed") && !existsSync(path.join(runDir(root, r.id), "lock")))
+        .map((r) => r.id);
   if (!ids.length) { console.log("No runs to learn from."); return; }
   for (const id of ids) console.log(`${id}: ${await learnFromRun(root, id, learning, use, timeoutMs)}`);
 }

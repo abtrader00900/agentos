@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeRepo } from "../orchestrator/helpers.js";
-import { saveRun, logEvent, loadRun, type RunState } from "../../src/orchestrator/run.js";
+import { saveRun, logEvent, loadRun, runDir, type RunState } from "../../src/orchestrator/run.js";
 import { saveLessons, listLessons } from "../../src/learning/lessons.js";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { draftSkill, draftsDir } from "../../src/learning/skilldraft.js";
 import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "../../src/commands/lessons.js";
@@ -83,6 +83,22 @@ describe("lessons CLI", () => {
     expect(out).not.toMatch(/^(c|d|s): /m);
     expect(loadRun(repo.root, "new").learned).toBe("done");
     expect(loadRun(repo.root, "c").learned).toBeUndefined();
+  });
+
+  it("learn --run refuses a run that has not finished", async () => {
+    saveRun(repo.root, runOf("busy", "running"));
+    await expect(learnRuns({ cwd: repo.root, run: "busy" }, fakeRunners())).rejects.toThrow("run busy is running; learn it after it finishes");
+    expect(loadRun(repo.root, "busy").learned).toBeUndefined();
+  });
+
+  it("learn --pending-runs skips a run an engine still holds the lock of", async () => {
+    saveRun(repo.root, runOf("locked", "pr_open"));
+    saveRun(repo.root, runOf("free", "pr_open"));
+    writeFileSync(path.join(runDir(repo.root, "locked"), "lock"), String(process.pid));
+    await learnRuns({ cwd: repo.root, pendingRuns: true }, fakeRunners());
+    expect(logs.join("\n")).not.toMatch(/^locked: /m);
+    expect(loadRun(repo.root, "locked").learned).toBeUndefined();
+    expect(loadRun(repo.root, "free").learned).toBe("done");
   });
 
   it("skill approve prints the full draft before installing it", async () => {
