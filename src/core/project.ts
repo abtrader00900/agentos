@@ -20,11 +20,12 @@ export function projectRoot(from = process.cwd(), home = homedir()): string {
   const env = process.env.AGENTOS_PROJECT?.trim();
   if (env && isDir(path.resolve(env))) return path.resolve(env);
   const start = path.resolve(from);
-  const global = new Set([path.resolve(home), path.resolve(homedir())]);
+  const key = (p: string) => process.platform === "win32" ? p.toLowerCase() : p;
+  const global = new Set([key(path.resolve(home)), key(path.resolve(homedir()))]);
   let dir = start;
   for (;;) {
     if (existsSync(path.join(dir, "agent.config.yaml"))) return dir;
-    if (!global.has(dir) && isDir(path.join(dir, ".agentos"))) return dir;
+    if (!global.has(key(dir)) && isDir(path.join(dir, ".agentos"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return start;
     dir = parent;
