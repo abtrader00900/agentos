@@ -224,6 +224,7 @@ Add an `orchestrator` block to `agent.config.yaml`:
 ```yaml
 orchestrator:
   verify: [npm test, npx tsc --noEmit]   # must pass before a PR opens
+  build: [npm run compile]               # refresh committed build output just before the PR
   workers: [claude, codex]               # agent CLIs that write code — your subscriptions, no API keys
   reviewer: codex                        # reviews the diff (swapped if it wrote everything)
   maxWorkers: 2                          # parallel agents, each in its own git worktree
@@ -237,6 +238,8 @@ agentos runs                                        # list runs
 agentos run --resume <id>                           # continue after a rate limit or a crash
 agentos run --cancel <id>
 ```
+
+The `build` commands run in the run worktree right before the PR and their output is committed as `agentos: build`, so generated files you keep in git go out with the change; a failing build command stops the run with that command's output instead of opening a PR.
 
 A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
 
