@@ -207,8 +207,9 @@ program
     .command("runs")
     .description("List orchestrator runs, newest first")
     .option("--json", "machine-readable JSON output")
+    .option("--limit <n>", "show only the n newest runs", Number)
     .action((opts) => { try {
-    runs({ json: opts.json });
+    runs({ json: opts.json, limit: opts.limit });
 }
 catch (e) {
     fail(e);

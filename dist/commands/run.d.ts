@@ -14,4 +14,5 @@ export declare function run(task: string, opts: {
 export declare function runs(opts: {
     json?: boolean;
     cwd?: string;
+    limit?: number;
 }): void;

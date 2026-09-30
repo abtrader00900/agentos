@@ -9,7 +9,7 @@ import { runVerify, parseFindings, blocking, reviewPrompt } from "./verify.js";
 import { scanDiff, redact } from "./safety.js";
 import { finalText, killTree } from "./runners.js";
 import { git, tryGit, head, defaultBranch, statusOf, ensureExcluded, addWorktree, linkDeps, commitAll, mergeBranch, mergeInProgress, abortMerge, removeWorktree, } from "./workspace.js";
-import { prBody } from "./report.js";
+import { prBody, prTitle } from "./report.js";
 const minutes = (m) => m * 60_000;
 const other = (a) => (a === "claude" ? "codex" : "claude");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -456,7 +456,7 @@ async function gate(c) {
     git(root, ["push", "-q", "-u", "origin", s.branch]);
     if (cancelled())
         return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
-    const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", `agentos: ${s.task.slice(0, 60)}`, "--body", prBody(s)]);
+    const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", prTitle(s.task), "--body", prBody(s)]);
     s.prUrl = out.trim().split("\n").pop();
     move(c, "pr_open", s.prUrl);
     remember(c);
