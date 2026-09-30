@@ -249,6 +249,34 @@ mcpServers:
     args: ["-y", "@basit0090/agent-os@0.3.0", "mcp", "orchestrator"]
 ```
 
+## Learning from runs
+
+After every `agentos run`, agentos records what went wrong and how it was fixed: failing checks that a fix round turned green, review findings that were fixed, CLI fallbacks and merge conflicts. A read-only agent turns that into up to three short lessons. Later runs get the relevant lessons in their planner, worker, reviewer and fixer prompts. Your normal Claude and Codex chats see them too, through `memory_recall`.
+
+- A lesson backed by that recorded evidence is used right away (`auto`).
+- A guess, or anything with a URL or a shell pipe, waits for you (`pending`).
+- A lesson that contains a secret is dropped.
+- A lesson whose text is edited outside agentos (for example with `memory_store`) drops back to `pending` until you approve it again.
+
+```bash
+agentos lessons                      # list (status, seen, used) with each lesson's evidence
+agentos lessons --pending            # waiting for you
+agentos lessons approve <key>        # or: forget <key> | promote <key> (auto/approved only → agent.config.local.yaml rule)
+agentos skill drafts                 # a skill drafted after a kind of task succeeded 3 times
+agentos skill approve <kind>         # prints it, then installs it; or: agentos skill reject <kind>
+agentos learn --pending-runs         # learn from finished runs that were not learned yet
+```
+
+A rejected draft, or one that failed validation or the safety filter, leaves a tombstone, so agentos drafts that kind at most once. Delete `.agentos/skill-drafts/<kind>/` to allow a new draft.
+
+```yaml
+learning:            # optional; these are the defaults
+  retro: true
+  retroAgent: claude
+  maxLessonsInPrompt: 5
+  skillAfterRuns: 3
+```
+
 ## Storage
 
 Zero native dependencies — `npm install` never compiles anything. Memory and graph persist as atomic-writes JSON in `.agentos/`. A SQLite backend can plug in behind the same interface later if a project outgrows it.

@@ -5,6 +5,8 @@ export interface PlannerInput {
     facts: string[];
     files: string[];
     workers: AgentName[];
+    /** lessons block from earlier runs ("" = none) */
+    notes?: string;
 }
 export declare function plannerPrompt(input: PlannerInput): string;
 /** the JSON object in an agent's reply: first "{" to last "}" */
@@ -14,4 +16,5 @@ export declare function makePlan(runner: Runner, input: PlannerInput, cwd: strin
     plan?: Plan;
     error?: string;
     rateLimited?: boolean;
+    rejected?: string;
 }>;

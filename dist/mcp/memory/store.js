@@ -1,4 +1,5 @@
 import { JsonStore } from "../../core/jsonstore.js";
+import { isPendingLesson } from "../../learning/status.js";
 /** a fact is one list item: newlines in it would start new headings/items in the export */
 export const oneLine = (s) => s.replace(/\s*\r?\n\s*/g, " ").trim();
 export class MemoryStore {
@@ -9,6 +10,28 @@ export class MemoryStore {
     store(input) {
         // under the store lock: two harnesses writing at once must not drop each other's facts
         return this.db.update(() => this.upsert(input));
+    }
+    /**
+     * Read-modify-write one fact under the store lock: fn sees the fact as it is on disk now, and returns the
+     * changes. A different key moves the fact (source and pinned kept) in the same write. Returns undefined,
+     * changing nothing, when the fact no longer exists: a forgotten fact is never re-created.
+     */
+    patch(topic, key, fn) {
+        return this.db.update(() => {
+            const facts = this.db.table("facts");
+            const i = facts.findIndex((f) => f.topic === topic && f.key === key);
+            if (i < 0)
+                return undefined;
+            const cur = facts[i];
+            const next = fn(structuredClone(cur));
+            const newKey = next.key ?? key;
+            if (newKey !== key)
+                facts.splice(i, 1);
+            return this.upsert({
+                topic, key: newKey, value: next.value ?? cur.value, meta: next.meta ?? cur.meta,
+                ...(newKey !== key ? { source: cur.source ?? undefined, pinned: !!cur.pinned } : {}),
+            });
+        });
     }
     upsert(input) {
         const facts = this.db.table("facts");
@@ -21,6 +44,8 @@ export class MemoryStore {
                 existing.source = input.source;
             if (input.pinned !== undefined)
                 existing.pinned = input.pinned ? 1 : 0;
+            if (input.meta !== undefined)
+                existing.meta = input.meta;
             existing.updated_at = now;
             return { ...existing };
         }
@@ -31,6 +56,7 @@ export class MemoryStore {
             value: input.value,
             source: input.source ?? null,
             pinned: input.pinned ? 1 : 0,
+            ...(input.meta !== undefined ? { meta: input.meta } : {}),
             created_at: now,
             updated_at: now,
         };
@@ -97,7 +123,7 @@ export class MemoryStore {
             }
             const pin = f.pinned ? " 📌" : "";
             const src = f.source ? ` _(source: ${oneLine(f.source)})_` : "";
-            lines.push(`- **${oneLine(f.key)}**${pin}: ${oneLine(f.value)}${src}`);
+            lines.push(`- **${oneLine(f.key)}**${pin}${isPendingLesson(f) ? " [pending]" : ""}: ${oneLine(f.value)}${src}`);
         }
         return lines.join("\n") + "\n";
     }

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFi
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { MemoryStore, oneLine } from "../mcp/memory/store.js";
+import { lessonStatus } from "../learning/lessons.js";
 
 /** pinned facts always; beyond that, this many of the most recent in HANDOFF.md */
 const MAX_MD_FACTS = 30;
@@ -64,7 +65,8 @@ export function exportHandoff(cwd: string, input: HandoffInput): HandoffBundle {
   let memory: HandoffBundle["memory"] = [];
   if (existsSync(memDb)) {
     const store = new MemoryStore(memDb);
-    memory = store.recall({ limit: Number.MAX_SAFE_INTEGER }).map((f) => ({
+    // a pending lesson is unreviewed model output: it never travels to another agent
+    memory = store.recall({ limit: Number.MAX_SAFE_INTEGER }).filter((f) => f.topic !== "lessons" || lessonStatus(f) !== "pending").map((f) => ({
       topic: f.topic, key: f.key, value: f.value, pinned: !!f.pinned, updatedAt: f.updated_at,
     }));
   }

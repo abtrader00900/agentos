@@ -55,6 +55,16 @@ export const orchestratorSchema = z.object({
         .strict()
         .default({}),
 });
+/** learning from runs (PRD 2): lessons fed into later runs, skill drafts after repeated success */
+export const learningSchema = z.object({
+    /** a read-only agent writes lessons after each run; false = no lessons */
+    retro: z.boolean().default(true),
+    retroAgent: agentNameSchema.default("claude"),
+    /** lessons added to each planner/worker/reviewer/fixer prompt */
+    maxLessonsInPrompt: z.number().int().min(0).max(20).default(5),
+    /** successful runs of one task kind before a skill is drafted */
+    skillAfterRuns: z.number().int().min(2).max(20).default(3),
+});
 export const agentConfigSchema = z.object({
     /** Project display name */
     project: z.object({
@@ -84,6 +94,8 @@ export const agentConfigSchema = z.object({
         .default({}),
     /** agentos run — absent means the command explains how to add it */
     orchestrator: orchestratorSchema.optional(),
+    /** learning from agentos runs — defaults apply whenever `orchestrator` is set */
+    learning: learningSchema.optional(),
 });
 export const ALL_HARNESSES = ["claude-code", "codex", "antigravity", "cursor", "windsurf"];
 export function rulesForHarness(config, harness) {

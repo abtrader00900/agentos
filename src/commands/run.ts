@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
-import type { OrchestratorConfig } from "../core/schema.js";
+import { learningSchema, type LearningConfig, type OrchestratorConfig } from "../core/schema.js";
 import { git } from "../orchestrator/workspace.js";
 import { startRun, resumeRun, cancelRun, assertCleanCheckout, type EngineDeps } from "../orchestrator/engine.js";
 import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/run.js";
@@ -31,6 +31,9 @@ export function preflight(root: string, ghCli = gh): OrchestratorConfig {
   ghCli(root, ["auth", "status"]);
   return cfg;
 }
+
+/** run requires an orchestrator block, so the learning defaults apply whenever a run starts */
+const learningOf = (root: string): LearningConfig => loadConfig(root).config.learning ?? learningSchema.parse({});
 
 /** A background run (started with --id) that fails before its first save still leaves a record run_status can show. */
 function recordFailedStart(root: string, id: string, task: string, e: Error): void {
@@ -61,7 +64,9 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
   const deps = (cfg: OrchestratorConfig): EngineDeps => ({
     runners: cliRunners(cfg.models),
     gh,
+    learning: learningOf(root),
     onStatus: (s) => console.log(`→ ${s.status}${s.reason ? `: ${s.reason.split("\n")[0]}` : ""}`),
+    onLearning: (r) => console.log(r ? `learned: ${r}` : "→ learning…"),
   });
   let s;
   if (opts.resume) {
@@ -77,6 +82,7 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
     }
   }
   console.log(runLine(s));
+  if (s.draft) console.log(`skill draft ready: ${s.draft} — agentos skill drafts`);
   return s.status === "pr_open" ? 0 : 1;
 }
 

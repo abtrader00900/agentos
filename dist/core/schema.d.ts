@@ -117,6 +117,27 @@ export declare const orchestratorSchema: z.ZodObject<{
     } | undefined;
 }>;
 export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
+/** learning from runs (PRD 2): lessons fed into later runs, skill drafts after repeated success */
+export declare const learningSchema: z.ZodObject<{
+    /** a read-only agent writes lessons after each run; false = no lessons */
+    retro: z.ZodDefault<z.ZodBoolean>;
+    retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+    /** lessons added to each planner/worker/reviewer/fixer prompt */
+    maxLessonsInPrompt: z.ZodDefault<z.ZodNumber>;
+    /** successful runs of one task kind before a skill is drafted */
+    skillAfterRuns: z.ZodDefault<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    retro: boolean;
+    retroAgent: "codex" | "claude";
+    maxLessonsInPrompt: number;
+    skillAfterRuns: number;
+}, {
+    retro?: boolean | undefined;
+    retroAgent?: "codex" | "claude" | undefined;
+    maxLessonsInPrompt?: number | undefined;
+    skillAfterRuns?: number | undefined;
+}>;
+export type LearningConfig = z.infer<typeof learningSchema>;
 export declare const agentConfigSchema: z.ZodObject<{
     /** Project display name */
     project: z.ZodObject<{
@@ -264,6 +285,26 @@ export declare const agentConfigSchema: z.ZodObject<{
             claude?: string | undefined;
         } | undefined;
     }>>;
+    /** learning from agentos runs — defaults apply whenever `orchestrator` is set */
+    learning: z.ZodOptional<z.ZodObject<{
+        /** a read-only agent writes lessons after each run; false = no lessons */
+        retro: z.ZodDefault<z.ZodBoolean>;
+        retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+        /** lessons added to each planner/worker/reviewer/fixer prompt */
+        maxLessonsInPrompt: z.ZodDefault<z.ZodNumber>;
+        /** successful runs of one task kind before a skill is drafted */
+        skillAfterRuns: z.ZodDefault<z.ZodNumber>;
+    }, "strip", z.ZodTypeAny, {
+        retro: boolean;
+        retroAgent: "codex" | "claude";
+        maxLessonsInPrompt: number;
+        skillAfterRuns: number;
+    }, {
+        retro?: boolean | undefined;
+        retroAgent?: "codex" | "claude" | undefined;
+        maxLessonsInPrompt?: number | undefined;
+        skillAfterRuns?: number | undefined;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     project: {
         name: string;
@@ -309,6 +350,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             claude?: string | undefined;
         };
     } | undefined;
+    learning?: {
+        retro: boolean;
+        retroAgent: "codex" | "claude";
+        maxLessonsInPrompt: number;
+        skillAfterRuns: number;
+    } | undefined;
 }, {
     project: {
         name: string;
@@ -353,6 +400,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         } | undefined;
+    } | undefined;
+    learning?: {
+        retro?: boolean | undefined;
+        retroAgent?: "codex" | "claude" | undefined;
+        maxLessonsInPrompt?: number | undefined;
+        skillAfterRuns?: number | undefined;
     } | undefined;
 }>;
 export type AgentConfig = z.infer<typeof agentConfigSchema>;

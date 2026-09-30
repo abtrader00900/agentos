@@ -9,6 +9,7 @@ import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
 import { learn } from "./commands/learn.js";
 import { run, runs } from "./commands/run.js";
+import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "./commands/lessons.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -111,6 +112,27 @@ mcp
     await server.connect(new StdioServerTransport());
 });
 const skill = program.command("skill").description("Manage AgentOS skills");
+skill.command("drafts").description("Skill drafts written from repeated successful runs")
+    .action(() => { try {
+    skillDraftsCommand();
+}
+catch (e) {
+    fail(e);
+} });
+skill.command("approve <kind>").description("Install a skill draft (prints it first)")
+    .action((kind) => { try {
+    skillApproveCommand(kind);
+}
+catch (e) {
+    fail(e);
+} });
+skill.command("reject <kind>").description("Delete a skill draft")
+    .action((kind) => { try {
+    skillRejectCommand(kind);
+}
+catch (e) {
+    fail(e);
+} });
 skill
     .command("list")
     .description("List bundled + installed skills")
@@ -237,10 +259,29 @@ program
 });
 program
     .command("learn")
-    .description("Learn rules from git history (co-changing files, hot spots) — auto-improvement loop")
+    .description("Learn rules from git history; --run/--pending-runs learn lessons from agentos runs")
     .option("--apply", "append suggestions to agent.config.local.yaml (review, then promote)")
-    .action((opts) => { try {
-    learn({ apply: opts.apply });
+    .option("--run <id>", "learn lessons from one finished agentos run")
+    .option("--pending-runs", "learn from every finished run not learned yet (or that failed to learn)")
+    .action(async (opts) => {
+    try {
+        if (opts.run || opts.pendingRuns)
+            await learnRuns({ run: opts.run, pendingRuns: opts.pendingRuns });
+        else
+            learn({ apply: opts.apply });
+    }
+    catch (e) {
+        fail(e);
+    }
+});
+program
+    .command("lessons [action] [key]")
+    .description("Lessons learned from agentos runs: list, or approve | forget | promote <key>")
+    .option("--pending", "only lessons waiting for your approval")
+    .option("--role <role>", "planner | worker | reviewer | fixer")
+    .option("--json", "machine-readable JSON output")
+    .action((action, key, opts) => { try {
+    lessonsCommand(action, key, opts);
 }
 catch (e) {
     fail(e);

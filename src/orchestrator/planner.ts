@@ -8,6 +8,8 @@ export interface PlannerInput {
   facts: string[];
   files: string[];
   workers: AgentName[];
+  /** lessons block from earlier runs ("" = none) */
+  notes?: string;
 }
 
 export function plannerPrompt(input: PlannerInput): string {
@@ -16,6 +18,7 @@ export function plannerPrompt(input: PlannerInput): string {
     `Task: ${input.task}`,
     input.facts.length ? `Project memory:\n${input.facts.map((f) => `- ${f}`).join("\n")}` : "",
     `Files in the repository (first ${input.files.length}):\n${input.files.join("\n")}`,
+    input.notes ?? "",
     [
       `Split the task into 1-8 subtasks for these agents: ${input.workers.join(", ")}.`,
       "A small task is ONE subtask. Split only when parts are truly independent.",
@@ -33,7 +36,7 @@ export function plannerPrompt(input: PlannerInput): string {
 export function extractJson(text: string): unknown {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("no JSON object in the planner's reply");
+  if (start < 0 || end < start) throw new Error("no JSON object in the reply");
   return JSON.parse(text.slice(start, end + 1));
 }
 
@@ -43,23 +46,26 @@ export async function makePlan(
   input: PlannerInput,
   cwd: string,
   timeoutMs: number,
-): Promise<{ plan?: Plan; error?: string; rateLimited?: boolean }> {
+): Promise<{ plan?: Plan; error?: string; rateLimited?: boolean; rejected?: string }> {
   let prompt = plannerPrompt(input);
   let error = "";
+  let firstError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await runner({ prompt, cwd, timeoutMs });
     if (res.rateLimited) return { rateLimited: true };
     if (!res.ok) {
       error = `the planner failed${res.timedOut ? " (timeout)" : ""}: ${res.output.slice(-500)}`;
+      if (attempt === 0) firstError = error;
       continue;
     }
     try {
       const v = validatePlan(extractJson(finalText(res.output)), input.workers);
-      if (v.plan) return { plan: v.plan };
+      if (v.plan) return { plan: v.plan, ...(attempt > 0 ? { rejected: firstError } : {}) };
       error = v.error!;
     } catch (e) {
       error = (e as Error).message;
     }
+    if (attempt === 0) firstError = error;
     prompt = `${plannerPrompt(input)}\n\nYour previous plan was rejected: ${error}\nReturn the corrected JSON only.`;
   }
   return { error };

@@ -41,6 +41,13 @@ export interface RunState {
   verifyOutput?: string;
   prUrl?: string;
   enginePid?: number;
+  /** lessons injected into this run's prompts (PRD 2) */
+  lessonsUsed?: string[];
+  /** task kind from the retrospective */
+  kind?: string;
+  learned?: "done" | "skipped" | "failed";
+  /** a skill draft this run created */
+  draft?: string;
 }
 
 export const runsDir = (root: string) => path.join(root, ".agentos", "runs");

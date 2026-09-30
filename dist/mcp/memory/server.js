@@ -5,6 +5,7 @@ import { z } from "zod";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MemoryStore } from "./store.js";
+import { isPendingLesson } from "../../learning/status.js";
 import { projectRoot } from "../../core/project.js";
 import { VERSION } from "../../version.js";
 /**
@@ -43,13 +44,13 @@ export function createMemoryServer(dbPath = resolveDbPath()) {
         if (!facts.length)
             return { content: [{ type: "text", text: "No matching facts." }] };
         const out = facts
-            .map((f) => `[${f.topic}/${f.key}]${f.pinned ? " 📌" : ""} ${f.value}${f.source ? ` (src: ${f.source})` : ""} — ${f.updated_at}`)
+            .map((f) => `[${f.topic}/${f.key}]${f.pinned ? " 📌" : ""}${isPendingLesson(f) ? " [pending]" : ""} ${f.value}${f.source ? ` (src: ${f.source})` : ""} — ${f.updated_at}`)
             .join("\n");
         return { content: [{ type: "text", text: out }] };
     });
     server.tool("memory_get", "Get one exact fact by topic + key.", { topic: z.string(), key: z.string() }, async ({ topic, key }) => {
         const fact = store.get(topic, key);
-        return { content: [{ type: "text", text: fact ? fact.value : `No fact [${topic}/${key}]` }] };
+        return { content: [{ type: "text", text: fact ? `${isPendingLesson(fact) ? "[pending] " : ""}${fact.value}` : `No fact [${topic}/${key}]` }] };
     });
     server.tool("memory_forget", "Delete a fact.", { topic: z.string(), key: z.string() }, async ({ topic, key }) => {
         const ok = store.forget(topic, key);

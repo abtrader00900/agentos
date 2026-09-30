@@ -1,4 +1,5 @@
 import { JsonStore } from "../../core/jsonstore.js";
+import { isPendingLesson } from "../../learning/status.js";
 
 /**
  * FR-3.x: persistent project memory.
@@ -15,6 +16,8 @@ export interface Fact {
   pinned: number;
   created_at: string;
   updated_at: string;
+  /** structured extras (lessons: status, roles, evidence …); absent on plain facts */
+  meta?: Record<string, unknown>;
 }
 
 export interface FactInput {
@@ -23,6 +26,7 @@ export interface FactInput {
   value: string;
   source?: string;
   pinned?: boolean;
+  meta?: Record<string, unknown>;
 }
 
 /** a fact is one list item: newlines in it would start new headings/items in the export */
@@ -40,6 +44,27 @@ export class MemoryStore {
     return this.db.update(() => this.upsert(input));
   }
 
+  /**
+   * Read-modify-write one fact under the store lock: fn sees the fact as it is on disk now, and returns the
+   * changes. A different key moves the fact (source and pinned kept) in the same write. Returns undefined,
+   * changing nothing, when the fact no longer exists: a forgotten fact is never re-created.
+   */
+  patch(topic: string, key: string, fn: (f: Fact) => { key?: string; value?: string; meta?: Record<string, unknown> }): Fact | undefined {
+    return this.db.update(() => {
+      const facts = this.db.table<Fact>("facts");
+      const i = facts.findIndex((f) => f.topic === topic && f.key === key);
+      if (i < 0) return undefined;
+      const cur = facts[i];
+      const next = fn(structuredClone(cur));
+      const newKey = next.key ?? key;
+      if (newKey !== key) facts.splice(i, 1);
+      return this.upsert({
+        topic, key: newKey, value: next.value ?? cur.value, meta: next.meta ?? cur.meta,
+        ...(newKey !== key ? { source: cur.source ?? undefined, pinned: !!cur.pinned } : {}),
+      });
+    });
+  }
+
   private upsert(input: FactInput): Fact {
     const facts = this.db.table<Fact>("facts");
     const now = new Date().toISOString();
@@ -49,6 +74,7 @@ export class MemoryStore {
       // an update that does not mention source/pinned keeps them (re-storing a fact used to unpin it)
       if (input.source !== undefined) existing.source = input.source;
       if (input.pinned !== undefined) existing.pinned = input.pinned ? 1 : 0;
+      if (input.meta !== undefined) existing.meta = input.meta;
       existing.updated_at = now;
       return { ...existing };
     }
@@ -59,6 +85,7 @@ export class MemoryStore {
       value: input.value,
       source: input.source ?? null,
       pinned: input.pinned ? 1 : 0,
+      ...(input.meta !== undefined ? { meta: input.meta } : {}),
       created_at: now,
       updated_at: now,
     };
@@ -128,7 +155,7 @@ export class MemoryStore {
       }
       const pin = f.pinned ? " 📌" : "";
       const src = f.source ? ` _(source: ${oneLine(f.source)})_` : "";
-      lines.push(`- **${oneLine(f.key)}**${pin}: ${oneLine(f.value)}${src}`);
+      lines.push(`- **${oneLine(f.key)}**${pin}${isPendingLesson(f) ? " [pending]" : ""}: ${oneLine(f.value)}${src}`);
     }
     return lines.join("\n") + "\n";
   }

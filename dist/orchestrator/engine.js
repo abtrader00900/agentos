@@ -2,6 +2,8 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdirSync } from "node:fs";
 import { MemoryStore } from "../mcp/memory/store.js";
+import { lessonsFor } from "../learning/inject.js";
+import { learnFromRun } from "../learning/learn-run.js";
 import { TERMINAL, newRunId, runDir, saveRun, loadRun, setStatus, logEvent, requestCancel, cancelRequested, } from "./run.js";
 import { makePlan } from "./planner.js";
 import { runScheduled } from "./scheduler.js";
@@ -104,6 +106,14 @@ function lockRun(root, id) {
         return () => rmSync(file, { force: true });
     }
 }
+/** Whether an engine holds the run's lock: "live" (its PID is running), "stale" (a dead engine's) or "free". */
+export function runLockState(root, id) {
+    const file = path.join(runDir(root, id), "lock");
+    if (!existsSync(file))
+        return { state: "free", pid: 0 };
+    const pid = lockPid(file);
+    return { state: alive(pid) ? "live" : "stale", pid };
+}
 /** the PID a lock file holds; 0 (stale) when it is empty, malformed or gone */
 function lockPid(file) {
     try {
@@ -184,8 +194,20 @@ async function drive(root, s, cfg, deps) {
     finally {
         clearInterval(watcher);
     }
+    // learning reads only the run's events and state: the worktrees go first, not after minutes of retro
     if (s.status === "pr_open")
         cleanup(c);
+    if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
+        // best effort: learning reads the run's record and never changes its status. One subtaskMinutes for all of it.
+        deps.onLearning?.();
+        const learned = await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
+        try {
+            const saved = loadRun(root, s.id);
+            Object.assign(s, { learned: saved.learned, kind: saved.kind, draft: saved.draft });
+        }
+        catch { /* keep s as it is: learning never makes drive() throw */ }
+        deps.onLearning?.(learned);
+    }
     return s;
 }
 async function step(c) {
@@ -236,7 +258,8 @@ function agentRunner(c, agent, mode) {
         const alt = other(agent);
         if (!c.cfg.workers.includes(alt))
             return res;
-        logEvent(c.root, c.s.id, { type: "fallback", from: agent, to: alt, why: res.timedOut ? "timeout" : "error" });
+        const lastLine = res.output.trim().split("\n").filter(Boolean).pop() ?? "";
+        logEvent(c.root, c.s.id, { type: "fallback", from: agent, to: alt, why: res.timedOut ? "timeout" : "error", error: redact(lastLine).slice(0, 200) });
         return call(alt, req);
     };
 }
@@ -244,20 +267,39 @@ function recall(root, task) {
     if (!existsSync(memoryFile(root)))
         return [];
     try {
-        return new MemoryStore(memoryFile(root)).recall({ text: task, limit: 10 }).map((f) => `[${f.topic}/${f.key}] ${f.value}`);
+        // lessons reach prompts only through notes(), under the fixed header and only when auto/approved
+        return new MemoryStore(memoryFile(root)).recall({ text: task, limit: Number.MAX_SAFE_INTEGER })
+            .filter((f) => f.topic !== "lessons").slice(0, 10).map((f) => `[${f.topic}/${f.key}] ${f.value}`);
     }
     catch {
         return [];
     }
 }
+/** lessons for one role's prompt ("" when learning is off or nothing applies); records which were used */
+function notes(c, role) {
+    const L = c.deps.learning;
+    if (!L)
+        return "";
+    try {
+        const r = lessonsFor(c.root, role, c.s.task, L.maxLessonsInPrompt);
+        if (r.keys.length)
+            c.s.lessonsUsed = [...new Set([...(c.s.lessonsUsed ?? []), ...r.keys])];
+        return r.block;
+    }
+    catch {
+        return ""; // lessons are advice; a broken memory file must not stop a run
+    }
+}
 async function plan(c) {
     const { s, cfg, root } = c;
     const files = git(s.runWorktree, ["ls-files"]).split("\n").filter(Boolean).slice(0, 300);
-    const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers }, s.runWorktree, minutes(cfg.subtaskMinutes));
+    const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers, notes: notes(c, "planner") }, s.runWorktree, minutes(cfg.subtaskMinutes));
     if (r.rateLimited)
         return pause(c, "planning");
     if (!r.plan)
         return move(c, "needs_human", `planner: ${r.error}`);
+    if (r.rejected)
+        logEvent(root, s.id, { type: "planner-retry", error: redact(r.rejected).slice(0, 300) });
     s.plan = r.plan;
     s.subtasks = r.plan.subtasks.map((t) => ({
         id: t.id, agent: t.agent, status: "pending", branch: `${s.branch}-${t.id}`,
@@ -266,13 +308,14 @@ async function plan(c) {
     logEvent(root, s.id, { type: "plan", plan: r.plan });
     return move(c, "working");
 }
-function workerPrompt(s, sub) {
+function workerPrompt(s, sub, note = "") {
     return [
         `You are one worker in a team. Overall goal: ${s.task}`,
         `Team plan: ${s.plan.summary}`,
         `Your subtask (${sub.id}): ${sub.title}\n${sub.prompt}`,
         sub.files.length ? `Files you are expected to change: ${sub.files.join(", ")}` : "",
         "Rules: work only inside the current directory. Do not commit, push, deploy, run migrations against real databases, or delete anything outside this directory. agentos commits your changes and runs the tests.",
+        note,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -289,7 +332,7 @@ async function work(c) {
         saveRun(root, s);
         addWorktree(root, t.worktree, t.branch, head(s.runWorktree));
         linkDeps(root, t.worktree, cfg.link);
-        const res = await agentRunner(c, sub.agent, "write")({ prompt: workerPrompt(s, sub), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+        const res = await agentRunner(c, sub.agent, "write")({ prompt: workerPrompt(s, sub, notes(c, "worker")), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) });
         if (res.rateLimited) {
             paused = true;
             t.status = "pending";
@@ -365,6 +408,7 @@ async function resolveConflicts(c, files, agent) {
         abortMerge(cwd);
         return "failed";
     }
+    logEvent(c.root, c.s.id, { type: "conflict-resolved", files });
     return "ok";
 }
 async function verify(c) {
@@ -378,7 +422,7 @@ async function verify(c) {
         const authors = new Set(s.subtasks.map((t) => t.agent));
         const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
         const diff = git(s.runWorktree, ["diff", `${s.base}..HEAD`]);
-        const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+        const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff, notes(c, "reviewer")), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
         if (res.rateLimited)
             return pause(c, "verifying");
         // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so
@@ -387,7 +431,10 @@ async function verify(c) {
         s.findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
     }
     saveRun(c.root, s);
-    logEvent(c.root, s.id, { type: "verify", ok: v.ok, findings: s.findings });
+    logEvent(c.root, s.id, {
+        type: "verify", ok: v.ok, findings: s.findings,
+        ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: s.verifyOutput.slice(-600) }),
+    });
     if (v.ok && blocking(s.findings).length === 0)
         return gate(c);
     if (s.fixRound >= cfg.maxFixRounds) {
@@ -395,13 +442,14 @@ async function verify(c) {
     }
     return move(c, "fixing");
 }
-function fixPrompt(s) {
+function fixPrompt(s, note = "") {
     const found = blocking(s.findings);
     return [
         `Goal: ${s.task}`,
         "The change in this directory does not pass yet. Fix it. Edit files only; do not commit.",
         s.verifyOk === false ? `Failing checks:\n${s.verifyOutput}` : "",
         found.length ? `Review findings to fix:\n${found.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n")}` : "",
+        note,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -411,12 +459,15 @@ async function fix(c) {
     s.fixRound++;
     saveRun(c.root, s);
     const author = s.subtasks[0]?.agent ?? c.cfg.workers[0];
-    const res = await agentRunner(c, author, "write")({ prompt: fixPrompt(s), cwd: s.runWorktree, timeoutMs: minutes(c.cfg.subtaskMinutes) });
+    const res = await agentRunner(c, author, "write")({ prompt: fixPrompt(s, notes(c, "fixer")), cwd: s.runWorktree, timeoutMs: minutes(c.cfg.subtaskMinutes) });
     if (res.rateLimited) {
         s.fixRound--;
         return pause(c, "fixing");
     }
-    commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
+    const committed = commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
+    const diff = committed ? tryGit(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]) : undefined; // logging must never fail the run
+    const files = diff?.ok ? diff.out.split("\n").filter(Boolean) : [];
+    logEvent(c.root, s.id, { type: "fix", round: s.fixRound, files });
     return move(c, "verifying");
 }
 function guardOutside(c) {
