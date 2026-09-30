@@ -29,4 +29,34 @@ describe("usage", () => {
     logEvent(root, "r2", { type: "agent", agent: "claude", line: JSON.stringify({ type: "result", total_cost_usd: 0.1, usage: { input_tokens: 1, output_tokens: 1 } }) });
     expect(runUsage(root, "r2").costUsd).toBe(0.1);
   });
+
+  it("falls back per agent line without double counting logged usage", () => {
+    saveRun(root, run("r3"));
+    logEvent(root, "r3", { type: "usage", agent: "claude", costUsd: 0.2, inputTokens: 100, outputTokens: 10 });
+    logEvent(root, "r3", { type: "agent", agent: "claude", line: JSON.stringify({ type: "result", total_cost_usd: 0.2, usage: { input_tokens: 100, output_tokens: 10 } }) });
+    logEvent(root, "r3", { type: "agent", agent: "codex", line: JSON.stringify({ type: "turn.completed", usage: { input_tokens: 50, output_tokens: 5 } }) });
+
+    expect(runUsage(root, "r3")).toEqual({
+      costUsd: 0.2,
+      inputTokens: 150,
+      outputTokens: 15,
+      byAgent: {
+        claude: { costUsd: 0.2, inputTokens: 100, outputTokens: 10 },
+        codex: { inputTokens: 50, outputTokens: 5 },
+      },
+    });
+  });
+
+  it("ignores malformed usage events without suppressing line fallback", () => {
+    saveRun(root, run("r4"));
+    logEvent(root, "r4", { type: "usage", agent: "claude", inputTokens: "x", outputTokens: 10 });
+    logEvent(root, "r4", { type: "agent", agent: "claude", line: JSON.stringify({ type: "result", total_cost_usd: 0.1, usage: { input_tokens: 20, output_tokens: 2 } }) });
+
+    expect(runUsage(root, "r4")).toEqual({
+      costUsd: 0.1,
+      inputTokens: 20,
+      outputTokens: 2,
+      byAgent: { claude: { costUsd: 0.1, inputTokens: 20, outputTokens: 2 } },
+    });
+  });
 });
