@@ -58,6 +58,26 @@ describe("collectEvidence", () => {
     expect(describeEvidence(e)).toContain("***");
   });
 
+  it("describes a failure by its error line, not the stack trace under it", () => {
+    saveRun(root, run("r6"));
+    const out = [
+      "$ node run-tests.js  ✗ FAILED",
+      "node:internal/modules/cjs/loader:1",
+      "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:",
+      "",
+      "-1 !== 5",
+      "",
+      "    at Object.<anonymous> (C:/x/test.js:3:8)",
+      "    at Module._compile (node:internal/modules/cjs/loader:1934:14)",
+    ].join("\n");
+    logEvent(root, "r6", { type: "verify", ok: false, findings: [], command: "node run-tests.js", output: out });
+    logEvent(root, "r6", { type: "fix", round: 1, files: ["str.js"] });
+    logEvent(root, "r6", { type: "verify", ok: true, findings: [] });
+    const d = describeEvidence(collectEvidence(root, "r6")[0]);
+    expect(d).toContain("Failure: AssertionError [ERR_ASSERTION]");
+    expect(d).not.toContain("at Object");
+  });
+
   it("returns nothing for a clean run", () => {
     saveRun(root, run("r5"));
     logEvent(root, "r5", { type: "verify", ok: true, findings: [] });

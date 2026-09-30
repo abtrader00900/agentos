@@ -25,6 +25,10 @@ export class MemoryStore {
             const cur = facts[i];
             const next = fn(structuredClone(cur));
             const newKey = next.key ?? key;
+            // moving onto a key another fact holds would silently replace that fact
+            if (newKey !== key && facts.some((f) => f.topic === topic && f.key === newKey)) {
+                throw new Error(`[${topic}/${newKey}] already exists — forget one of the two first`);
+            }
             if (newKey !== key)
                 facts.splice(i, 1);
             return this.upsert({

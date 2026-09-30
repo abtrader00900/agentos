@@ -5,6 +5,13 @@ import type { Finding } from "./types.js";
 const tail = (s: string, n = 4000) => (s.length > n ? `…${s.slice(-n)}` : s);
 
 /** Run the configured commands through the shell, in order, stopping at the first failure. */
+/** a long text cut to its head and tail: the error message sits at the top, the summary at the bottom */
+export function excerpt(text: string, max = 600): string {
+  if (text.length <= max) return text;
+  const half = Math.floor((max - 3) / 2);
+  return `${text.slice(0, half)}\n…\n${text.slice(-half)}`;
+}
+
 export function runVerify(cwd: string, commands: string[], timeoutMs: number): { ok: boolean; output: string } {
   let output = "";
   for (const cmd of commands) {

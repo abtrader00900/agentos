@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
-import { runVerify, parseFindings, blocking, reviewPrompt } from "../../src/orchestrator/verify.js";
+import { runVerify, parseFindings, blocking, reviewPrompt, excerpt } from "../../src/orchestrator/verify.js";
 import type { Finding } from "../../src/orchestrator/types.js";
 
 describe("runVerify", () => {
@@ -45,5 +45,17 @@ describe("reviewPrompt", () => {
     expect(p).toContain("add x");
     expect(p).toContain("+x");
     expect(reviewPrompt("t", "y".repeat(200_000))).toContain("(diff truncated)");
+  });
+});
+
+describe("excerpt", () => {
+  it("keeps short text whole, and the head and tail of long text", () => {
+    expect(excerpt("short", 600)).toBe("short");
+    const long = ["AssertionError: boom", "x".repeat(3000), "last line"].join("\n");
+    const e = excerpt(long, 600);
+    expect(e.length).toBeLessThanOrEqual(605);
+    expect(e.startsWith("AssertionError: boom")).toBe(true);
+    expect(e.endsWith("last line")).toBe(true);
+    expect(e).toContain("\n…\n");
   });
 });

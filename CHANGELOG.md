@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (0.4.0)
+## 0.4.0 — 2026-09-30
+
+PRD 2: agentos learns from its own runs. The real end-to-end runs are recorded in `bench/learning-e2e.md`.
 
 ### Added
 - **Learning from runs (PRD 2).**
@@ -15,6 +17,11 @@
 - Run events gain the verify failure output, the files each fix round changed, the fallback error line, `conflict-resolved` and `planner-retry`.
 - The PR body lists the lessons a run used.
 - `doctor` warns (`lessons:count`) above 200 active lessons.
+
+### Fixed (found in the real e2e and the review)
+- A verify failure was described by its Node stack trace (only the last 600 chars were kept). The event now keeps head + tail, and evidence names the first error line.
+- The same evidence reported by two runs was stored twice in a merged lesson. Merging now dedupes by the fact itself.
+- Approving a lesson whose text was swapped to equal another lesson's could overwrite that lesson. `MemoryStore.patch` now refuses to move a fact onto an existing key.
 
 ## 0.3.0 — 2026-09-30
 

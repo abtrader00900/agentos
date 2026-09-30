@@ -48,7 +48,7 @@ export function collectEvidence(root: string, id: string): Evidence[] {
         continue;
       }
       if (failed !== null) {
-        add({ type: "verify_fixed", command: failed.command, failedTail: redact(failed.output).slice(-600), files: [...new Set(fixFiles)], round });
+        add({ type: "verify_fixed", command: failed.command, failedTail: redact(failed.output).slice(0, 700), files: [...new Set(fixFiles)], round });
         failed = null;
         fixFiles = [];
       }
@@ -71,11 +71,17 @@ export function collectEvidence(root: string, id: string): Evidence[] {
   return out;
 }
 
+/** what failed, in one line: the first error-looking line, never the command header or a stack frame */
+function failureLine(text: string): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && l !== "…" && !/✗ FAILED$/.test(l) && !/^at /.test(l));
+  return (lines.find((l) => /error|assert|expected|fail|!==|cannot|not found|undefined/i.test(l)) ?? lines[0] ?? "").slice(0, 160);
+}
+
 /** one line for prompts and for a lesson's meta.evidence */
 export function describeEvidence(e: Evidence): string {
   const text = (() => {
     switch (e.type) {
-      case "verify_fixed": return `verify_fixed: \`${e.command}\` failed, fixed in round ${e.round} by changing ${e.files.join(", ") || "(no files)"}. Failure: ${e.failedTail.replace(/\s+/g, " ").slice(-160)}`;
+      case "verify_fixed": return `verify_fixed: \`${e.command}\` failed, fixed in round ${e.round} by changing ${e.files.join(", ") || "(no files)"}. Failure: ${failureLine(e.failedTail)}`;
       case "finding_fixed": return `finding_fixed: [${e.severity}] ${e.file}: ${e.issue}`;
       case "fallback": return `fallback: ${e.from} failed (${e.why}: ${e.error}), ${e.to} took over`;
       case "conflict_resolved": return `conflict_resolved: ${e.files.join(", ")}`;

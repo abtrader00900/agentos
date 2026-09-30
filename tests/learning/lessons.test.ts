@@ -78,6 +78,28 @@ describe("lessons", () => {
     expect(Date.now() - t).toBeLessThan(500);
   });
 
+  it("a merge does not repeat the same evidence from another run (different id or failure excerpt)", () => {
+    const a = "E2: verify_fixed: `node run-tests.js` failed, fixed in round 1 by changing str.js. Failure: oad (loader:261:19)";
+    const b = "E1: verify_fixed: `node run-tests.js` failed, fixed in round 1 by changing str.js. Failure: Load (loader:261:19)";
+    saveLessons(root, "r1", "k", [{ text: "Check the runner baseline before adding tests", roles: ["worker"], evidence: [a] }]);
+    saveLessons(root, "r2", "k", [{ text: "Check the runner baseline before adding tests", roles: ["worker"], evidence: [b] }]);
+    const [l] = listLessons(root);
+    expect(l.meta.seen).toBe(2);
+    expect(l.meta.evidence).toHaveLength(1);
+  });
+
+  it("approving a swapped lesson whose new text equals another lesson's refuses instead of overwriting it", () => {
+    const [ka, kb] = saveLessons(root, "r1", undefined, [
+      { text: "Keep controllers thin and move queries out", roles: ["worker"], evidence: EV },
+      { text: "Name migrations after the table they change", roles: ["planner"], evidence: EV },
+    ]);
+    // a chat rewrites lesson A's text to lesson B's text
+    new MemoryStore(path.join(root, ".agentos", "memory.json")).store({ topic: "lessons", key: ka, value: "Name migrations after the table they change" });
+    expect(() => approveLesson(root, ka)).toThrow(/already exists/);
+    const b = listLessons(root).find((l) => l.key === kb)!;
+    expect(b.meta).toMatchObject({ status: "auto", runs: ["r1"], roles: ["planner"] });
+  });
+
   it("keeps at most 3 lessons from one run and caps text at 300 chars", () => {
     // distinct words per lesson: similar texts would merge by design
     const drafts = ["alpha", "bravo", "charlie", "delta"].map((n) => ({ text: `${n} ${n}rule ${n}thing ${"y".repeat(400)}`, roles: ["worker" as const], evidence: EV }));
