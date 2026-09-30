@@ -7,6 +7,7 @@ import { gitCapture, handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot } from "../core/skills.js";
 import { PKG, VERSION } from "../version.js";
+import { MAX_ACTIVE } from "../learning/lessons.js";
 
 /** the generated files that start MCP servers */
 const MCP_FILES = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json", ".agents/mcp_config.json"];
@@ -111,8 +112,13 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
     // read it directly: opening a MemoryStore would quarantine a corrupt file as a side effect
     try {
       const data = JSON.parse(readFileSync(memDb, "utf8")) as { facts?: unknown };
-      const facts = (Array.isArray(data?.facts) ? data.facts : []) as { topic?: string; key?: string; pinned?: number; updated_at?: string }[];
+      const facts = (Array.isArray(data?.facts) ? data.facts : []) as { topic?: string; key?: string; pinned?: number; updated_at?: string; meta?: { status?: string } }[];
       add({ name: "memory", status: "pass", detail: `${facts.length} facts, ${(statSync(memDb).size / 1024).toFixed(1)} KB` });
+
+      const active = facts.filter((f) => f?.topic === "lessons" && ["auto", "approved"].includes(f.meta?.status ?? "")).length;
+      if (active > MAX_ACTIVE) {
+        add({ name: "lessons:count", status: "warn", detail: `${active} active lessons (limit ${MAX_ACTIVE}) — prompts get only the top few`, fix: "Run: agentos lessons, then agentos lessons forget <key> for stale ones" });
+      }
 
       // pinned facts ride along in every handoff snapshot — one reality moved past misleads every chat
       const days = config.staleAfter.pinnedFactDays;

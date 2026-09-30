@@ -1,0 +1,64 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeRepo } from "../orchestrator/helpers.js";
+import { saveRun, logEvent, loadRun, type RunState } from "../../src/orchestrator/run.js";
+import { saveLessons, listLessons } from "../../src/learning/lessons.js";
+import { lessonsCommand, learnRuns, skillDraftsCommand, skillRejectCommand } from "../../src/commands/lessons.js";
+import { doctor } from "../../src/commands/doctor.js";
+import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
+
+let repo: ReturnType<typeof makeRepo>;
+let logs: string[];
+beforeEach(() => {
+  repo = makeRepo({ "agent.config.yaml": "project: { name: t }\norchestrator: { verify: [] }\n" });
+  logs = [];
+  vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { logs.push(a.join(" ")); });
+});
+afterEach(() => { vi.restoreAllMocks(); repo.cleanup(); });
+
+const reply = (text: string): RunnerResult => ({ ok: true, output: JSON.stringify({ type: "result", result: text }) + "\n", rateLimited: false, timedOut: false });
+const EV = ["E1: verify_fixed: `npm test` failed"];
+
+describe("lessons CLI", () => {
+  it("lists, filters pending, approves and forgets", () => {
+    const [a, p] = saveLessons(repo.root, "r1", undefined, [
+      { text: "Run migrations in tests before seeding data", roles: ["worker"], evidence: EV },
+      { text: "Maybe prefer smaller subtasks for views", roles: ["planner"], evidence: [] },
+    ]);
+    lessonsCommand(undefined, undefined, { cwd: repo.root });
+    expect(logs.join("\n")).toContain(a);
+    logs = [];
+    lessonsCommand(undefined, undefined, { cwd: repo.root, pending: true, json: true });
+    expect(JSON.parse(logs.join("\n")).map((l: { key: string }) => l.key)).toEqual([p]);
+    lessonsCommand("approve", p, { cwd: repo.root });
+    expect(listLessons(repo.root).find((l) => l.key === p)?.meta.status).toBe("approved");
+    lessonsCommand("forget", a, { cwd: repo.root });
+    expect(listLessons(repo.root).map((l) => l.key)).toEqual([p]);
+    expect(() => lessonsCommand("explode", a, { cwd: repo.root })).toThrow(/Unknown action/);
+  });
+
+  it("learn --run learns one finished run with the given runners", async () => {
+    const s: RunState = { id: "old1", task: "t", status: "pr_open", baseBranch: "main", base: "x", branch: "agentos/run-old1", runWorktree: "/w", createdAt: new Date().toISOString(), updatedAt: "", subtasks: [], fixRound: 1, findings: [] };
+    saveRun(repo.root, s);
+    logEvent(repo.root, "old1", { type: "verify", ok: false, findings: [], command: "npm test", output: "boom" });
+    logEvent(repo.root, "old1", { type: "fix", round: 1, files: ["a.js"] });
+    logEvent(repo.root, "old1", { type: "verify", ok: true, findings: [] });
+    const read: Runner = async () => reply(JSON.stringify({ kind: "bug-fix", lessons: [{ text: "Check a.js edge cases before the verify step", roles: ["worker"], evidence: ["E1"] }] }));
+    await learnRuns({ cwd: repo.root, run: "old1" }, { claude: { read, write: read }, codex: { read, write: read } });
+    expect(loadRun(repo.root, "old1")).toMatchObject({ learned: "done", kind: "bug-fix" });
+    expect(listLessons(repo.root)[0].meta.status).toBe("auto");
+  });
+
+  it("skill drafts: empty list and reject of a missing draft", () => {
+    skillDraftsCommand(repo.root);
+    expect(logs.join("\n")).toContain("No skill drafts");
+    expect(() => skillRejectCommand("nope", repo.root)).toThrow(/No skill draft/);
+  });
+
+  it("doctor warns when active lessons exceed the limit", () => {
+    // every word unique per lesson, so none of them merge
+    const drafts = Array.from({ length: 201 }, (_, i) => ({ text: `topic${i} alpha${i} beta${i} gamma${i}`, roles: ["worker" as const], evidence: EV }));
+    for (let i = 0; i < drafts.length; i += 3) saveLessons(repo.root, `r${i}`, undefined, drafts.slice(i, i + 3));
+    const check = doctor({ cwd: repo.root, quiet: true }).checks.find((c) => c.name === "lessons:count");
+    expect(check?.status).toBe("warn");
+  });
+});
