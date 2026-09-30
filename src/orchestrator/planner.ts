@@ -8,6 +8,8 @@ export interface PlannerInput {
   facts: string[];
   files: string[];
   workers: AgentName[];
+  /** lessons block from earlier runs ("" = none) */
+  notes?: string;
 }
 
 export function plannerPrompt(input: PlannerInput): string {
@@ -16,6 +18,7 @@ export function plannerPrompt(input: PlannerInput): string {
     `Task: ${input.task}`,
     input.facts.length ? `Project memory:\n${input.facts.map((f) => `- ${f}`).join("\n")}` : "",
     `Files in the repository (first ${input.files.length}):\n${input.files.join("\n")}`,
+    input.notes ?? "",
     [
       `Split the task into 1-8 subtasks for these agents: ${input.workers.join(", ")}.`,
       "A small task is ONE subtask. Split only when parts are truly independent.",

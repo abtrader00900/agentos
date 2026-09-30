@@ -2,7 +2,9 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdirSync } from "node:fs";
 import { MemoryStore } from "../mcp/memory/store.js";
-import type { OrchestratorConfig } from "../core/schema.js";
+import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
+import { lessonsFor } from "../learning/inject.js";
+import type { Role } from "../learning/lessons.js";
 import type { AgentName, Runner, RunnerRequest, Subtask } from "./types.js";
 import {
   type RunState, type RunStatus, type SubtaskState, TERMINAL, newRunId, runDir, saveRun, loadRun,
@@ -25,6 +27,8 @@ export interface EngineDeps {
   gh: (cwd: string, args: string[]) => string;
   freeMemMb?: () => number;
   onStatus?: (s: RunState) => void;
+  /** PRD 2: lessons in prompts and learning after the run; absent = off */
+  learning?: LearningConfig;
 }
 
 interface Ctx {
@@ -249,16 +253,31 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
 function recall(root: string, task: string): string[] {
   if (!existsSync(memoryFile(root))) return [];
   try {
-    return new MemoryStore(memoryFile(root)).recall({ text: task, limit: 10 }).map((f) => `[${f.topic}/${f.key}] ${f.value}`);
+    // lessons reach prompts only through notes(), under the fixed header and only when auto/approved
+    return new MemoryStore(memoryFile(root)).recall({ text: task, limit: Number.MAX_SAFE_INTEGER })
+      .filter((f) => f.topic !== "lessons").slice(0, 10).map((f) => `[${f.topic}/${f.key}] ${f.value}`);
   } catch {
     return [];
+  }
+}
+
+/** lessons for one role's prompt ("" when learning is off or nothing applies); records which were used */
+function notes(c: Ctx, role: Role): string {
+  const L = c.deps.learning;
+  if (!L) return "";
+  try {
+    const r = lessonsFor(c.root, role, c.s.task, L.maxLessonsInPrompt);
+    if (r.keys.length) c.s.lessonsUsed = [...new Set([...(c.s.lessonsUsed ?? []), ...r.keys])];
+    return r.block;
+  } catch {
+    return ""; // lessons are advice; a broken memory file must not stop a run
   }
 }
 
 async function plan(c: Ctx): Promise<void> {
   const { s, cfg, root } = c;
   const files = git(s.runWorktree, ["ls-files"]).split("\n").filter(Boolean).slice(0, 300);
-  const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers }, s.runWorktree, minutes(cfg.subtaskMinutes));
+  const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers, notes: notes(c, "planner") }, s.runWorktree, minutes(cfg.subtaskMinutes));
   if (r.rateLimited) return pause(c, "planning");
   if (!r.plan) return move(c, "needs_human", `planner: ${r.error}`);
   if (r.rejected) logEvent(root, s.id, { type: "planner-retry", error: redact(r.rejected).slice(0, 300) });
@@ -271,13 +290,14 @@ async function plan(c: Ctx): Promise<void> {
   return move(c, "working");
 }
 
-function workerPrompt(s: RunState, sub: Subtask): string {
+function workerPrompt(s: RunState, sub: Subtask, note = ""): string {
   return [
     `You are one worker in a team. Overall goal: ${s.task}`,
     `Team plan: ${s.plan!.summary}`,
     `Your subtask (${sub.id}): ${sub.title}\n${sub.prompt}`,
     sub.files.length ? `Files you are expected to change: ${sub.files.join(", ")}` : "",
     "Rules: work only inside the current directory. Do not commit, push, deploy, run migrations against real databases, or delete anything outside this directory. agentos commits your changes and runs the tests.",
+    note,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -295,7 +315,7 @@ async function work(c: Ctx): Promise<void> {
     saveRun(root, s);
     addWorktree(root, t.worktree, t.branch, head(s.runWorktree));
     linkDeps(root, t.worktree, cfg.link);
-    const res = await agentRunner(c, sub.agent, "write")({ prompt: workerPrompt(s, sub), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+    const res = await agentRunner(c, sub.agent, "write")({ prompt: workerPrompt(s, sub, notes(c, "worker")), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) });
     if (res.rateLimited) {
       paused = true;
       t.status = "pending";
@@ -387,7 +407,7 @@ async function verify(c: Ctx): Promise<void> {
     const authors = new Set(s.subtasks.map((t) => t.agent));
     const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
     const diff = git(s.runWorktree, ["diff", `${s.base}..HEAD`]);
-    const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+    const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff, notes(c, "reviewer")), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
     if (res.rateLimited) return pause(c, "verifying");
     // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so
     if (!res.ok) return move(c, "needs_human", `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}`);
@@ -405,13 +425,14 @@ async function verify(c: Ctx): Promise<void> {
   return move(c, "fixing");
 }
 
-function fixPrompt(s: RunState): string {
+function fixPrompt(s: RunState, note = ""): string {
   const found = blocking(s.findings);
   return [
     `Goal: ${s.task}`,
     "The change in this directory does not pass yet. Fix it. Edit files only; do not commit.",
     s.verifyOk === false ? `Failing checks:\n${s.verifyOutput}` : "",
     found.length ? `Review findings to fix:\n${found.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n")}` : "",
+    note,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -422,7 +443,7 @@ async function fix(c: Ctx): Promise<void> {
   s.fixRound++;
   saveRun(c.root, s);
   const author = s.subtasks[0]?.agent ?? c.cfg.workers[0];
-  const res = await agentRunner(c, author, "write")({ prompt: fixPrompt(s), cwd: s.runWorktree, timeoutMs: minutes(c.cfg.subtaskMinutes) });
+  const res = await agentRunner(c, author, "write")({ prompt: fixPrompt(s, notes(c, "fixer")), cwd: s.runWorktree, timeoutMs: minutes(c.cfg.subtaskMinutes) });
   if (res.rateLimited) {
     s.fixRound--;
     return pause(c, "fixing");
