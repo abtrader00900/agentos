@@ -9,8 +9,17 @@ import { finalText } from "../orchestrator/runners.js";
 import type { Runner } from "../orchestrator/types.js";
 import { listLessons, safetyCheck } from "./lessons.js";
 
-const KIND = /^[a-z0-9][a-z0-9-]{1,39}$/;
+// kebab-case, and never a Windows device name (a directory called "con" cannot be created there)
+const KIND = /^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9][a-z0-9-]{1,39}$/;
 export const draftsDir = (root: string) => path.join(root, ".agentos", "skill-drafts");
+
+/** A rejected or failed draft leaves only this file behind, so skillDue never drafts the kind again (spec §8). */
+function tombstone(root: string, kind: string, reason: string): void {
+  const dir = path.join(draftsDir(root), kind);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "rejected"), `${new Date().toISOString()} ${reason}\n`);
+}
 
 /** the kind's successful runs when a skill should be drafted now, else null */
 export function skillDue(root: string, kind: string, after: number): RunState[] | null {
@@ -43,14 +52,17 @@ export async function draftSkill(root: string, kind: string, runs: RunState[], r
   const res = await runner({ prompt: skillPrompt(kind, runs, lessons), cwd: root, timeoutMs });
   if (!res.ok) return { ok: false, reason: res.rateLimited ? "rate limit" : "the agent failed" };
   const md = finalText(res.output).trim().replace(/^```(?:markdown|md)?\s*\n/, "").replace(/\n```\s*$/, "");
-  if (safetyCheck(md) !== "ok") return { ok: false, reason: "the draft failed the safety filter" };
   ensureExcluded(root, "/.agentos/skill-drafts/");
+  if (safetyCheck(md) !== "ok") {
+    tombstone(root, kind, "the draft failed the safety filter");
+    return { ok: false, reason: "the draft failed the safety filter" };
+  }
   const dir = path.join(draftsDir(root), kind);
   mkdirSync(path.join(dir, "test"), { recursive: true });
   writeFileSync(path.join(dir, "SKILL.md"), `${md}\n`);
   const v = validateSkillDir(dir);
   if (!v.ok) {
-    rmSync(dir, { recursive: true, force: true });
+    tombstone(root, kind, v.issues.join("; "));
     return { ok: false, reason: v.issues.join("; ") };
   }
   return { ok: true };
@@ -73,14 +85,16 @@ export function readDraft(root: string, kind: string): string {
 /** Install a draft as a project skill (the owner's approval) and remove the draft. Returns the installed SKILL.md. */
 export function approveDraft(root: string, kind: string): string {
   const text = readDraft(root, kind);
+  if (existsSync(path.join(root, ".agentos", "skills", kind))) {
+    throw new Error(`a skill named ${kind} is already installed — remove it first or reject the draft`);
+  }
   installSkillsFromDir(draftsDir(root), root, "skill drafts", kind);
   rmSync(path.join(draftsDir(root), kind), { recursive: true, force: true });
   return text;
 }
 
 export function rejectDraft(root: string, kind: string): boolean {
-  const dir = path.join(draftsDir(root), kind);
-  if (!KIND.test(kind) || !existsSync(dir)) return false;
-  rmSync(dir, { recursive: true, force: true });
+  if (!KIND.test(kind) || !existsSync(path.join(draftsDir(root), kind, "SKILL.md"))) return false;
+  tombstone(root, kind, "rejected by the owner");
   return true;
 }
