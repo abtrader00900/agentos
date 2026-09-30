@@ -17,7 +17,7 @@ import {
   git, tryGit, head, defaultBranch, statusOf, ensureExcluded, addWorktree, linkDeps, commitAll,
   mergeBranch, mergeInProgress, abortMerge, removeWorktree,
 } from "./workspace.js";
-import { prBody } from "./report.js";
+import { prBody, prTitle } from "./report.js";
 
 export interface EngineDeps {
   runners: Record<AgentName, { read: Runner; write: Runner }>;
@@ -457,7 +457,7 @@ async function gate(c: Ctx): Promise<void> {
   // remote work runs from the checkout: a relative remote URL (../origin.git) resolves against the cwd
   git(root, ["push", "-q", "-u", "origin", s.branch]);
   if (cancelled()) return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
-  const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", `agentos: ${s.task.slice(0, 60)}`, "--body", prBody(s)]);
+  const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", prTitle(s.task), "--body", prBody(s)]);
   s.prUrl = out.trim().split("\n").pop();
   move(c, "pr_open", s.prUrl);
   remember(c);
