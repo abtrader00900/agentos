@@ -57,10 +57,8 @@ export async function retrospective(
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await runner({ prompt, cwd, timeoutMs });
     if (res.rateLimited) return { rateLimited: true };
-    if (!res.ok) {
-      error = `the retrospective agent failed${res.timedOut ? " (timeout)" : ""}`;
-      continue;
-    }
+    // spec §7: one retry only after invalid JSON, not after an agent failure or timeout
+    if (!res.ok) return { error: `the retrospective agent failed${res.timedOut ? " (timeout)" : ""}` };
     try {
       const p = retroSchema.safeParse(extractJson(finalText(res.output)));
       if (p.success) {

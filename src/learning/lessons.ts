@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { MemoryStore, oneLine, type Fact } from "../mcp/memory/store.js";
-import { scanDiff, redact } from "../orchestrator/safety.js";
+import { secretHits, redact } from "../orchestrator/safety.js";
 import { applyLearnedRules } from "../commands/learn.js";
 
 export type Role = "planner" | "worker" | "reviewer" | "fixer";
@@ -41,9 +41,13 @@ export function jaccard(a: string, b: string): number {
 export const lessonKey = (text: string) =>
   `L-${createHash("sha1").update(text.toLowerCase().replace(/\s+/g, " ").trim()).digest("hex").slice(0, 8)}`;
 
+const INTERP = "(?:sh|bash|zsh|pwsh|powershell|python\\d*|node|perl|ruby)";
 const RISKY = [
-  /https?:\/\//i, /\bwww\./i, /\|\s*(sh|bash|zsh|pwsh|powershell)\b/i, /\biex\b/i, /invoke-expression/i,
-  /rm\s+-rf/i, /base64\s+(-d|--decode)/i,
+  /https?:\/\//i, /\bwww\./i, /\biex\b/i, /invoke-expression/i, /base64\s+(-d|--decode)/i,
+  new RegExp(`(?:\\||&&|;)\\s*(?:sudo\\s+)?${INTERP}\\b`, "i"), // a pipe or chain into an interpreter
+  /\b(ba)?sh\s+-c\b/i,
+  /\b(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/i,
+  /rm\s+-[a-z]*(rf|fr)/i,
 ];
 
 /**
@@ -51,9 +55,7 @@ const RISKY = [
  * dropped ("reject"). A URL, a pipe into a shell and the like can never be auto ("pending").
  */
 export function safetyCheck(text: string): "ok" | "pending" | "reject" {
-  // every line is an "added" line, so a secret on line 2+ of a skill draft is seen too
-  const asDiff = `+++ b/lesson\n${text.split("\n").map((l) => `+${l}`).join("\n")}`;
-  if (scanDiff(asDiff).length || redact(text) !== text) return "reject";
+  if (secretHits(text).length || redact(text) !== text) return "reject";
   return RISKY.some((r) => r.test(text)) ? "pending" : "ok";
 }
 
@@ -81,15 +83,30 @@ export function saveLessons(root: string, runId: string, kind: string | undefine
   const store = new MemoryStore(memoryFile(root));
   const existing = listLessons(root);
   const touched: string[] = [];
+  // ponytail: read-modify-write outside the store lock, so a concurrent `uses` bump (made when a lesson goes
+  // into a prompt) can be lost; upgrade path: do the whole merge inside one MemoryStore update.
   for (const d of drafts.slice(0, PER_RUN)) {
-    const text = oneLine(d.text).slice(0, 300);
-    const safety = text ? safetyCheck(text) : "reject";
+    // check the whole text first: a secret straddling the 300-char cut must never be stored partially
+    const full = oneLine(d.text);
+    const safety = full ? safetyCheck(full) : "reject";
     if (safety === "reject") continue;
-    const evidence = d.evidence.map((e) => e.slice(0, 200));
+    const text = full.slice(0, 300);
+    // evidence is a fact about the run, but its text can still carry a secret from a failing command's output
+    const evidence = d.evidence.filter((e) => safetyCheck(e) !== "reject").map((e) => e.slice(0, 200));
     const status: LessonStatus = evidence.length && safety === "ok" ? "auto" : "pending";
-    const same =
-      (d.sameAs ? existing.find((l) => l.key === d.sameAs) : undefined) ??
-      existing.find((l) => l.meta.roles.some((r) => d.roles.includes(r)) && jaccard(l.text, text) >= 0.6);
+    const roles = d.roles.length ? d.roles : ROLES;
+    const shares = (l: Lesson) => l.meta.roles.some((r) => roles.includes(r));
+    let same = d.sameAs ? existing.find((l) => l.key === d.sameAs && shares(l)) : undefined;
+    if (!same) {
+      // best match among lessons for the same roles; a safe evidenced lesson is never absorbed into a risky one
+      let best = 0.6;
+      for (const l of existing) {
+        if (!shares(l) || (safety === "ok" && safetyCheck(l.text) !== "ok")) continue;
+        const j = jaccard(l.text, text);
+        if (j >= best) { same = l; best = j; }
+      }
+    }
+    same ??= existing.find((l) => l.key === lessonKey(text)); // identical text always merges: a fresh store would overwrite it
     if (same) {
       const m = same.meta;
       // upgrade only when the stored text is itself safe: a risky lesson never turns auto through a safe twin

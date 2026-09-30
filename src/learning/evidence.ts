@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadRun, runDir } from "../orchestrator/run.js";
-import { redact } from "../orchestrator/safety.js";
+import { redact, maskSecrets } from "../orchestrator/safety.js";
 
 /** Facts agentos recorded about a finished run. They are data, not a model's opinion. */
 export type Evidence =
@@ -83,5 +83,6 @@ export function describeEvidence(e: Evidence): string {
       case "planner_retry": return `planner_retry: ${e.error}`;
     }
   })();
-  return `${e.id}: ${text}`.slice(0, 300);
+  // mask before cutting: a token straddling the cut must not survive as a partial match
+  return maskSecrets(`${e.id}: ${text}`).slice(0, 300);
 }

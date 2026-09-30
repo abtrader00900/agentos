@@ -50,6 +50,14 @@ describe("collectEvidence", () => {
     expect(collectEvidence(root, "r4")[3]).toMatchObject({ reason: "still failing after 3 fix round(s)" });
   });
 
+  it("masks secret-pattern text in a description", () => {
+    const gh = "ghp_" + "a".repeat(36);
+    saveRun(root, run("r6", { status: "needs_human", reason: `token ${gh} rejected` }));
+    const [e] = collectEvidence(root, "r6");
+    expect(describeEvidence(e)).not.toContain(gh);
+    expect(describeEvidence(e)).toContain("***");
+  });
+
   it("returns nothing for a clean run", () => {
     saveRun(root, run("r5"));
     logEvent(root, "r5", { type: "verify", ok: true, findings: [] });
