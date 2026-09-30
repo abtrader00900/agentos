@@ -454,9 +454,10 @@ async function gate(c: Ctx): Promise<void> {
   const hits = [...new Set([...scanDiff(history), ...scanDiff(git(s.runWorktree, ["diff", `${s.base}..HEAD`]))])];
   if (hits.length) return move(c, "needs_human", `secret scan blocked the PR: ${hits.join("; ")}`);
   if (cancelled()) return move(c, "cancelled", "cancelled by the owner");
-  git(s.runWorktree, ["push", "-q", "-u", "origin", s.branch]);
+  // remote work runs from the checkout: a relative remote URL (../origin.git) resolves against the cwd
+  git(root, ["push", "-q", "-u", "origin", s.branch]);
   if (cancelled()) return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
-  const out = c.deps.gh(s.runWorktree, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", `agentos: ${s.task.slice(0, 60)}`, "--body", prBody(s)]);
+  const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", `agentos: ${s.task.slice(0, 60)}`, "--body", prBody(s)]);
   s.prUrl = out.trim().split("\n").pop();
   move(c, "pr_open", s.prUrl);
   remember(c);
