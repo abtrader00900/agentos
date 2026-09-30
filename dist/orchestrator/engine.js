@@ -74,21 +74,44 @@ function lockRun(root, id) {
     const file = path.join(runDir(root, id), "lock");
     mkdirSync(path.dirname(file), { recursive: true });
     for (let attempt = 0;; attempt++) {
+        let fd;
         try {
-            const fd = openSync(file, "wx");
-            writeSync(fd, String(process.pid));
-            closeSync(fd);
-            return () => rmSync(file, { force: true });
+            fd = openSync(file, "wx");
         }
         catch (e) {
             if (e.code !== "EEXIST" || attempt > 0)
                 throw e;
-            const pid = Number(readFileSync(file, "utf8").trim());
+            const pid = lockPid(file);
             if (alive(pid))
                 throw new Error(`run ${id} is already being driven by agentos process ${pid} — wait for it, or cancel the run`);
             logEvent(root, id, { type: "stale-lock", pid });
             rmSync(file, { force: true });
+            continue;
         }
+        try {
+            writeSync(fd, String(process.pid));
+            closeSync(fd);
+        }
+        catch (e) {
+            // never leave a lock without a pid behind
+            try {
+                closeSync(fd);
+            }
+            catch { /* already closed */ }
+            rmSync(file, { force: true });
+            throw e;
+        }
+        return () => rmSync(file, { force: true });
+    }
+}
+/** the PID a lock file holds; 0 (stale) when it is empty, malformed or gone */
+function lockPid(file) {
+    try {
+        const pid = Number(readFileSync(file, "utf8").trim());
+        return Number.isInteger(pid) && pid > 0 ? pid : 0;
+    }
+    catch {
+        return 0;
     }
 }
 /** Ask a running engine to stop (it kills its own agents); a paused or dead run is marked at once. */
@@ -420,9 +443,10 @@ async function gate(c) {
         s.base = latest;
         return move(c, "verifying"); // the tests must pass on the new base too
     }
-    // every commit is pushed, so scan each one: a key a fixer removed later is still in the history
-    // (the final diff too, for what a conflict resolution added inside a merge commit)
-    const history = git(s.runWorktree, ["log", "-p", "--no-merges", "--format=", `${s.base}..HEAD`]);
+    // every commit is pushed, so scan each one: a key a fixer removed later is still in the history.
+    // --cc adds each merge commit's own lines (what a conflict resolution wrote) without re-listing
+    // the lines it took from the base branch, which are already public
+    const history = git(s.runWorktree, ["log", "-p", "--cc", "--format=", `${s.base}..HEAD`]);
     const hits = [...new Set([...scanDiff(history), ...scanDiff(git(s.runWorktree, ["diff", `${s.base}..HEAD`]))])];
     if (hits.length)
         return move(c, "needs_human", `secret scan blocked the PR: ${hits.join("; ")}`);

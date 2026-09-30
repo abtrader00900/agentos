@@ -37,7 +37,8 @@ export function spawnRunner(command: string, args: string[]): Runner {
         return;
       }
       const child = WIN
-        ? spawn([exe, ...args].map(quote).join(" "), { cwd: req.cwd, shell: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
+        // the executable is always quoted: cmd.exe would split a path with & or ( ) in it
+        ? spawn([`"${exe}"`, ...args.map(quote)].join(" "), { cwd: req.cwd, shell: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
         : spawn(command, args, { cwd: req.cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
       const timer = setTimeout(() => {
         timedOut = true;

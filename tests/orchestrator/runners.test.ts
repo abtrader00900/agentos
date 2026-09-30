@@ -60,6 +60,21 @@ describe("spawnRunner", () => {
     }
   });
 
+  it.runIf(process.platform === "win32")("runs a CLI whose PATH folder has & and parentheses in its name", async () => {
+    const bin = path.join(tmp, "tools&co(x86)");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, "agentos-odd-cli.cmd"), "@echo odd-path-ok\r\n");
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+    try {
+      const r = await spawnRunner("agentos-odd-cli", [])({ prompt: "", cwd: tmp, timeoutMs: 10_000 });
+      expect(r.output).toContain("odd-path-ok");
+      expect(r.ok).toBe(true);
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  });
+
   it("reports a missing command as a failed result", async () => {
     const r = await spawnRunner("agentos-no-such-cli", [])({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
     expect(r.ok).toBe(false);

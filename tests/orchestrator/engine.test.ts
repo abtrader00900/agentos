@@ -220,6 +220,37 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
     expect(remoteHas(s.branch)).toBe(false);
   });
 
+  it("blocks the PR when a conflict resolution added a secret that a later fix removed", async () => {
+    const reviews = [JSON.stringify([{ severity: "high", file: "shared.txt", line: 1, issue: "remove the hard-coded key" }]), "[]"];
+    const d = deps({
+      plan: planOf(sub("a"), sub("b")),
+      review: () => reviews.shift() ?? "[]",
+      work: (cwd, p) => {
+        const shared = path.join(cwd, "shared.txt");
+        if (p.includes("stopped with conflicts")) return writeFileSync(shared, `a and b\nkey=${fakeKey()}\n`);
+        if (p.includes("does not pass yet")) return writeFileSync(shared, "a and b\n");
+        writeFileSync(shared, `${p.includes("create a.txt") ? "a" : "b"}\n`);
+      },
+    });
+    const s = await startRun(repo.root, "leaky merge", cfg(), d);
+    expect(s.fixRound).toBe(1); // the key lives only in the merge commit
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("secret scan");
+    expect(prCalls(d)).toHaveLength(0);
+    expect(remoteHas(s.branch)).toBe(false);
+  });
+
+  it("treats an empty or malformed lock file as stale", async () => {
+    const d = deps({ plan: () => LIMIT, work: creates });
+    expect((await startRun(repo.root, "odd locks", cfg(), d, "lk2")).status).toBe("paused");
+    const lock = path.join(runDir(repo.root, "lk2"), "lock");
+    for (const junk of ["", "not-a-pid", "-5"]) {
+      writeFileSync(lock, junk);
+      expect((await resumeRun(repo.root, "lk2", cfg(), d)).status).toBe("paused");
+      expect(existsSync(lock)).toBe(false);
+    }
+  });
+
   it("aborts a half-finished merge left by a dead engine instead of committing it on resume", async () => {
     let bCalls = 0;
     const d = deps({
