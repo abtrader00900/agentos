@@ -2,6 +2,13 @@ import { execSync } from "node:child_process";
 import { z } from "zod";
 const tail = (s, n = 4000) => (s.length > n ? `…${s.slice(-n)}` : s);
 /** Run the configured commands through the shell, in order, stopping at the first failure. */
+/** a long text cut to its head and tail: the error message sits at the top, the summary at the bottom */
+export function excerpt(text, max = 600) {
+    if (text.length <= max)
+        return text;
+    const half = Math.floor((max - 3) / 2);
+    return `${text.slice(0, half)}\n…\n${text.slice(-half)}`;
+}
 export function runVerify(cwd, commands, timeoutMs) {
     let output = "";
     for (const cmd of commands) {

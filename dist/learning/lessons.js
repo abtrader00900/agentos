@@ -101,7 +101,7 @@ export function saveLessons(root, runId, kind, drafts) {
                 return {
                     meta: {
                         ...f.meta,
-                        evidence: [...new Set([...m.evidence, ...evidence])].slice(-10),
+                        evidence: mergeEvidence(m.evidence, evidence),
                         runs: [...new Set([...m.runs, runId])].slice(-20),
                         seen: m.seen + 1,
                     },
@@ -120,6 +120,15 @@ export function saveLessons(root, runId, kind, drafts) {
         touched.push(key);
     }
     return touched;
+}
+/** evidence ids and failure excerpts differ between runs; the fact they describe does not */
+const evidenceKey = (e) => e.replace(/^E\d+:\s*/, "").replace(/\. Failure: [\s\S]*$/, "");
+function mergeEvidence(a, b) {
+    const byKey = new Map();
+    for (const e of [...a, ...b])
+        if (!byKey.has(evidenceKey(e)))
+            byKey.set(evidenceKey(e), e);
+    return [...byKey.values()].slice(-10);
 }
 function find(root, key) {
     const l = listLessons(root).find((x) => x.key === key);
