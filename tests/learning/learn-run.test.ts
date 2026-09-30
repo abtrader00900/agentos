@@ -10,6 +10,7 @@ import { listLessons, saveLessons } from "../../src/learning/lessons.js";
 import { orchestratorSchema, learningSchema } from "../../src/core/schema.js";
 import { readEvents } from "../../src/learning/evidence.js";
 import { draftsDir } from "../../src/learning/skilldraft.js";
+import { LESSONS_HEADER } from "../../src/learning/inject.js";
 import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
 
 let repo: ReturnType<typeof makeRepo>;
@@ -45,6 +46,27 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     const [l] = listLessons(repo.root);
     expect(l.meta).toMatchObject({ status: "auto", kind: "file-add", runs: ["lr1"] });
     expect(l.meta.evidence[0]).toMatch(/^E1: verify_fixed/);
+  });
+
+  it("chained: run 1's auto lesson reaches run 2's planner prompt and is listed in its PR body", async () => {
+    const LESSON = "Create fixed.txt whenever the verify command checks for it";
+    const d1 = deps((p) => reply(JSON.stringify({ kind: "file-add", lessons: [{ text: LESSON, roles: ["planner", "worker"], evidence: [p.includes("E1:") ? "E1" : "E0"] }] })), {}, true);
+    expect((await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [], verify }), d1, "ch1")).status).toBe("pr_open");
+    const [l] = listLessons(repo.root);
+    expect(l.meta).toMatchObject({ status: "auto", runs: ["ch1"] });
+
+    const planPrompts: string[] = [];
+    const base = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })));
+    const read: Runner = async (req) => {
+      if (req.prompt.includes("You are the planner")) planPrompts.push(req.prompt);
+      return base.runners.claude.read(req);
+    };
+    const d2 = { ...base, runners: { claude: { read, write: base.runners.claude.write }, codex: base.runners.codex } };
+    const s2 = await startRun(repo.root, "create a file again", orchestratorSchema.parse({ link: [] }), d2, "ch2");
+    expect(s2.status).toBe("pr_open");
+    expect(planPrompts[0]).toContain(`${LESSONS_HEADER}\n- ${LESSON}`);
+    const args = vi.mocked(d2.gh).mock.calls.map((c) => c[1]).find((a) => a[0] === "pr")!;
+    expect(args[args.indexOf("--body") + 1]).toContain(l.key);
   });
 
   it("a learning failure never changes the run's status", async () => {
