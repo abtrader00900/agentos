@@ -15,6 +15,8 @@ export interface Fact {
   pinned: number;
   created_at: string;
   updated_at: string;
+  /** structured extras (lessons: status, roles, evidence …); absent on plain facts */
+  meta?: Record<string, unknown>;
 }
 
 export interface FactInput {
@@ -23,6 +25,7 @@ export interface FactInput {
   value: string;
   source?: string;
   pinned?: boolean;
+  meta?: Record<string, unknown>;
 }
 
 /** a fact is one list item: newlines in it would start new headings/items in the export */
@@ -49,6 +52,7 @@ export class MemoryStore {
       // an update that does not mention source/pinned keeps them (re-storing a fact used to unpin it)
       if (input.source !== undefined) existing.source = input.source;
       if (input.pinned !== undefined) existing.pinned = input.pinned ? 1 : 0;
+      if (input.meta !== undefined) existing.meta = input.meta;
       existing.updated_at = now;
       return { ...existing };
     }
@@ -59,6 +63,7 @@ export class MemoryStore {
       value: input.value,
       source: input.source ?? null,
       pinned: input.pinned ? 1 : 0,
+      ...(input.meta !== undefined ? { meta: input.meta } : {}),
       created_at: now,
       updated_at: now,
     };
