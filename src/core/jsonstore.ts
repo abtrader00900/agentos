@@ -33,7 +33,7 @@ function sleep(ms: number): void {
 }
 
 /** Run fn, retrying transient Windows file-sharing errors for up to ~1s. */
-function retrying<T>(fn: () => T): T {
+export function retrying<T>(fn: () => T): T {
   for (let attempt = 0; ; attempt++) {
     try {
       return fn();
