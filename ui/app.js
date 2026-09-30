@@ -525,7 +525,9 @@
       if (!e || typeof e !== "object") return;
       if (e.type === "verify") { ctx.verifyEvent = e; paintVerify(ctx, e); }
       pushEvent(ctx, e);
-      if (e.type === "status" || e.type === "verify" || e.type === "agent" || e.type === "usage") refreshRun(ctx);
+      // agent lines stream by the hundred: repainting the run per line hammered the API; status, verify
+      // and usage change what the summary shows, and a burst of them collapses into one refresh
+      if (e.type === "status" || e.type === "verify" || e.type === "usage") scheduleRefresh(ctx);
     };
   }
 
@@ -533,11 +535,18 @@
 
   let timer = null;                              // runs refresh or active-run elapsed tick
   let stream = null;                             // the run detail's EventSource
+  let refreshPending = null;                     // a coalesced run-detail refresh
   let seqNo = 0;                                 // a render in flight when the route changed must not paint
   const stale = (seq) => seq !== seqNo;
 
+  function scheduleRefresh(ctx) {
+    if (refreshPending) return;
+    refreshPending = setTimeout(() => { refreshPending = null; refreshRun(ctx); }, 300);
+  }
+
   function teardown() {
     if (timer) { clearInterval(timer); timer = null; }
+    if (refreshPending) { clearTimeout(refreshPending); refreshPending = null; }
     if (stream) { stream.close(); stream = null; }
   }
 
