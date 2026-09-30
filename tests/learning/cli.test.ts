@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeRepo } from "../orchestrator/helpers.js";
 import { saveRun, logEvent, loadRun, type RunState } from "../../src/orchestrator/run.js";
 import { saveLessons, listLessons } from "../../src/learning/lessons.js";
-import { lessonsCommand, learnRuns, skillDraftsCommand, skillRejectCommand } from "../../src/commands/lessons.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { draftSkill, draftsDir } from "../../src/learning/skilldraft.js";
+import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "../../src/commands/lessons.js";
 import { doctor } from "../../src/commands/doctor.js";
 import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
 
@@ -26,6 +29,7 @@ describe("lessons CLI", () => {
     ]);
     lessonsCommand(undefined, undefined, { cwd: repo.root });
     expect(logs.join("\n")).toContain(a);
+    expect(logs.join("\n")).toContain("· E1: verify_fixed: `npm test` failed"); // the evidence is shown
     logs = [];
     lessonsCommand(undefined, undefined, { cwd: repo.root, pending: true, json: true });
     expect(JSON.parse(logs.join("\n")).map((l: { key: string }) => l.key)).toEqual([p]);
@@ -46,6 +50,53 @@ describe("lessons CLI", () => {
     await learnRuns({ cwd: repo.root, run: "old1" }, { claude: { read, write: read }, codex: { read, write: read } });
     expect(loadRun(repo.root, "old1")).toMatchObject({ learned: "done", kind: "bug-fix" });
     expect(listLessons(repo.root)[0].meta.status).toBe("auto");
+  });
+
+  it("filters by --role and rejects an unknown role", () => {
+    const [w, p] = saveLessons(repo.root, "r1", undefined, [
+      { text: "Run migrations in tests before seeding data", roles: ["worker"], evidence: EV },
+      { text: "Prefer smaller subtasks for views", roles: ["planner"], evidence: EV },
+    ]);
+    lessonsCommand(undefined, undefined, { cwd: repo.root, role: "planner", json: true });
+    expect(JSON.parse(logs.join("\n")).map((l: { key: string }) => l.key)).toEqual([p]);
+    expect(w).not.toBe(p);
+    expect(() => lessonsCommand(undefined, undefined, { cwd: repo.root, role: "boss" })).toThrow(/Unknown role/);
+  });
+
+  const runOf = (id: string, status: RunState["status"], learned?: RunState["learned"]): RunState =>
+    ({ id, task: "t", status, learned, baseBranch: "main", base: "x", branch: `agentos/run-${id}`, runWorktree: "/w", createdAt: new Date().toISOString(), updatedAt: "", subtasks: [], fixRound: 0, findings: [] });
+  const fakeRunners = () => {
+    const read: Runner = async () => reply(JSON.stringify({ kind: "misc", lessons: [] }));
+    return { claude: { read, write: read }, codex: { read, write: read } };
+  };
+
+  it("learn --run fails clearly for an unknown run id", async () => {
+    await expect(learnRuns({ cwd: repo.root, run: "nope" }, fakeRunners())).rejects.toThrow(/No run "nope"/);
+  });
+
+  it("learn --pending-runs skips cancelled, done and skipped runs and retries failed ones", async () => {
+    for (const [id, st, l] of [["new", "pr_open", undefined], ["retry", "needs_human", "failed"], ["c", "cancelled", undefined], ["d", "pr_open", "done"], ["s", "failed", "skipped"]] as const) saveRun(repo.root, runOf(id, st, l));
+    await learnRuns({ cwd: repo.root, pendingRuns: true }, fakeRunners());
+    const out = logs.join("\n");
+    expect(out).toMatch(/new: /);
+    expect(out).toMatch(/retry: /);
+    expect(out).not.toMatch(/^(c|d|s): /m);
+    expect(loadRun(repo.root, "new").learned).toBe("done");
+    expect(loadRun(repo.root, "c").learned).toBeUndefined();
+  });
+
+  it("skill approve prints the full draft before installing it", async () => {
+    const GOOD = "---\nname: erp-report\ndescription: Build a new ERP report page. Use when the owner asks for a report over ledger or stock data.\n---\n\n# ERP report\n\n## Workflow\n1. Add the query in a service class.\n\n## Rules\n- Eager load relations.\n"
+    const r = await draftSkill(repo.root, "erp-report", [], async () => reply(GOOD), 1000);
+    expect(r.ok).toBe(true);
+    const draftPresent: boolean[] = [];
+    vi.mocked(console.log).mockImplementation((...a: unknown[]) => { logs.push(a.join(" ")); draftPresent.push(existsSync(path.join(draftsDir(repo.root), "erp-report"))); });
+    skillApproveCommand("erp-report", repo.root);
+    expect(logs[0]).toContain("## Workflow");
+    expect(draftPresent[0]).toBe(true); // printed while the draft still exists
+    expect(logs[logs.length - 1]).toContain("installed");
+    expect(draftPresent[draftPresent.length - 1]).toBe(false);
+    expect(() => skillApproveCommand("erp-report", repo.root)).toThrow(/No skill draft/);
   });
 
   it("skill drafts: empty list and reject of a missing draft", () => {

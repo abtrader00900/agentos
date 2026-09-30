@@ -1,12 +1,12 @@
 import { loadConfig } from "../core/loader.js";
 import { learningSchema } from "../core/schema.js";
 import { git } from "../orchestrator/workspace.js";
-import { listRuns, TERMINAL } from "../orchestrator/run.js";
+import { listRuns, loadRun, TERMINAL } from "../orchestrator/run.js";
 import { cliRunners } from "../orchestrator/runners.js";
 import type { AgentName, Runner } from "../orchestrator/types.js";
 import { listLessons, approveLesson, forgetLesson, promoteLesson, ROLES, type Role } from "../learning/lessons.js";
 import { learnFromRun } from "../learning/learn-run.js";
-import { listDrafts, approveDraft, rejectDraft } from "../learning/skilldraft.js";
+import { listDrafts, readDraft, approveDraft, rejectDraft } from "../learning/skilldraft.js";
 
 const repoRoot = (cwd = process.cwd()) => git(cwd, ["rev-parse", "--show-toplevel"]);
 
@@ -29,7 +29,7 @@ export function lessonsCommand(action: string | undefined, key: string | undefin
   if (opts.json) { console.log(JSON.stringify(all.map((l) => ({ key: l.key, text: l.text, ...l.meta })), null, 2)); return; }
   if (!all.length) { console.log(opts.pending ? "No pending lessons." : "No lessons yet — they are learned after each agentos run."); return; }
   for (const l of all) {
-    console.log(`${l.key}  ${l.meta.status.padEnd(8)}  seen ${l.meta.seen} · used ${l.meta.uses} · ${l.meta.roles.join(",")}${l.meta.kind ? ` · ${l.meta.kind}` : ""}\n    ${l.text}`);
+    console.log(`${l.key}  ${l.meta.status.padEnd(8)}  seen ${l.meta.seen} · used ${l.meta.uses} · ${l.meta.roles.join(",")}${l.meta.kind ? ` · ${l.meta.kind}` : ""}\n    ${l.text}${l.meta.evidence.map((e) => `\n      · ${e}`).join("")}`);
   }
 }
 
@@ -43,6 +43,7 @@ export async function learnRuns(
   const learning = config.learning ?? learningSchema.parse({});
   const timeoutMs = (config.orchestrator?.subtaskMinutes ?? 20) * 60_000;
   const use = runners ?? cliRunners(config.orchestrator?.models ?? {});
+  if (opts.run) loadRun(root, opts.run); // throws `No run "<id>"`
   const ids = opts.run
     ? [opts.run]
     : listRuns(root).filter((r) => TERMINAL.includes(r.status) && r.status !== "cancelled" && (!r.learned || r.learned === "failed")).map((r) => r.id);
@@ -57,8 +58,10 @@ export function skillDraftsCommand(cwd?: string): void {
 }
 
 export function skillApproveCommand(kind: string, cwd?: string): void {
-  const text = approveDraft(repoRoot(cwd), kind);
-  console.log(`${text}\n✓ installed .agentos/skills/${kind} — commit it, then: agentos sync`);
+  const root = repoRoot(cwd);
+  console.log(readDraft(root, kind)); // the owner reads the full file before it is installed
+  approveDraft(root, kind);
+  console.log(`✓ installed .agentos/skills/${kind} — commit it, then: agentos sync`);
 }
 
 export function skillRejectCommand(kind: string, cwd?: string): void {

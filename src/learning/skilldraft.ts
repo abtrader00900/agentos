@@ -63,11 +63,16 @@ export function listDrafts(root: string): Array<{ kind: string; description: str
     .map((kind) => ({ kind, description: parseSkill(readFileSync(path.join(draftsDir(root), kind, "SKILL.md"), "utf8")).description ?? "" }));
 }
 
-/** Install a draft as a project skill (the owner's approval) and remove the draft. Returns the installed SKILL.md. */
-export function approveDraft(root: string, kind: string): string {
+/** The full SKILL.md of a draft; throws when there is none. */
+export function readDraft(root: string, kind: string): string {
   const file = path.join(draftsDir(root), kind, "SKILL.md");
   if (!KIND.test(kind) || !existsSync(file)) throw new Error(`No skill draft "${kind}" — see: agentos skill drafts`);
-  const text = readFileSync(file, "utf8");
+  return readFileSync(file, "utf8");
+}
+
+/** Install a draft as a project skill (the owner's approval) and remove the draft. Returns the installed SKILL.md. */
+export function approveDraft(root: string, kind: string): string {
+  const text = readDraft(root, kind);
   installSkillsFromDir(draftsDir(root), root, "skill drafts", kind);
   rmSync(path.join(draftsDir(root), kind), { recursive: true, force: true });
   return text;
