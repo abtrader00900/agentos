@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, writeSync, renameSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync, renameSync, linkSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -53,14 +53,18 @@ export function retrying<T>(fn: () => T): T {
  * in between and the wrong one gets deleted. rename has exactly one winner, so
  * moving the file to a path only this caller knows hands us the file itself —
  * and whatever we then inspect is the thing we delete. A lock that turns out to
- * belong to someone else goes straight back.
+ * belong to someone else goes back by link, not rename: rename would replace a
+ * lock somebody acquired in the meantime, link fails instead — and a lock path
+ * that is occupied again makes the file we took obsolete, so it just goes.
  */
 export function dropLock(lock: string, to: string, mine: (taken: string) => boolean): void {
   try { renameSync(lock, to); } catch { return; } // already gone, or another process won it
-  try {
-    if (mine(to)) unlinkSync(to);
-    else renameSync(to, lock);
-  } catch { /* best effort */ }
+  let ours = false;
+  try { ours = mine(to); } catch { /* unreadable: treat as someone else's */ }
+  if (!ours) {
+    try { linkSync(to, lock); } catch { /* the path holds a live lock now */ }
+  }
+  try { unlinkSync(to); } catch { /* best effort */ }
 }
 
 /**
@@ -83,7 +87,14 @@ export function withLock<T>(file: string, fn: () => T): T {
   for (let attempt = 0; fd === undefined; attempt++) {
     try {
       const opened = openSync(lock, "wx");
-      writeSync(opened, token); // stamped before we count as the holder
+      try {
+        writeSync(opened, token); // stamped before we count as the holder
+      } catch (e) {
+        // an unstamped lock is ours and nobody else's business: take it with us
+        closeSync(opened);
+        try { unlinkSync(lock); } catch { /* best effort */ }
+        throw e;
+      }
       fd = opened;
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code ?? "";

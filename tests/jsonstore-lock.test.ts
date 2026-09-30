@@ -58,6 +58,18 @@ describe("dropLock", () => {
     expect(existsSync(taken)).toBe(false);
   });
 
+  it("never hands a lock back onto a path someone else has claimed", () => {
+    writeFileSync(lock, "stale-token");
+
+    dropLock(lock, taken, () => {
+      writeFileSync(lock, "other-process-token"); // acquired while we were deciding
+      return false;
+    });
+
+    expect(readFileSync(lock, "utf8")).toBe("other-process-token");
+    expect(existsSync(taken)).toBe(false);
+  });
+
   it("hands back a lock that turns out to be someone else's", () => {
     writeFileSync(lock, "other-process-token");
 
