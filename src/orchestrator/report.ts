@@ -25,3 +25,12 @@ export function runLine(s: RunState): string {
   const why = s.reason && s.status !== "pr_open" ? `\n    ${s.reason.split("\n")[0]}` : "";
   return `${s.id}  ${s.status.padEnd(11)}  ${s.task.slice(0, 60)}${s.prUrl ? `  ${s.prUrl}` : ""}${why}`;
 }
+
+/** "agentos: <task>" for the PR title, cut at a word boundary so it never ends mid-word */
+export function prTitle(task: string, max = 72): string {
+  const t = `agentos: ${task.replace(/\s+/g, " ").trim()}`;
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:]+$/, "")}…`;
+}

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (0.3.0)
+## 0.3.0 — 2026-09-30
+
+First release of PRD 1, the orchestrator. The real end-to-end runs are recorded in `bench/orchestrator-e2e.md`.
 
 ### Added
 - `agentos run "<task>"`: a planner splits the task, and Claude Code / Codex workers run in parallel git worktrees. Each finished subtask merges into a run branch. Verify commands run, a different model reviews the diff, and a fixer loops until both pass (up to `maxFixRounds`). A pull request opens at the end.
@@ -12,10 +14,12 @@
   - there are no skip-permission flags
   - a secret scan runs before every push
   - secret-looking env values are redacted from logs
+- `agentos runs --limit <n>` shows only the n newest runs. This change was written, tested, reviewed and opened as PR #16 by `agentos run` itself.
 - `orchestrator.models: { claude?, codex? }` overrides a CLI's own default model for this project (passed as `--model` / `-m`).
 
 ### Fixed (found in the first real e2e)
 - A run failed at push when `origin` has a relative URL (`../origin.git`): push and `gh pr create` ran inside the run worktree, where the relative path resolves elsewhere. They now run from the checkout.
+- PR titles were cut at 60 characters, mid-word. They are now cut at a word boundary before 72 characters, with an ellipsis.
 
 ## 0.2.2 — 2026-09-29
 
