@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { retrying } from "../core/jsonstore.js";
+import { retrying, withLock } from "../core/jsonstore.js";
 
 /**
  * The folders the dashboard knows about, kept in ~/.agentos/projects.json.
@@ -31,43 +31,67 @@ export function projectId(root: string): string {
   return `${slug(path.basename(path.resolve(root)))}-${createHash("sha1").update(key(root)).digest("hex").slice(0, 4)}`;
 }
 
-/** a registry that is absent, unreadable or not a JSON array reads as empty; the next write replaces it */
+const isProject = (p: unknown): p is Project =>
+  !!p && typeof p === "object" &&
+  (["id", "name", "path", "addedAt", "lastSeen"] as const).every((k) => typeof (p as Record<string, unknown>)[k] === "string");
+
+/**
+ * A registry that is absent, not a JSON array, or holds malformed entries reads
+ * as empty (the next write replaces it). An I/O error is NOT corruption — it is
+ * retried and then surfaces, because reporting an empty registry would let the
+ * next write make that true and drop every project we failed to read.
+ */
 function read(home: string): Project[] {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(registryFile(home), "utf8"));
-    return Array.isArray(parsed) ? (parsed as Project[]) : [];
+    text = retrying(() => readFileSync(registryFile(home), "utf8"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed.filter(isProject) : [];
   } catch {
     return [];
   }
 }
 
-function write(home: string, projects: Project[]): void {
+/**
+ * Read-modify-write under a cross-process lock, so two runs starting at once
+ * each see the other's entry instead of overwriting it. The rename is atomic.
+ */
+function update<T>(home: string, fn: (projects: Project[]) => T): T {
   const file = registryFile(home);
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(projects, null, 2));
-  try {
-    retrying(() => renameSync(tmp, file));
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
+  return withLock(file, () => {
+    const projects = read(home);
+    const result = fn(projects);
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(projects, null, 2));
+    try {
+      retrying(() => renameSync(tmp, file));
+    } catch (e) {
+      try { unlinkSync(tmp); } catch { /* already gone */ }
+      throw e;
+    }
+    return result;
+  });
 }
 
 /** Add the folder if it is new, otherwise just refresh lastSeen. Returns the stored entry. */
 export function registerProject(root: string, home = agentosHome()): Project {
   const dir = path.resolve(root);
-  const projects = read(home);
-  const now = new Date().toISOString();
-  let entry = projects.find((p) => key(p.path) === key(dir));
-  if (entry) {
-    entry.lastSeen = now;
-  } else {
-    entry = { id: projectId(dir), name: path.basename(dir), path: dir, addedAt: now, lastSeen: now };
-    projects.push(entry);
-  }
-  write(home, projects);
-  return entry;
+  return update(home, (projects) => {
+    const now = new Date().toISOString();
+    let entry = projects.find((p) => key(p.path) === key(dir));
+    if (entry) {
+      entry.lastSeen = now;
+    } else {
+      entry = { id: projectId(dir), name: path.basename(dir), path: dir, addedAt: now, lastSeen: now };
+      projects.push(entry);
+    }
+    return entry;
+  });
 }
 
 export const listProjects = (home = agentosHome()): Array<Project & { missing: boolean }> =>
@@ -77,9 +101,10 @@ export const getProject = (id: string, home = agentosHome()): Project | undefine
   read(home).find((p) => p.id === id);
 
 export function removeProject(id: string, home = agentosHome()): boolean {
-  const projects = read(home);
-  const left = projects.filter((p) => p.id !== id);
-  if (left.length === projects.length) return false;
-  write(home, left);
-  return true;
+  return update(home, (projects) => {
+    const i = projects.findIndex((p) => p.id === id);
+    if (i < 0) return false;
+    projects.splice(i, 1);
+    return true;
+  });
 }
