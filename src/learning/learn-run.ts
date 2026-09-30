@@ -1,11 +1,12 @@
 // src/learning/learn-run.ts
 import type { LearningConfig } from "../core/schema.js";
 import type { AgentName, Runner } from "../orchestrator/types.js";
-import { loadRun, saveRun, logEvent, type RunState } from "../orchestrator/run.js";
+import { loadRun, saveRun, logEvent, listRuns, type RunState } from "../orchestrator/run.js";
 import { collectEvidence } from "./evidence.js";
 import { retrospective } from "./retro.js";
 import { listLessons, saveLessons, jaccard } from "./lessons.js";
 import { skillDue, draftSkill } from "./skilldraft.js";
+import { redact } from "../orchestrator/safety.js";
 
 const LEARNABLE: RunState["status"][] = ["pr_open", "needs_human", "failed"];
 
@@ -23,7 +24,7 @@ export async function learnFromRun(
       const { reason, lessons, ...fields } = extra;
       Object.assign(cur, { learned }, fields);
       saveRun(root, cur);
-      logEvent(root, runId, { type: learned === "failed" ? "learn-failed" : "learn", learned, ...fields, ...(reason ? { reason } : {}), ...(lessons ? { lessons } : {}) });
+      logEvent(root, runId, { type: learned === "failed" ? "learn-failed" : "learn", learned, ...fields, ...(reason ? { reason: redact(reason).slice(0, 300) } : {}), ...(lessons ? { lessons } : {}) });
     } catch { /* the run record itself is unreadable: nothing to note */ }
     return learned;
   };
@@ -32,12 +33,14 @@ export async function learnFromRun(
     if (!LEARNABLE.includes(s.status)) return record("skipped", { reason: `status ${s.status}` });
     if (!learning.retro) return record("skipped", { reason: "learning.retro is false" });
     const evidence = collectEvidence(root, runId);
-    const existing = listLessons(root)
+    const existing = listLessons(root, { status: ["auto", "approved"] }) // pending text never reaches a prompt
       .map((l) => ({ l, score: jaccard(l.text, s.task) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 30)
       .map((x) => x.l);
-    const r = await retrospective(runners[learning.retroAgent].read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing }, root, timeoutMs);
+    // reusing a kind keeps skillDue counting; listRuns is most recent first
+    const kinds = [...new Set(listRuns(root).map((r) => r.kind).filter((k): k is string => !!k))].slice(0, 30);
+    const r = await retrospective(runners[learning.retroAgent].read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing, kinds }, root, timeoutMs);
     if (!r.result) return record("failed", { reason: r.rateLimited ? "rate limit" : r.error });
     const kind = r.result.kind;
     const cur = loadRun(root, runId);

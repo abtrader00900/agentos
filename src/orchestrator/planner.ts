@@ -36,7 +36,7 @@ export function plannerPrompt(input: PlannerInput): string {
 export function extractJson(text: string): unknown {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("no JSON object in the planner's reply");
+  if (start < 0 || end < start) throw new Error("no JSON object in the reply");
   return JSON.parse(text.slice(start, end + 1));
 }
 

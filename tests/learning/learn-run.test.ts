@@ -4,10 +4,11 @@ import { writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { makeRepo } from "../orchestrator/helpers.js";
 import { startRun, type EngineDeps } from "../../src/orchestrator/engine.js";
-import { loadRun } from "../../src/orchestrator/run.js";
+import { loadRun, saveRun, type RunState } from "../../src/orchestrator/run.js";
+import { learnFromRun } from "../../src/learning/learn-run.js";
+import { listLessons, saveLessons } from "../../src/learning/lessons.js";
 import { orchestratorSchema, learningSchema } from "../../src/core/schema.js";
 import { readEvents } from "../../src/learning/evidence.js";
-import { listLessons } from "../../src/learning/lessons.js";
 import { draftsDir } from "../../src/learning/skilldraft.js";
 import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
 
@@ -94,5 +95,44 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     expect(loadRun(repo.root, "lr9")).toMatchObject({ status: "needs_human", learned: "done", kind: "file-add" });
     expect(loadRun(repo.root, "lr9").draft).toBeUndefined();
     expect(existsSync(path.join(draftsDir(repo.root), "file-add"))).toBe(false);
+  });
+});
+
+describe("learnFromRun inputs", () => {
+  const runOf = (id: string, kind: string | undefined, minute: number): RunState =>
+    ({ id, task: "t", status: "pr_open", kind, baseBranch: "main", base: "x", branch: `agentos/run-${id}`, runWorktree: "/w", createdAt: `2026-09-30T10:${String(minute).padStart(2, "0")}:00.000Z`, updatedAt: "", subtasks: [], fixRound: 0, findings: [] });
+  const runners = (read: Runner) => ({ claude: { read, write: read }, codex: { read, write: read } });
+
+  it("the retro prompt carries only auto/approved lessons and the kinds earlier runs got, most recent first", async () => {
+    saveLessons(repo.root, "r0", "k", [
+      { text: "Run the migration before the seed step", roles: ["worker"], evidence: ["E1: verify_fixed: x"] },
+      { text: "Maybe split views into their own subtask", roles: ["planner"], evidence: [] },
+    ]);
+    saveRun(repo.root, runOf("old-a", "erp-report", 1));
+    saveRun(repo.root, runOf("old-b", "bug-fix", 2));
+    saveRun(repo.root, runOf("old-c", "erp-report", 3));
+    saveRun(repo.root, runOf("cur", undefined, 4));
+    let prompt = "";
+    const read: Runner = async (req) => { prompt = req.prompt; return reply(JSON.stringify({ kind: "misc", lessons: [] })); };
+    expect(await learnFromRun(repo.root, "cur", learningSchema.parse({}), runners(read), 1000)).toBe("done");
+    expect(prompt).toContain("Run the migration before the seed step");
+    expect(prompt).not.toContain("Maybe split views"); // pending text never reaches a prompt
+    expect(prompt).toContain("Kinds this project already uses (reuse one when it fits): erp-report, bug-fix\n");
+  });
+
+  it("the learn-failed reason is redacted and capped at 300 chars", async () => {
+    const secret = "s3cr3t-value-123456";
+    process.env.AGENTOS_TEST_TOKEN = secret;
+    try {
+      saveRun(repo.root, runOf("boom", undefined, 5));
+      const read: Runner = async () => { throw new Error(`bad key ${secret} ${"x".repeat(1000)}`); };
+      expect(await learnFromRun(repo.root, "boom", learningSchema.parse({}), runners(read), 1000)).toBe("failed");
+      const ev = readEvents(repo.root, "boom").find((e) => e.type === "learn-failed")!;
+      expect(ev.reason).toContain("***");
+      expect(ev.reason).not.toContain(secret);
+      expect((ev.reason as string).length).toBeLessThanOrEqual(300);
+    } finally {
+      delete process.env.AGENTOS_TEST_TOKEN;
+    }
   });
 });
