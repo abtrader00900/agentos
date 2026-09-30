@@ -23,7 +23,7 @@ export async function learnFromRun(
       const { reason, lessons, ...fields } = extra;
       Object.assign(cur, { learned }, fields);
       saveRun(root, cur);
-      logEvent(root, runId, { type: "learn", learned, ...fields, ...(reason ? { reason } : {}), ...(lessons ? { lessons } : {}) });
+      logEvent(root, runId, { type: learned === "failed" ? "learn-failed" : "learn", learned, ...fields, ...(reason ? { reason } : {}), ...(lessons ? { lessons } : {}) });
     } catch { /* the run record itself is unreadable: nothing to note */ }
     return learned;
   };
@@ -46,11 +46,16 @@ export async function learnFromRun(
     const lessons = saveLessons(root, runId, kind, r.result.lessons);
     let draft: string | undefined;
     if (s.status === "pr_open") {
-      const runs = skillDue(root, kind, learning.skillAfterRuns);
-      if (runs) {
-        const d = await draftSkill(root, kind, runs, runners[learning.retroAgent].read, timeoutMs);
-        if (d.ok) draft = kind;
-        else logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: d.reason });
+      // the lessons are saved already: a draft error is logged, never turned into learned: "failed"
+      try {
+        const runs = skillDue(root, kind, learning.skillAfterRuns);
+        if (runs) {
+          const d = await draftSkill(root, kind, runs, runners[learning.retroAgent].read, timeoutMs);
+          if (d.ok) draft = kind;
+          else logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: d.reason });
+        }
+      } catch (e) {
+        logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: (e as Error).message });
       }
     }
     return record("done", { kind, lessons, ...(draft ? { draft } : {}) });

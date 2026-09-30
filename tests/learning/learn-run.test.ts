@@ -6,6 +6,7 @@ import { makeRepo } from "../orchestrator/helpers.js";
 import { startRun, type EngineDeps } from "../../src/orchestrator/engine.js";
 import { loadRun } from "../../src/orchestrator/run.js";
 import { orchestratorSchema, learningSchema } from "../../src/core/schema.js";
+import { readEvents } from "../../src/learning/evidence.js";
 import { listLessons } from "../../src/learning/lessons.js";
 import { draftsDir } from "../../src/learning/skilldraft.js";
 import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
@@ -50,6 +51,7 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     const s = await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr2");
     expect(s.status).toBe("pr_open");
     expect(loadRun(repo.root, "lr2").learned).toBe("failed");
+    expect(readEvents(repo.root, "lr2").some((e) => e.type === "learn-failed" && e.reason === "retro exploded")).toBe(true);
   });
 
   it("retro: false skips learning", async () => {
@@ -65,5 +67,32 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     const s = await startRun(repo.root, "create a again", orchestratorSchema.parse({ link: [] }), d, "lr5");
     expect(s.draft).toBe("file-add");
     expect(existsSync(path.join(draftsDir(repo.root), "file-add", "SKILL.md"))).toBe(true);
+  });
+
+  it("a draft agent that throws leaves the run learned: done and logs skill-draft-rejected", async () => {
+    let skillCalls = 0;
+    const base = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })));
+    const read: Runner = async (req) => {
+      if (req.prompt.includes("Write a SKILL.md")) { skillCalls++; throw new Error("draft exploded"); }
+      return base.runners.claude.read(req);
+    };
+    const d = { ...base, runners: { claude: { read, write: base.runners.claude.write }, codex: base.runners.codex } };
+    await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr6");
+    const s = await startRun(repo.root, "create a again", orchestratorSchema.parse({ link: [] }), d, "lr7");
+    expect(s.status).toBe("pr_open");
+    expect(skillCalls).toBe(1);
+    expect(loadRun(repo.root, "lr7").learned).toBe("done");
+    expect(readEvents(repo.root, "lr7").some((e) => e.type === "skill-draft-rejected" && e.reason === "draft exploded")).toBe(true);
+    expect(existsSync(path.join(draftsDir(repo.root), "file-add"))).toBe(false);
+  });
+
+  it("a needs_human run still learns, but never drafts a skill", async () => {
+    const d = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })), { learning: learningSchema.parse({ skillAfterRuns: 2 }) });
+    await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr8");
+    const s = await startRun(repo.root, "create a but fail", orchestratorSchema.parse({ link: [], verify: [`node -e "process.exit(1)"`], maxFixRounds: 0 }), d, "lr9");
+    expect(s.status).toBe("needs_human");
+    expect(loadRun(repo.root, "lr9")).toMatchObject({ status: "needs_human", learned: "done", kind: "file-add" });
+    expect(loadRun(repo.root, "lr9").draft).toBeUndefined();
+    expect(existsSync(path.join(draftsDir(repo.root), "file-add"))).toBe(false);
   });
 });

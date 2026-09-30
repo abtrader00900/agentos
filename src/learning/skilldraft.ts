@@ -12,27 +12,6 @@ import { listLessons, safetyCheck } from "./lessons.js";
 const KIND = /^[a-z0-9][a-z0-9-]{1,39}$/;
 export const draftsDir = (root: string) => path.join(root, ".agentos", "skill-drafts");
 
-// the same contract test the bundled skills ship with, so a draft validates like any skill
-const SKILL_TEST = `// skill contract test — structure + frontmatter validity (written by agentos for a skill draft)
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { describe, it, expect } from "vitest";
-
-const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skillName = path.basename(skillDir);
-
-describe(\`skill contract: \${skillName}\`, () => {
-  const skillPath = path.join(skillDir, "SKILL.md");
-  it("SKILL.md exists", () => expect(existsSync(skillPath)).toBe(true));
-  it("frontmatter: name matches directory, description has 'Use when'", () => {
-    const fm = readFileSync(skillPath, "utf8").split("---")[1] ?? "";
-    expect(fm).toContain(\`name: \${skillName}\`);
-    expect(fm).toMatch(/Use when/i);
-  });
-});
-`;
-
 /** the kind's successful runs when a skill should be drafted now, else null */
 export function skillDue(root: string, kind: string, after: number): RunState[] | null {
   if (!KIND.test(kind)) return null;
@@ -69,7 +48,6 @@ export async function draftSkill(root: string, kind: string, runs: RunState[], r
   const dir = path.join(draftsDir(root), kind);
   mkdirSync(path.join(dir, "test"), { recursive: true });
   writeFileSync(path.join(dir, "SKILL.md"), `${md}\n`);
-  writeFileSync(path.join(dir, "test", "skill.test.mjs"), SKILL_TEST);
   const v = validateSkillDir(dir);
   if (!v.ok) {
     rmSync(dir, { recursive: true, force: true });

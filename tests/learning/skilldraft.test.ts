@@ -1,6 +1,6 @@
 // tests/learning/skilldraft.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { makeRepo } from "../orchestrator/helpers.js";
 import { saveRun, type RunState } from "../../src/orchestrator/run.js";
@@ -50,6 +50,7 @@ describe("skill drafts", { timeout: 30_000 }, () => {
     expect(r).toEqual({ ok: true });
     expect(listDrafts(repo.root)).toEqual([{ kind: "erp-report", description: expect.stringContaining("Use when") }]);
     expect(statusOf(repo.root)).toBe("");
+    expect(readdirSync(path.join(draftsDir(repo.root), "erp-report", "test"))).toEqual([]); // nothing vitest could pick up
     expect(skillDue(repo.root, "erp-report", 1)).toBeNull(); // a draft exists now
     const text = approveDraft(repo.root, "erp-report");
     expect(text).toContain("## Workflow");

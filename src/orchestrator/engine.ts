@@ -196,8 +196,10 @@ async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: E
   if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
     // best effort: learning reads the run's record and never changes its status
     await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
-    const learned = loadRun(root, s.id);
-    Object.assign(s, { learned: learned.learned, kind: learned.kind, draft: learned.draft });
+    try {
+      const learned = loadRun(root, s.id);
+      Object.assign(s, { learned: learned.learned, kind: learned.kind, draft: learned.draft });
+    } catch { /* keep s as it is: learning never makes drive() throw */ }
   }
   if (s.status === "pr_open") cleanup(c);
   return s;
