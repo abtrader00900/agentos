@@ -64,4 +64,25 @@ describe("run events for learning", { timeout: 60_000 }, () => {
     await startRun(repo.root, "t", cfg(), deps(read, write), "ev4");
     expect(events("ev4").find((e) => e.type === "planner-retry").error).toContain("no JSON object");
   });
+
+  it("redacts secrets from the planner-retry and fallback events", async () => {
+    const secret = "s3cr3t-value-123456";
+    process.env.AGENTOS_TEST_TOKEN = secret;
+    try {
+      const boom = { ok: false, output: `boom ${secret}`, rateLimited: false, timedOut: false } as RunnerResult; // fails on both CLIs, so attempt 1 is the planner's retry
+      const planReplies = [boom, boom, reply(JSON.stringify(planOf("a")))];
+      const read: Runner = async (req) => (req.prompt.includes("You are the planner") ? planReplies.shift()! : reply("[]"));
+      const failing: Runner = async () => ({ ok: false, output: `Error: bad key ${secret}\n`, rateLimited: false, timedOut: false });
+      const ok: Runner = async (req) => { creates(req.cwd, req.prompt); return reply(); };
+      await startRun(repo.root, "t", cfg(), deps(read, failing, ok), "ev5");
+      const ev = events("ev5");
+      const retry = ev.find((e) => e.type === "planner-retry");
+      const fb = ev.find((e) => e.type === "fallback");
+      expect(retry.error).toContain("***");
+      expect(fb.error).toContain("***");
+      expect(JSON.stringify([retry, fb])).not.toContain(secret);
+    } finally {
+      delete process.env.AGENTOS_TEST_TOKEN;
+    }
+  });
 });

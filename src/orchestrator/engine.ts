@@ -261,7 +261,7 @@ async function plan(c: Ctx): Promise<void> {
   const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers }, s.runWorktree, minutes(cfg.subtaskMinutes));
   if (r.rateLimited) return pause(c, "planning");
   if (!r.plan) return move(c, "needs_human", `planner: ${r.error}`);
-  if (r.rejected) logEvent(root, s.id, { type: "planner-retry", error: r.rejected.slice(0, 300) });
+  if (r.rejected) logEvent(root, s.id, { type: "planner-retry", error: redact(r.rejected).slice(0, 300) });
   s.plan = r.plan;
   s.subtasks = r.plan.subtasks.map((t) => ({
     id: t.id, agent: t.agent, status: "pending", branch: `${s.branch}-${t.id}`,
@@ -396,7 +396,7 @@ async function verify(c: Ctx): Promise<void> {
   saveRun(c.root, s);
   logEvent(c.root, s.id, {
     type: "verify", ok: v.ok, findings: s.findings,
-    ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(v.output)?.[1] ?? "", output: s.verifyOutput.slice(-600) }),
+    ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: s.verifyOutput.slice(-600) }),
   });
   if (v.ok && blocking(s.findings).length === 0) return gate(c);
   if (s.fixRound >= cfg.maxFixRounds) {
@@ -428,7 +428,8 @@ async function fix(c: Ctx): Promise<void> {
     return pause(c, "fixing");
   }
   const committed = commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
-  const files = committed ? git(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]).split("\n").filter(Boolean) : [];
+  const diff = committed ? tryGit(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]) : undefined; // logging must never fail the run
+  const files = diff?.ok ? diff.out.split("\n").filter(Boolean) : [];
   logEvent(c.root, s.id, { type: "fix", round: s.fixRound, files });
   return move(c, "verifying");
 }
