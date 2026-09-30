@@ -28,6 +28,7 @@ export function req(port: number, o: { method?: string; path: string; headers?: 
     const headers: Record<string, string> = {
       host: o.host ?? `127.0.0.1:${port}`,
       ...(o.cookie === false ? {} : { cookie: `agentos_ui=${TOKEN}` }),
+      ...(o.body === undefined ? {} : { "content-length": String(Buffer.byteLength(o.body)) }),
       ...(o.headers ?? {}),
     };
     const r = http.request({ host: "127.0.0.1", port, method: o.method ?? "GET", path: o.path, headers }, (res) => {

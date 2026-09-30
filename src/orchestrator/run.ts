@@ -4,9 +4,8 @@ import { randomBytes } from "node:crypto";
 import { retrying } from "../core/jsonstore.js";
 import type { AgentName, Finding, Plan } from "./types.js";
 
-export type RunStatus =
-  | "queued" | "planning" | "working" | "verifying" | "fixing" | "paused"
-  | "pr_open" | "needs_human" | "failed" | "cancelled";
+export const RUN_STATUSES = ["queued", "planning", "working", "verifying", "fixing", "paused", "pr_open", "needs_human", "failed", "cancelled"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
 
 export const TERMINAL: readonly RunStatus[] = ["pr_open", "needs_human", "failed", "cancelled"];
 
