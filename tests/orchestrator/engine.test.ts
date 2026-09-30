@@ -240,6 +240,15 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
     expect(remoteHas(s.branch)).toBe(false);
   });
 
+  it("pushes and opens the PR from the checkout, so a relative remote URL still resolves", async () => {
+    sh(repo.root, ["remote", "set-url", "origin", "../remote.git"]); // relative to the checkout, not to a worktree
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const s = await startRun(repo.root, "relative origin", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(sh(repo.remote, ["ls-tree", "--name-only", s.branch])).toContain("a.txt");
+    expect(prCalls(d)[0][0]).toBe(repo.root);
+  });
+
   it("treats an empty or malformed lock file as stale", async () => {
     const d = deps({ plan: () => LIMIT, work: creates });
     expect((await startRun(repo.root, "odd locks", cfg(), d, "lk2")).status).toBe("paused");

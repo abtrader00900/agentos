@@ -25,6 +25,7 @@ export const mcpServerRefSchema = z.object({
     env: z.record(z.string()).optional(),
 });
 export const agentNameSchema = z.enum(["claude", "codex"]);
+const modelNameSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/, "model names are letters, digits and . _ : - (at most 64)");
 /** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
 export const orchestratorSchema = z.object({
     /** how far a run may go on its own; merge/deploy come in a later release */
@@ -48,6 +49,11 @@ export const orchestratorSchema = z.object({
     minFreeMemoryMb: z.number().nonnegative().default(1500),
     /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
     link: z.array(z.string().min(1)).default(["node_modules"]),
+    /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+    models: z
+        .object({ claude: modelNameSchema.optional(), codex: modelNameSchema.optional() })
+        .strict()
+        .default({}),
 });
 export const agentConfigSchema = z.object({
     /** Project display name */
