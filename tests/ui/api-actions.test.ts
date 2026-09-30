@@ -25,7 +25,7 @@ beforeEach(async () => {
     preflight: () => { if (preflightError) throw new Error(preflightError); },
   });
   repo = makeRepo();
-  pid = registerProject(repo.root, t.home).id;
+  pid = registerProject(repo.root, t.home)!.id;
 });
 afterEach(async () => { await t.close(); repo.cleanup(); });
 
