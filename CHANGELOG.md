@@ -12,6 +12,10 @@
   - there are no skip-permission flags
   - a secret scan runs before every push
   - secret-looking env values are redacted from logs
+- `orchestrator.models: { claude?, codex? }` overrides a CLI's own default model for this project (passed as `--model` / `-m`).
+
+### Fixed (found in the first real e2e)
+- A run failed at push when `origin` has a relative URL (`../origin.git`): push and `gh pr create` ran inside the run worktree, where the relative path resolves elsewhere. They now run from the checkout.
 
 ## 0.2.2 — 2026-09-29
 

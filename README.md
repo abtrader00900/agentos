@@ -228,6 +228,7 @@ orchestrator:
   reviewer: codex                        # reviews the diff (swapped if it wrote everything)
   maxWorkers: 2                          # parallel agents, each in its own git worktree
   link: [node_modules]                   # installed deps shared from your checkout into worktrees
+  models: { codex: gpt-5.6-sol }         # optional: override a CLI's default model
 ```
 
 ```bash

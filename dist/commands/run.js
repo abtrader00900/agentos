@@ -5,7 +5,7 @@ import { loadConfig } from "../core/loader.js";
 import { git } from "../orchestrator/workspace.js";
 import { startRun, resumeRun, cancelRun, assertCleanCheckout } from "../orchestrator/engine.js";
 import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/run.js";
-import { CLI_RUNNERS } from "../orchestrator/runners.js";
+import { cliRunners } from "../orchestrator/runners.js";
 import { runLine } from "../orchestrator/report.js";
 import { isCommandOnPath } from "./doctor.js";
 export const ORCHESTRATOR_SNIPPET = `orchestrator:
@@ -54,18 +54,20 @@ export async function run(task, opts) {
         console.log(runLine(await cancelRun(root, opts.cancel)));
         return 0;
     }
-    const deps = {
-        runners: CLI_RUNNERS,
+    const deps = (cfg) => ({
+        runners: cliRunners(cfg.models),
         gh,
         onStatus: (s) => console.log(`→ ${s.status}${s.reason ? `: ${s.reason.split("\n")[0]}` : ""}`),
-    };
+    });
     let s;
     if (opts.resume) {
-        s = await resumeRun(root, opts.resume, preflight(root), deps);
+        const cfg = preflight(root);
+        s = await resumeRun(root, opts.resume, cfg, deps(cfg));
     }
     else {
         try {
-            s = await startRun(root, task, preflight(root), deps, opts.id);
+            const cfg = preflight(root);
+            s = await startRun(root, task, cfg, deps(cfg), opts.id);
         }
         catch (e) {
             if (opts.id)

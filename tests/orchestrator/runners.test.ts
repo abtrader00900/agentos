@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnRunner, finalText } from "../../src/orchestrator/runners.js";
+import { spawnRunner, finalText, cliArgs, cliRunners } from "../../src/orchestrator/runners.js";
 
 let tmp: string;
 const script = (name: string, body: string) => {
@@ -78,6 +78,33 @@ describe("spawnRunner", () => {
   it("reports a missing command as a failed result", async () => {
     const r = await spawnRunner("agentos-no-such-cli", [])({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("cliArgs", () => {
+  it("passes a configured model to each CLI, and nothing when none is set", () => {
+    expect(cliArgs("claude", "write", "claude-opus-5-5")[1]).toEqual(expect.arrayContaining(["--model", "claude-opus-5-5"]));
+    const [cmd, args] = cliArgs("codex", "read", "gpt-5.6-sol");
+    expect(cmd).toBe("codex");
+    expect(args.slice(args.indexOf("-m"), args.indexOf("-m") + 2)).toEqual(["-m", "gpt-5.6-sol"]);
+    expect(args.at(-1)).toBe("-"); // the prompt still comes from stdin
+    expect(cliArgs("claude", "read")[1]).not.toContain("--model");
+    expect(cliArgs("codex", "write")[1]).not.toContain("-m");
+  });
+
+  it("keeps each mode's permission flags and never a skip-permission flag", () => {
+    expect(cliArgs("claude", "write")[1]).toEqual(expect.arrayContaining(["--permission-mode", "acceptEdits"]));
+    expect(cliArgs("claude", "read")[1]).toEqual(expect.arrayContaining(["--disallowedTools", "Edit,Write,NotebookEdit,Bash"]));
+    expect(cliArgs("codex", "write")[1]).toEqual(expect.arrayContaining(["-s", "workspace-write"]));
+    expect(cliArgs("codex", "read")[1]).toEqual(expect.arrayContaining(["-s", "read-only"]));
+    const all = (["claude", "codex"] as const).flatMap((a) => (["read", "write"] as const).flatMap((m) => cliArgs(a, m, "x")[1]));
+    expect(all.join(" ")).not.toMatch(/dangerously|--yolo/);
+  });
+
+  it("builds read and write runners for both CLIs", () => {
+    const r = cliRunners({ codex: "gpt-5.6-sol" });
+    expect(typeof r.claude.read).toBe("function");
+    expect(typeof r.codex.write).toBe("function");
   });
 });
 

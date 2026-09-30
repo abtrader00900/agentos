@@ -72,6 +72,17 @@ export declare const orchestratorSchema: z.ZodObject<{
     minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
     /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
     link: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+    models: z.ZodDefault<z.ZodObject<{
+        claude: z.ZodOptional<z.ZodString>;
+        codex: z.ZodOptional<z.ZodString>;
+    }, "strict", z.ZodTypeAny, {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    }, {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     autonomy: "pr";
     maxWorkers: number;
@@ -84,6 +95,10 @@ export declare const orchestratorSchema: z.ZodObject<{
     verify: string[];
     minFreeMemoryMb: number;
     link: string[];
+    models: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    };
 }, {
     autonomy?: "pr" | "merge" | "deploy" | undefined;
     maxWorkers?: number | undefined;
@@ -96,6 +111,10 @@ export declare const orchestratorSchema: z.ZodObject<{
     verify?: string[] | undefined;
     minFreeMemoryMb?: number | undefined;
     link?: string[] | undefined;
+    models?: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    } | undefined;
 }>;
 export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
 export declare const agentConfigSchema: z.ZodObject<{
@@ -201,6 +220,17 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
         /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
         link: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+        models: z.ZodDefault<z.ZodObject<{
+            claude: z.ZodOptional<z.ZodString>;
+            codex: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        }, {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        }>>;
     }, "strip", z.ZodTypeAny, {
         autonomy: "pr";
         maxWorkers: number;
@@ -213,6 +243,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         verify: string[];
         minFreeMemoryMb: number;
         link: string[];
+        models: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        };
     }, {
         autonomy?: "pr" | "merge" | "deploy" | undefined;
         maxWorkers?: number | undefined;
@@ -225,6 +259,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         verify?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
+        models?: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        } | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     project: {
@@ -266,6 +304,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         verify: string[];
         minFreeMemoryMb: number;
         link: string[];
+        models: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        };
     } | undefined;
 }, {
     project: {
@@ -307,6 +349,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         verify?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
+        models?: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        } | undefined;
     } | undefined;
 }>;
 export type AgentConfig = z.infer<typeof agentConfigSchema>;

@@ -12,11 +12,14 @@ export declare function spawnRunner(command: string, args: string[]): Runner;
 /** The agent's final message from Claude stream-json or Codex --json output, else the output's tail. */
 export declare function finalText(output: string): string;
 /**
+ * The command and fixed argv for one agent CLI.
  * write: may edit files in its cwd. read: planner and reviewer, which must not edit.
  * Claude in -p mode denies tools that are not allowed, so a writer edits files but
  * runs no shell commands; agentos commits and runs the tests itself.
+ * model (schema-checked to a plain name) overrides the CLI's own default.
  */
-export declare const CLI_RUNNERS: Record<AgentName, {
+export declare function cliArgs(agent: AgentName, mode: "read" | "write", model?: string): [string, string[]];
+export declare function cliRunners(models?: Partial<Record<AgentName, string>>): Record<AgentName, {
     write: Runner;
     read: Runner;
 }>;

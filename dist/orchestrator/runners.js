@@ -90,18 +90,25 @@ export function finalText(output) {
 const CLAUDE = ["-p", "--output-format", "stream-json", "--verbose"];
 const CODEX = ["exec", "--json", "--skip-git-repo-check"];
 /**
+ * The command and fixed argv for one agent CLI.
  * write: may edit files in its cwd. read: planner and reviewer, which must not edit.
  * Claude in -p mode denies tools that are not allowed, so a writer edits files but
  * runs no shell commands; agentos commits and runs the tests itself.
+ * model (schema-checked to a plain name) overrides the CLI's own default.
  */
-export const CLI_RUNNERS = {
-    claude: {
-        write: spawnRunner("claude", [...CLAUDE, "--permission-mode", "acceptEdits"]),
-        read: spawnRunner("claude", [...CLAUDE, "--disallowedTools", "Edit,Write,NotebookEdit,Bash"]),
-    },
-    codex: {
-        write: spawnRunner("codex", [...CODEX, "-s", "workspace-write", "-"]),
-        read: spawnRunner("codex", [...CODEX, "-s", "read-only", "-"]),
-    },
-};
+export function cliArgs(agent, mode, model) {
+    if (agent === "claude") {
+        const perms = mode === "write" ? ["--permission-mode", "acceptEdits"] : ["--disallowedTools", "Edit,Write,NotebookEdit,Bash"];
+        return ["claude", [...CLAUDE, ...(model ? ["--model", model] : []), ...perms]];
+    }
+    const sandbox = mode === "write" ? "workspace-write" : "read-only";
+    return ["codex", [...CODEX, ...(model ? ["-m", model] : []), "-s", sandbox, "-"]];
+}
+export function cliRunners(models = {}) {
+    const runner = (a, m) => spawnRunner(...cliArgs(a, m, models[a]));
+    return {
+        claude: { write: runner("claude", "write"), read: runner("claude", "read") },
+        codex: { write: runner("codex", "write"), read: runner("codex", "read") },
+    };
+}
 //# sourceMappingURL=runners.js.map
