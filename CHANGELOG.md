@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased (0.5.0)
+
+### Added
+- **Local dashboard (`agentos ui`).** All projects, runs, run detail with live events and controls, lessons, skill drafts and new-run preflight are available in the browser. It binds only to loopback and protects every request with a per-process token cookie or Bearer token, Host and Origin checks, JSON/body limits, packaged-only static files, string-free DOM construction and a strict CSP.
+- **Project registry.** Every `agentos run` records its project in `~/.agentos/projects.json` for dashboard discovery.
+- **Run cost accounting.** A new `usage` run event records each agent's tokens and cost so the dashboard can show run cost.
+- **Packaged dashboard assets.** The npm package now ships the `ui/` files.
+
 ## 0.4.0 — 2026-09-30
 
 PRD 2: agentos learns from its own runs. The real end-to-end runs are recorded in `bench/learning-e2e.md`.
