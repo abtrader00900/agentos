@@ -13,7 +13,7 @@ import {
 } from "./run.js";
 import { makePlan } from "./planner.js";
 import { runScheduled } from "./scheduler.js";
-import { runVerify, parseFindings, blocking, reviewPrompt } from "./verify.js";
+import { runVerify, parseFindings, blocking, reviewPrompt, excerpt } from "./verify.js";
 import { scanDiff, redact } from "./safety.js";
 import { finalText, killTree } from "./runners.js";
 import {
@@ -438,7 +438,7 @@ async function verify(c: Ctx): Promise<void> {
   saveRun(c.root, s);
   logEvent(c.root, s.id, {
     type: "verify", ok: v.ok, findings: s.findings,
-    ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: s.verifyOutput.slice(-600) }),
+    ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: excerpt(s.verifyOutput, 600) }),
   });
   if (v.ok && blocking(s.findings).length === 0) return gate(c);
   if (s.fixRound >= cfg.maxFixRounds) {
