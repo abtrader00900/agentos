@@ -303,7 +303,10 @@
     if (!run || stale(ctx.seq)) return;
     ctx.run = run;
     paintRun(ctx);
-    if (!run.active && timer) { clearInterval(timer); timer = null; }
+    if (run.active && ACTIVE.indexOf(run.status) < 0) {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => refreshRun(ctx), 1000);
+    } else if (!run.active && timer) { clearInterval(timer); timer = null; }
   }
 
   function runHeader(ctx) {
