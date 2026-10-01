@@ -57,6 +57,19 @@ describe("frontend", () => {
     expect(ctx.window.LABELS!["run.starting"]).toBeTruthy();
   });
 
+  it("has a Queue page and a daemon status line", () => {
+    const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
+    vm.runInNewContext(read("labels.js"), ctx);
+    const app = read("app.js");
+    for (const k of ["nav.queue", "queue.title", "queue.add", "queue.remove", "queue.empty", "daemon.running", "daemon.stopped"]) {
+      expect(ctx.window.LABELS![k], k).toBeTruthy();
+      expect(app).toContain(`L("${k}")`);
+    }
+    expect(app).toContain('"/api/queue"');
+    expect(app).toContain('"/api/daemon"');
+    expect(app).not.toMatch(/innerHTML/);
+  });
+
   it("serves the app files with the right types", async () => {
     t = await startTestServer();
     for (const [f, type] of [["/", /text\/html/], ["/app.js", /javascript/], ["/labels.js", /javascript/], ["/style.css", /text\/css/]] as const) {

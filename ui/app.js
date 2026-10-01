@@ -155,11 +155,16 @@
 
   // ------------------------------------------------------------- sidebar
 
-  function renderSidebar(projects, r) {
+  function renderSidebar(projects, r, daemon) {
     const el = document.getElementById("sidebar");
     clear(el);
     el.appendChild(h("a", { className: "brand", href: "#/" }, L("nav.brand")));
     el.appendChild(h("a", { className: r.screen === "home" ? "navlink sel" : "navlink", href: "#/" }, L("nav.projects")));
+    el.appendChild(h("a", { className: r.screen === "queue" ? "navlink sel" : "navlink", href: "#/queue" }, L("nav.queue")));
+    // a daemon we could not ask about reads as stopped; the banner already says why
+    el.appendChild(text("p", "dstatus", daemon && daemon.running
+      ? L("daemon.running") + " · " + daemon.today + "/" + daemon.maxRunsPerDay + " " + L("daemon.today")
+      : L("daemon.stopped")));
     if (!projects.length) el.appendChild(text("p", "muted", L("nav.noProjects")));
     for (const p of projects) {
       const selected = p.id === r.p;
@@ -701,6 +706,83 @@
     area.focus();
   }
 
+  // --------------------------------------------------------------- queue
+
+  /** The daemon's queue, across every project: what it will run, and what came of it. */
+  async function renderQueue(main, seq) {
+    clear(main);
+    main.appendChild(text("p", "muted", L("common.loading")));
+    const jobs = await api("/api/queue");
+    const projects = await api("/api/projects");
+    if (stale(seq)) return;
+    if (!jobs || !projects) { clear(main); return; }   // the banner says why
+    clear(main);
+    main.appendChild(h("h1", null, L("queue.title")));
+    main.appendChild(addToQueue(projects));
+    main.appendChild(jobs.length ? queueTable(jobs) : text("p", "muted", L("queue.empty")));
+  }
+
+  function addToQueue(projects) {
+    const pick = h("select", null);
+    for (const p of projects.filter((p) => !p.missing)) {
+      const opt = h("option", null, p.name);
+      opt.value = p.id;                            // value is not one of h()'s props
+      pick.appendChild(opt);
+    }
+    const area = h("textarea", { className: "task" });
+    const quick = h("input", { type: "checkbox" });
+    const counter = text("p", "note", "");
+    const add = h("button", { className: "btn" }, L("queue.add"));
+    const sync = () => {
+      const v = area.value;
+      counter.textContent = v.length + " / " + TASK_MAX + " " + L("new.counter");
+      add.disabled = !pick.options.length || v.trim().length < TASK_MIN || v.length > TASK_MAX;
+    };
+    area.oninput = sync;
+    add.onclick = async () => {
+      add.disabled = true;
+      const r = await api("/api/queue", { method: "POST", body: { projectId: pick.value, task: area.value.trim(), ...(quick.checked ? { quick: true } : {}) } });
+      if (!r || !r.id) { sync(); return; }          // the banner says why; the task stays for a retry
+      render();
+    };
+    sync();
+    return section(L("queue.add"), pick, area, counter, h("label", { className: "quick" }, quick, L("new.quick")), h("div", { className: "acts" }, add));
+  }
+
+  function queueTable(jobs) {
+    const head = h("tr", null, [L("queue.project"), L("queue.source"), L("queue.status"), L("runs.task"), L("queue.result"), ""].map((t) => h("th", null, t)));
+    return h("table", { className: "runs" }, h("thead", null, head), h("tbody", null, jobs.map(jobRow)));
+  }
+
+  function jobRow(j) {
+    const task = String(j.task || "").split(/\r?\n/)[0];
+    return h("tr", null,
+      h("td", null, j.project),
+      h("td", null, j.source),
+      h("td", null, statusSpan(j.status)),
+      h("td", { title: j.task || "" }, truncate(task, 80)),
+      h("td", null, jobResult(j.result)),
+      h("td", null, j.status === "queued" ? removeJob(j.id) : null));
+  }
+
+  /** The daemon writes the PR URL here once there is one, and otherwise why there is not. */
+  function jobResult(result) {
+    if (!result) return null;
+    if (/^https:\/\//.test(result)) return h("a", { href: result, rel: "noreferrer", target: "_blank" }, result);
+    return text("span", "muted", result);
+  }
+
+  function removeJob(id) {
+    const btn = h("button", { className: "btn danger" }, L("queue.remove"));
+    btn.onclick = async () => {
+      btn.disabled = true;                         // one click per request; a job that already started comes back as a 409
+      const ok = await api("/api/queue/" + encodeURIComponent(id), { method: "DELETE" });
+      btn.disabled = false;
+      if (ok) render();
+    };
+    return btn;
+  }
+
   // -------------------------------------------------------------- router
 
   let timer = null;                              // runs refresh or active-run elapsed tick
@@ -725,9 +807,10 @@
   /** A hand-typed hash can be malformed; an undecodable segment matches no project and lands on home. */
   const decode = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
 
-  /** #/ · #/p/:p/runs · #/p/:p/runs/:id · #/p/:p/lessons · #/p/:p/drafts · #/p/:p/new */
+  /** #/ · #/queue · #/p/:p/runs · #/p/:p/runs/:id · #/p/:p/lessons · #/p/:p/drafts · #/p/:p/new */
   function route() {
     const parts = String(location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean).map(decode);
+    if (parts[0] === "queue") return { screen: "queue" };
     if (parts[0] !== "p" || !parts[1]) return { screen: "home" };
     const p = parts[1];
     if (parts[2] === "runs") return { screen: "runs", p: p, id: parts[3] };
@@ -742,11 +825,13 @@
     const main = document.getElementById("main");
     document.getElementById("sidebar").classList.remove("open");
     const projects = await api("/api/projects");
+    const daemon = await api("/api/daemon");
     if (stale(seq)) return;
-    renderSidebar(projects || [], r);
+    renderSidebar(projects || [], r, daemon);
     if (r.screen === "runs" && r.id) await renderRun(main, r.p, r.id, seq);
     else if (r.screen === "runs") await renderRuns(main, r.p, seq);
     else if (r.screen === "home") await renderHome(main, projects || [], seq);
+    else if (r.screen === "queue") await renderQueue(main, seq);
     else if (r.screen === "lessons") await renderLessons(main, r.p, seq);
     else if (r.screen === "drafts") await renderDrafts(main, r.p, seq);
     else await renderNew(main, r.p, seq);        // route() only leaves "new"
