@@ -38,6 +38,12 @@
       "path": "skills/doc-sync"
     },
     {
+      "name": "ponytail",
+      "description": "Lazy-senior-developer coding style (YAGNI ladder: reuse, stdlib, native features, then the minimum code). Use when writing, fixing, refactoring or reviewing code, to keep diffs small. MIT, from DietrichGebert/ponytail.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/ponytail"
+    },
+    {
       "name": "pr-description",
       "description": "PR description draft from a branch diff. Use when asked to write or improve a pull request description.",
       "repo": "abtrader00900/agentos",
