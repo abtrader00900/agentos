@@ -188,6 +188,8 @@ export class Daemon {
   }
 
   private finish(job: Job, root: string): void {
+    // a stopped daemon lingers until its run ends; the daemon that now holds the lock adopted the run and records it
+    if (this.d.owns && !this.d.owns()) return;
     const now = this.d.now();
     let s;
     try {

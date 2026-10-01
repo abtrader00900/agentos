@@ -90,6 +90,15 @@ describe("daemon tick", { timeout: 30_000 }, () => {
     expect(listJobs(home)[0]).toMatchObject({ status: "running", runId: "theirs" });
   });
 
+  it("leaves the result to the new daemon when it lost its lock while the run was going", async () => {
+    let mine = true;
+    addJob({ projectId: pid, task: "handed over", source: "manual" }, home, clock);
+    const d = new Daemon(deps({ owns: () => mine, launch: async (root, args) => { launched.push(args); mine = false; saveRun(root, runState(args[args.indexOf("--id") + 1], { status: "pr_open", prUrl: "u" })); return 0; } }));
+    await d.tick();
+    await d.idle();
+    expect(listJobs(home)[0].status).toBe("running"); // the adopting daemon finishes it, not us
+  });
+
   it("waits for free memory, and says why once", async () => {
     addJob({ projectId: pid, task: "big", source: "manual" }, home, clock);
     const lines: string[] = [];

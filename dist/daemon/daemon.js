@@ -165,6 +165,9 @@ export class Daemon {
             await sleep(this.d.pollMs ?? 5000);
     }
     finish(job, root) {
+        // a stopped daemon lingers until its run ends; the daemon that now holds the lock adopted the run and records it
+        if (this.d.owns && !this.d.owns())
+            return;
         const now = this.d.now();
         let s;
         try {
