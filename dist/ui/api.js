@@ -5,6 +5,9 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { preflight as realPreflight } from "../commands/run.js";
+import { loadConfig } from "../core/loader.js";
+import { addJob, listJobs, removeJob } from "../daemon/queue.js";
+import { daemonStatus } from "../daemon/service.js";
 import { approveLesson, forgetLesson, listLessons, promoteLesson, safetyCheck } from "../learning/lessons.js";
 import { approveDraft, listDrafts, readDraft, rejectDraft } from "../learning/skilldraft.js";
 import { spawnDetachedRun } from "../mcp/orchestrator/server.js";
@@ -203,6 +206,15 @@ export const readRoutes = [
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/lessons$/, handler: read((root) => lessons(root)) },
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/drafts$/, handler: read((root) => drafts(root)) },
     { method: "GET", pattern: /^\/api\/p\/([^/]+)\/preflight$/, handler: read((root, _m, opts) => preflightReport(root, opts)) },
+    // the queue is global, not per project: a row names its project, and an unregistered id stands in for the name
+    { method: "GET", pattern: /^\/api\/queue$/, handler: async (_m, _url, _body, opts) => ({
+            status: 200,
+            json: listJobs(opts.home).slice(-200).reverse().map((j) => ({ ...j, project: getProject(j.projectId, opts.home)?.name ?? j.projectId })),
+        }) },
+    { method: "GET", pattern: /^\/api\/daemon$/, handler: async (_m, _url, _body, opts) => {
+            const s = daemonStatus(opts.home);
+            return { status: 200, json: { running: s.running, lastTick: s.lastTick ?? null, pauseUntil: s.pauseUntil ?? null, today: s.today, maxRunsPerDay: s.maxRunsPerDay } };
+        } },
 ];
 /** `agentos run --resume <id>` as a detached process, the way spawnDetachedRun starts a new run. */
 export function spawnDetachedResume(root, id) {
@@ -306,6 +318,42 @@ export const actionRoutes = [
                 throw new Http(404, `No skill draft "${m[2]}"`);
             return { status: 200, json: { ok: true } };
         }),
+    },
+    // the queue routes carry no :p, so they look the project up and answer themselves, the way act() does
+    {
+        method: "POST",
+        pattern: /^\/api\/queue$/,
+        handler: async (_m, _url, body, opts) => {
+            const { projectId, task, quick } = (body ?? {});
+            if (typeof task !== "string" || task.trim().length < 3 || task.length > 2000)
+                return { status: 400, json: { error: "task must be 3-2000 characters" } };
+            if (quick !== undefined && typeof quick !== "boolean")
+                return { status: 400, json: { error: "quick must be a boolean" } };
+            const p = typeof projectId === "string" ? getProject(projectId, opts.home) : undefined;
+            if (!p || !existsSync(p.path))
+                return { status: 404, json: { error: `no such project: ${String(projectId)}` } };
+            let enabled = false;
+            try {
+                enabled = !!loadConfig(p.path).config.daemon?.enabled;
+            }
+            catch { /* a broken config is "not enabled" */ }
+            if (!enabled)
+                return { status: 409, json: { error: "the daemon is off for this project: add daemon: { enabled: true } to its agent.config.yaml" } };
+            const job = addJob({ projectId: p.id, task: task.trim(), quick: quick === true, source: "manual" }, opts.home);
+            return { status: 201, json: { id: job.id } };
+        },
+    },
+    {
+        method: "DELETE",
+        pattern: /^\/api\/queue\/([0-9a-f]{8})$/,
+        handler: async (m, _url, _body, opts) => {
+            const r = removeJob(m[1], opts.home);
+            if (r === "not-found")
+                return { status: 404, json: { error: `no job ${m[1]}` } };
+            if (r === "not-queued")
+                return { status: 409, json: { error: "only a queued job can be removed" } };
+            return { status: 200, json: { ok: true } };
+        },
     },
     // registry only: the project's folder stays exactly as it is, and one that is
     // already gone must still be removable, so this never resolves a root.

@@ -15,7 +15,7 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
-button, input, textarea { font: inherit; }
+button, input, select, textarea { font: inherit; }
 a { color: #1859a9; }
 a:hover { color: #0d3f7d; }
 a:focus-visible, button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
@@ -61,6 +61,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid #f59e0b; outline-offs
 .proj:hover, .proj.sel { color: #fff; background: #29364d; }
 .proj.sel { font-weight: 700; }
 .missing { color: #fbbfbd; }
+.dstatus { margin: .2rem .5rem 1rem; color: #9fb0c8; font-size: .8rem; }
 .dot {
   width: .55rem;
   height: .55rem;
@@ -146,10 +147,10 @@ a:focus-visible, button:focus-visible { outline: 3px solid #f59e0b; outline-offs
   font-size: .78rem;
   font-weight: 700;
 }
-.s-queued, .s-planning, .s-working, .s-verifying, .s-fixing { color: #175da8; background: #e8f2ff; }
-.s-pr_open { color: #18733c; background: #e8f7ee; }
+.s-queued, .s-planning, .s-working, .s-verifying, .s-fixing, .s-running { color: #175da8; background: #e8f2ff; }
+.s-pr_open, .s-done { color: #18733c; background: #e8f7ee; }
 .s-needs_human, .s-failed, .s-unreadable { color: #a32018; background: #feeceb; }
-.s-paused, .s-cancelled { color: #586174; background: #eef0f3; }
+.s-paused, .s-cancelled, .s-removed { color: #586174; background: #eef0f3; }
 .muted, .note { color: #667085; }
 .note { font-size: .85rem; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
