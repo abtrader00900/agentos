@@ -505,3 +505,49 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
     expect(sh(repo.remote, ["show", `${s.branch}:q.txt`])).toBe("q.txt");
   });
 });
+
+describe("orchestrator engine: --onto", { timeout: 60_000 }, () => {
+  /** an agentos PR branch on the remote, one commit past main */
+  const prBranch = (name = "agentos/run-pr1") => {
+    sh(repo.root, ["checkout", "-q", "-b", name]);
+    writeFileSync(path.join(repo.root, "feature.txt"), "feature\n");
+    sh(repo.root, ["add", "-A"]);
+    sh(repo.root, ["commit", "-qm", "feature"]);
+    sh(repo.root, ["push", "-q", "origin", name]);
+    sh(repo.root, ["checkout", "-q", "main"]);
+    return { name, tip: sh(repo.root, ["rev-parse", name]) };
+  };
+
+  it("refuses a branch that is not an agentos run branch", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    await expect(startRun(repo.root, "fix ci", cfg(), d, "o1", { onto: "main" })).rejects.toThrow(/agentos\/run-/);
+    await expect(startRun(repo.root, "fix ci", cfg(), d, "o2", { onto: "feature/x" })).rejects.toThrow(/agentos\/run-/);
+  });
+
+  it("works on top of the PR branch, pushes there fast-forward, and opens no new PR", async () => {
+    const pr = prBranch();
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const s = await startRun(repo.root, "create main.txt", cfg(), d, "o3", { onto: pr.name, quick: true });
+    expect(s.status).toBe("pr_open");
+    expect(s.onto).toBe(pr.name);
+    expect(s.baseBranch).toBe(pr.name);
+    const files = sh(repo.remote, ["ls-tree", "--name-only", pr.name]);
+    expect(files).toContain("feature.txt");
+    expect(files).toContain("main.txt"); // quick: the whole task is the one subtask, and creates() writes main.txt
+    expect(sh(repo.remote, ["merge-base", "--is-ancestor", pr.tip, pr.name])).toBe(""); // fast-forward: the old tip is kept
+    expect(d.gh.mock.calls.some((c) => c[1][0] === "pr" && c[1][1] === "create")).toBe(false);
+    expect(d.gh.mock.calls.some((c) => c[1][0] === "pr" && c[1][1] === "view" && c[1][2] === pr.name)).toBe(true);
+    expect(s.prUrl).toBe("https://github.com/o/r/pull/7");
+  });
+
+  it("keeps onto across a pause and resume", async () => {
+    const pr = prBranch("agentos/run-pr2");
+    let calls = 0;
+    const d = deps({ plan: planOf(sub("a")), work: (cwd, p) => (++calls === 1 ? LIMIT : creates(cwd, p)) });
+    const paused = await startRun(repo.root, "create main.txt", cfg(), d, "o4", { onto: pr.name, quick: true });
+    expect(paused.status).toBe("paused");
+    const s = await resumeRun(repo.root, "o4", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(sh(repo.remote, ["merge-base", "--is-ancestor", pr.tip, pr.name])).toBe("");
+  });
+});

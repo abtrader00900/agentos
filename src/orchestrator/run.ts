@@ -40,6 +40,8 @@ export interface RunState {
   verifyOutput?: string;
   /** --quick: no planner, the whole task is one subtask */
   quick?: boolean;
+  /** --onto: a CI fix that lands on this agentos/run-* branch (its open PR) instead of opening a new PR */
+  onto?: string;
   /** the last review that ran: the commit it saw and what it found; the next one checks only the fix since */
   reviewed?: { head: string; findings: Finding[] };
   prUrl?: string;
