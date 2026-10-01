@@ -77,7 +77,7 @@ export async function run(task, opts) {
     else {
         try {
             const cfg = preflight(root);
-            s = await startRun(root, task, cfg, deps(cfg), opts.id);
+            s = await startRun(root, task, cfg, deps(cfg), opts.id, { quick: opts.quick });
         }
         catch (e) {
             if (opts.id)

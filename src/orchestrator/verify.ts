@@ -1,10 +1,10 @@
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { z } from "zod";
+import { killTree } from "./runners.js";
 import type { Finding } from "./types.js";
 
 const tail = (s: string, n = 4000) => (s.length > n ? `…${s.slice(-n)}` : s);
 
-/** Run the configured commands through the shell, in order, stopping at the first failure. */
 /** a long text cut to its head and tail: the error message sits at the top, the summary at the bottom */
 export function excerpt(text: string, max = 600): string {
   if (text.length <= max) return text;
@@ -12,18 +12,35 @@ export function excerpt(text: string, max = 600): string {
   return `${text.slice(0, half)}\n…\n${text.slice(-half)}`;
 }
 
-export function runVerify(cwd: string, commands: string[], timeoutMs: number): { ok: boolean; output: string } {
+/**
+ * One shell command, async so the engine can review while the tests run. Its own process group,
+ * so a timeout or a cancel (through `live`) kills the test runner too, not just the shell.
+ */
+function sh(cmd: string, cwd: string, timeoutMs: number, live?: Set<number>): Promise<{ ok: boolean; out: string }> {
+  return new Promise((resolve) => {
+    // the commands come from the owner's own agent.config.yaml, never from an agent
+    const child = spawn(cmd, { cwd, shell: true, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const pid = child.pid ?? 0;
+    if (pid) live?.add(pid);
+    let out = "";
+    let timedOut = false;
+    const add = (d: string) => { out = (out + d).slice(-8_000_000); };
+    child.stdout.setEncoding("utf8").on("data", add);
+    child.stderr.setEncoding("utf8").on("data", add);
+    const timer = setTimeout(() => { timedOut = true; if (pid) killTree(pid); }, timeoutMs);
+    const done = (ok: boolean, extra = "") => { clearTimeout(timer); live?.delete(pid); resolve({ ok, out: out + extra }); };
+    child.on("error", (e) => done(false, e.message));
+    child.on("close", (code) => done(code === 0 && !timedOut, timedOut ? `\n(timed out after ${Math.round(timeoutMs / 1000)} s)` : ""));
+  });
+}
+
+/** Run the configured commands through the shell, in order, stopping at the first failure. */
+export async function runVerify(cwd: string, commands: string[], timeoutMs: number, live?: Set<number>): Promise<{ ok: boolean; output: string }> {
   let output = "";
   for (const cmd of commands) {
-    try {
-      // the commands come from the owner's own agent.config.yaml, never from an agent
-      const out = execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-      output += `$ ${cmd}\n${tail(out, 1500)}\n`;
-    } catch (e) {
-      const err = e as { stdout?: string; stderr?: string; message: string };
-      output += `$ ${cmd}  ✗ FAILED\n${tail(`${err.stdout ?? ""}${err.stderr ?? ""}` || err.message)}\n`;
-      return { ok: false, output };
-    }
+    const r = await sh(cmd, cwd, timeoutMs, live);
+    if (!r.ok) return { ok: false, output: `${output}$ ${cmd}  ✗ FAILED\n${tail(r.out)}\n` };
+    output += `$ ${cmd}\n${tail(r.out, 1500)}\n`;
   }
   return { ok: true, output };
 }
@@ -54,15 +71,38 @@ export function parseFindings(text: string): Finding[] | null {
 
 export const blocking = (findings: Finding[]) => findings.filter((f) => f.severity !== "low");
 
+const FORMAT = 'Reply with ONLY a JSON array, for example [{"severity":"high","file":"src/a.ts","line":12,"issue":"what breaks and when"}]. Use [] when you find nothing. severity is high, medium or low.';
+const capped = (diff: string) => (diff.length > 150_000 ? `${diff.slice(0, 150_000)}\n…(diff truncated)` : diff);
+
 export function reviewPrompt(task: string, diff: string, notes = ""): string {
   return [
     "You are reviewing a change another AI agent made. Do not edit any files.",
     `The task was: ${task}`,
     "Report real problems only: wrong behaviour, crashes, security holes, data loss, or parts of the task left undone. Ignore style.",
-    'Reply with ONLY a JSON array, for example [{"severity":"high","file":"src/a.ts","line":12,"issue":"what breaks and when"}]. Use [] when you find nothing. severity is high, medium or low.',
+    FORMAT,
     notes,
     "The diff:",
-    diff.length > 150_000 ? `${diff.slice(0, 150_000)}\n…(diff truncated)` : diff,
+    capped(diff),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * The review after a fix round: the earlier findings plus only the fixer's diff, so the reviewer
+ * checks the fix instead of re-reading the whole change (and finding new nits in it) every round.
+ */
+export function reReviewPrompt(task: string, earlier: Finding[], fixDiff: string, base: string, changedFiles: string[], notes = ""): string {
+  const listed = earlier.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n");
+  return [
+    "You reviewed a change another AI agent made and reported problems; a fixer has since edited it. Do not edit any files.",
+    `The task was: ${task}`,
+    `Your earlier findings:\n${listed || "(none: only the tests failed)"}`,
+    `Check that each earlier finding is really fixed, and that the fix broke nothing and left no part of the task undone. The diff below is only the fixer's change. The whole change touches: ${changedFiles.join(", ") || "(no files)"}; read those files (or run \`git diff ${base}..HEAD\` if you can) for context. Report real problems that remain or that the fix caused; ignore style.`,
+    FORMAT,
+    notes,
+    "The fixer's diff:",
+    fixDiff.trim() ? capped(fixDiff) : "(the fixer changed nothing)",
   ]
     .filter(Boolean)
     .join("\n\n");

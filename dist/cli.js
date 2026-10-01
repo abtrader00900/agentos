@@ -214,6 +214,7 @@ program
     .option("--cancel <id>", "stop a run (its worktrees are kept)")
     .option("--status <id>", "print a run's full state as JSON")
     .option("--id <id>", "use this run id (used by the orchestrator MCP server)")
+    .option("--quick", "skip the planner: one agent does the whole task (faster for small tasks)")
     .action(async (words, opts) => {
     try {
         const task = words.join(" ").trim();

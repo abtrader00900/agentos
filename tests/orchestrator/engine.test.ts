@@ -21,12 +21,12 @@ const sub = (id: string, over: Record<string, unknown> = {}) =>
 const planOf = (...subtasks: object[]) => ({ summary: "test plan", subtasks });
 
 type Work = (cwd: string, prompt: string) => void | RunnerResult | Promise<void | RunnerResult>;
-function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: () => string | RunnerResult }) {
+function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: (prompt: string, cwd: string) => string | RunnerResult | Promise<string | RunnerResult> }) {
   const reviewed = (r: string | RunnerResult) => (typeof r === "string" ? reply(r) : r);
   const read: Runner = async (req) =>
     req.prompt.includes("You are the planner")
       ? typeof f.plan === "function" ? (f.plan as () => RunnerResult)() : reply(JSON.stringify(f.plan))
-      : reviewed(f.review ? f.review() : "[]");
+      : reviewed(f.review ? await f.review(req.prompt, req.cwd) : "[]");
   const write: Runner = async (req) => (await f.work?.(req.cwd, req.prompt)) ?? reply();
   const gh = vi.fn((_cwd: string, args: string[]) => (args[0] === "pr" ? "https://github.com/o/r/pull/7\n" : ""));
   const d: EngineDeps = { runners: { claude: { read, write }, codex: { read, write } }, gh, freeMemMb: () => 1e6 };
@@ -382,5 +382,126 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
     const s = await resumeRun(repo.root, "cf1", c, d);
     expect(s.status).toBe("pr_open");
     expect(sh(repo.remote, ["show", `${s.branch}:shared.txt`])).toBe("a and b");
+  });
+});
+
+describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
+  const high = (issue: string) => JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue }]);
+
+  it("reviews while the tests run, not after them", async () => {
+    // the test command holds a flag file for 4 s; a review that starts after the tests never sees it
+    const verify = [`node -e "const f=require('fs');f.writeFileSync('testing.flag','');setTimeout(()=>f.unlinkSync('testing.flag'),4000)"`];
+    let sawTests = false;
+    const d = deps({
+      plan: planOf(sub("a")), work: creates,
+      review: async (_p, cwd) => {
+        for (let i = 0; i < 160 && !sawTests; i++) { sawTests = existsSync(path.join(cwd, "testing.flag")); await new Promise((r) => setTimeout(r, 25)); }
+        return "[]";
+      },
+    });
+    const s = await startRun(repo.root, "parallel verify", cfg({ verify }), d);
+    expect(s.status).toBe("pr_open");
+    expect(sawTests).toBe(true);
+  });
+
+  it("gives the fixer the review findings in the same round as failing tests", async () => {
+    const verify = [`node -e "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1)"`];
+    const reviews = [high("a.txt must say hello"), "[]"];
+    let fixPrompt = "";
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => reviews.shift() ?? "[]",
+      work: (cwd, p) => {
+        if (!p.includes("does not pass yet")) return creates(cwd, p);
+        fixPrompt = p;
+        writeFileSync(path.join(cwd, "fixed.txt"), "ok");
+        writeFileSync(path.join(cwd, "a.txt"), "hello");
+      },
+    });
+    const s = await startRun(repo.root, "both at once", cfg({ verify }), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.fixRound).toBe(1);
+    expect(fixPrompt).toContain("Failing checks");
+    expect(fixPrompt).toContain("a.txt must say hello");
+  });
+
+  it("re-reviews only the fixer's change, against the earlier findings", async () => {
+    const reviews = [high("a.txt must say hello"), "[]"];
+    const prompts: string[] = [];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: (p) => { prompts.push(p); return reviews.shift() ?? "[]"; },
+      work: (cwd, p) => (p.includes("does not pass yet") ? writeFileSync(path.join(cwd, "a.txt"), "hello") : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "scoped review", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("new file mode"); // the first review sees the whole change
+    expect(prompts[1]).toContain("[high] a.txt:1 a.txt must say hello");
+    expect(prompts[1]).toContain("+hello");
+    expect(prompts[1]).not.toContain("new file mode");
+    expect(prompts[1]).toContain(`git diff ${s.base}..HEAD`);
+  });
+
+  it("does not hand a failing change to a human because its reviewer failed; the next review is a full one", async () => {
+    const verify = [`node -e "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1)"`];
+    const failed: RunnerResult = { ok: false, output: "reviewer crashed\n", rateLimited: false, timedOut: false };
+    const results: (string | RunnerResult)[] = [failed, "[]"];
+    const prompts: string[] = [];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: (p) => { prompts.push(p); return results.shift() ?? "[]"; },
+      work: (cwd, p) => (p.includes("does not pass yet") ? writeFileSync(path.join(cwd, "fixed.txt"), "ok") : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "flaky reviewer", cfg({ verify }), d);
+    expect(s.status).toBe("pr_open");
+    expect(prompts[1]).toContain("new file mode");
+  });
+
+  it("stops when a verify command commits while the review runs", async () => {
+    const verify = [`git commit -q --allow-empty -m sneaky`];
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const s = await startRun(repo.root, "committing verify", cfg({ verify }), d);
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("orchestrator.build");
+    expect(prCalls(d)).toHaveLength(0);
+  });
+
+  it("keeps the earlier findings without asking the reviewer again when the fixer changed nothing", async () => {
+    let reviews = 0;
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => { reviews++; return high("still wrong"); },
+      work: (cwd, p) => (p.includes("does not pass yet") ? undefined : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "lazy fixer", cfg({ maxFixRounds: 2 }), d);
+    expect(s.status).toBe("needs_human");
+    expect(reviews).toBe(1);
+    expect(s.findings[0].issue).toBe("still wrong");
+  });
+
+  it("sends failing tests to the fixer when the reviewer hits a rate limit, instead of pausing", async () => {
+    const verify = [`node -e "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1)"`];
+    const results: (string | RunnerResult)[] = [LIMIT, "[]"];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => results.shift() ?? "[]",
+      work: (cwd, p) => (p.includes("does not pass yet") ? writeFileSync(path.join(cwd, "fixed.txt"), "ok") : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "limited reviewer", cfg({ verify }), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.fixRound).toBe(1);
+  });
+
+  it("--quick skips the planner and gives the whole task to the first worker", async () => {
+    let planned = false;
+    let workPrompt = "";
+    const d = deps({ plan: () => { planned = true; return LIMIT; }, work: (cwd, p) => { workPrompt = p; creates(cwd, p); } });
+    const s = await startRun(repo.root, "create q.txt", cfg({ workers: ["codex", "claude"] }), d, "q1", { quick: true });
+    expect(s.status).toBe("pr_open");
+    expect(planned).toBe(false);
+    expect(s.subtasks.map((t) => [t.id, t.agent])).toEqual([["main", "codex"]]);
+    expect(workPrompt).toContain("create q.txt");
+    expect(sh(repo.remote, ["show", `${s.branch}:q.txt`])).toBe("q.txt");
   });
 });
