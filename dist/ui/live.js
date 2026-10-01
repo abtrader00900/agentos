@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { runDir } from "../orchestrator/run.js";
@@ -26,6 +26,13 @@ function startFrom(url, req) {
     const n = Number(raw);
     return Number.isInteger(n) && n >= 0 ? n : 0;
 }
+function identity(st) {
+    return { key: `${st.dev}:${st.ino}`, birth: st.birthtimeMs === st.ctimeMs ? 0 : st.birthtimeMs };
+}
+/** Both birth times have to be known for a difference between them to mean a different file. */
+function replaced(a, b) {
+    return a.key !== b.key || (!!a.birth && !!b.birth && a.birth !== b.birth);
+}
 export function liveEvents(projectId, runId, opts, url, req, res, sec) {
     const project = getProject(projectId, opts.home);
     if (!project || !existsSync(project.path))
@@ -48,6 +55,11 @@ export function liveEvents(projectId, runId, opts, url, req, res, sec) {
     let offset = 0;
     let partial = "";
     let seen = 0;
+    let id = null;
+    try {
+        id = identity(statSync(file));
+    }
+    catch { /* the first logEvent has not created it yet, so the identity comes from the first poll */ }
     /** A closed request can still have a timer in flight for one more tick. */
     const write = (frame) => { if (!res.writableEnded && !res.destroyed)
         res.write(frame); };
@@ -60,14 +72,18 @@ export function liveEvents(projectId, runId, opts, url, req, res, sec) {
             return; // the first logEvent has not created it yet
         }
         try {
-            if (fstatSync(fd).size < offset) {
-                // A replaced or truncated log starts a new sequence from its first line.
+            const st = fstatSync(fd);
+            const now = identity(st);
+            // A replaced or truncated log starts a new sequence from its first line; a
+            // replacement that is not smaller only shows as a change of file identity.
+            if (st.size < offset || (id && replaced(id, now))) {
                 offset = 0;
                 partial = "";
                 decoder = new StringDecoder("utf8");
                 seen = 0;
                 since = 0;
             }
+            id = now;
             for (;;) {
                 const n = readSync(fd, buf, 0, buf.length, offset);
                 if (!n)
