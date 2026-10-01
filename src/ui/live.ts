@@ -32,9 +32,16 @@ function startFrom(url: URL, req: IncomingMessage): number {
   return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
-/** Birth time is what survives an append; `ctimeMs` is the fallback where it is not recorded. */
-function identity(st: { ino: number; birthtimeMs: number; ctimeMs: number }): string {
-  return `${st.ino}:${st.birthtimeMs || st.ctimeMs}`;
+/**
+ * The inode is the only field that both survives an append and changes on a
+ * rename-replace. No timestamp is: where a filesystem records no birth time Node
+ * reports `ctimeMs` (or 0) in its place, and `ctimeMs` moves on every append, so
+ * mixing one in would read an appended line as a replacement and re-send the log.
+ * ponytail: where `ino` is 0 (not every filesystem records one) identity is
+ * constant and only a shrinking file is caught, as before.
+ */
+function identity(st: { dev: number; ino: number }): string {
+  return `${st.dev}:${st.ino}`;
 }
 
 export function liveEvents(
