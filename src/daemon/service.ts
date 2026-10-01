@@ -10,8 +10,6 @@ import { loadSettings } from "./settings.js";
 
 const TASK_NAME = "agentos daemon";
 const LOG_MAX = 1024 * 1024;
-/** a pid file this many ticks behind the daemon's own heartbeat is a crash leftover, and its pid may have been reused since */
-const STALE_TICKS = 4;
 
 export const pidFile = (home = agentosHome()) => path.join(home, ".agentos", "daemon.pid");
 export const logFile = (home = agentosHome()) => path.join(home, ".agentos", "daemon.log");
@@ -27,18 +25,10 @@ function recordedPid(home: string): number | undefined {
   } catch { return undefined; }
 }
 
-const at = (iso?: string) => (iso ? Date.parse(iso) : 0);
-
-/** a live pid is not proof on its own (pids are reused): the daemon's heartbeat in daemon-state.json has to name it and still be warm */
-function ours(home: string, pid: number): boolean {
-  const s = readState(home);
-  if (s.pid === undefined) return true; // no daemon has written state here, so the pid file is all there is to go on
-  return s.pid === pid && Date.now() - Math.max(at(s.lastTick), at(s.startedAt)) < loadSettings(home).tickSeconds * STALE_TICKS * 1000;
-}
-
+/** the pid holding the pid file, when that process is still running — the same rule as the run lock in engine.ts */
 function livePid(home: string): number | undefined {
   const pid = recordedPid(home);
-  return pid !== undefined && alive(pid) && ours(home, pid) ? pid : undefined;
+  return pid !== undefined && alive(pid) ? pid : undefined;
 }
 
 export function daemonStatus(home = agentosHome()) {
@@ -89,10 +79,9 @@ export async function runDaemon(home = agentosHome()): Promise<void> {
   if (!claimPidFile(home)) {
     const running = livePid(home);
     if (running && running !== process.pid) throw new Error(`the daemon is already running (pid ${running})`);
-    rmSync(pidFile(home), { force: true }); // a crashed daemon's file, or our own: take it over
+    rmSync(pidFile(home), { force: true }); // a dead daemon's file, or our own: take it over
     if (!claimPidFile(home)) throw new Error(`the daemon is already running (pid ${recordedPid(home) ?? "unknown"})`);
   }
-  // before anything slow: the heartbeat is what makes this pid file ours, so a second daemon cannot mistake it for a leftover
   writeState(home, { ...readState(home), pid: process.pid, startedAt: new Date().toISOString() });
   let stopping = false;
   const stop = () => { stopping = true; };
