@@ -149,7 +149,7 @@ Re-running `agentos install` leaves already-installed skills alone (your edits s
 
 - [x] Phase 1: config schema, harness generators, drift detection, memory MCP
 - [x] Phase 2: supersearch (text/symbol/git) + codegraph (impact/orphans/cycles) MCP servers
-- [x] Phase 3: skills framework + 12 core skills
+- [x] Phase 3: skills framework + 13 core skills
 - [x] Phase 4: handoff protocol (RFC + bundle + auto-inject) + doctor
 - [x] Phase 5: Cursor + Windsurf targets, `agentos learn` (git-history rule suggestions)
 - [x] VS Code extension (`editors/vscode/`) — status-bar doctor, skills sidebar, handoff wizard, `--json` CLI output (Issue #2)
@@ -185,6 +185,8 @@ skillRegistry: https://raw.githubusercontent.com/abtrader00900/agentos/master/sk
 ```
 
 Index format: `{ "version": 1, "skills": [{ "name", "description", "repo", "path?" }] }`.
+The bundled `saas-builder` skill is agentos's own playbook for turning an app into a sellable SaaS: ground rules every agent follows, 15 layers in build order (each with what agents miss, what the owner decides, and a "done when" list), and a pre-launch checklist. Install it with `agentos skill install saas-builder` and paste a layer's "done when" list into an `agentos run` task as its acceptance criteria.
+
 The bundled `ponytail` skill (a YAGNI ladder that keeps agent diffs small) comes from [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) under the MIT license; its license ships in `skills/ponytail/LICENSE`.
 
 Every install is validated (frontmatter `name`/`description` with a "Use when" trigger, at least two `##` sections, a `test/` directory) before it lands in `.agentos/skills/`; `agentos skill test` checks the bundled and the installed skills.

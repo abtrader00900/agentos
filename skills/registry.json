@@ -56,6 +56,12 @@
       "path": "skills/refactor-safe"
     },
     {
+      "name": "saas-builder",
+      "description": "Take a web app from demo to a SaaS you can sell, layer by layer (scope, architecture, data, auth, APIs, frontend, CI, tests, hosting, security, rate limits, caching, errors, monitoring, scaling) with checks an agent cannot fake. Use when starting a product, adding a major feature, preparing a launch, or reviewing production readiness.",
+      "repo": "abtrader00900/agentos",
+      "path": "skills/saas-builder"
+    },
+    {
       "name": "security-scan",
       "description": "Security checklist sweep for Laravel + React codebases. Use when reviewing changes touching auth, input, queries, files, or config.",
       "repo": "abtrader00900/agentos",
