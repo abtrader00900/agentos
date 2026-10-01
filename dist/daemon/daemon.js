@@ -32,6 +32,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export class Daemon {
     d;
     current;
+    /** the job last held back by the memory gate (so the reason is logged once) */
+    waitingOn;
     constructor(d) {
         this.d = d;
     }
@@ -112,8 +114,16 @@ export class Daemon {
         }
         if (!config.daemon?.enabled)
             return this.fail(job, "daemon.enabled is off in this project's agent.config.yaml");
-        if (this.d.freeMemMb() < (config.orchestrator?.minFreeMemoryMb ?? 1500))
+        const needMb = config.orchestrator?.minFreeMemoryMb ?? 1500;
+        const freeMb = Math.round(this.d.freeMemMb());
+        if (freeMb < needMb) {
+            // said once per job, not every tick: the owner must be able to see why nothing starts
+            if (this.waitingOn !== job.id)
+                this.d.log(`job ${job.id} waits for memory: ${freeMb} MB free, ${needMb} MB needed (orchestrator.minFreeMemoryMb)`);
+            this.waitingOn = job.id;
             return; // try again next tick
+        }
+        this.waitingOn = undefined;
         this.start(job, project.path, now);
     }
     enabledProjects() {
@@ -155,6 +165,10 @@ export class Daemon {
             await sleep(this.d.pollMs ?? 5000);
     }
     finish(job, root) {
+        // a stopped daemon lingers until its run ends: when a newer daemon holds the lock it adopted the run and
+        // records it; with no daemon holding it, nobody else will, so this one still does
+        if (this.d.otherOwner?.())
+            return;
         const now = this.d.now();
         let s;
         try {

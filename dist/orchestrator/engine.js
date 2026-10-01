@@ -308,7 +308,7 @@ function notes(c, role) {
 /** --quick: the whole task as one subtask for the first worker, with no planner call */
 function quickPlan(task, agent) {
     const title = task.split("\n")[0].slice(0, 80);
-    return { summary: title, subtasks: [{ id: "main", title, prompt: task, files: [], dependsOn: [], agent }] };
+    return { summary: title, subtasks: [{ id: "task", title, prompt: task, files: [], dependsOn: [], agent }] };
 }
 async function plan(c) {
     const { s, cfg, root } = c;

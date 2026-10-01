@@ -10,6 +10,8 @@ export interface DaemonDeps {
     log(line: string): void;
     /** whether this daemon still holds its lock (absent: always) */
     owns?(): boolean;
+    /** whether another daemon holds the lock now (absent: never) */
+    otherOwner?(): boolean;
     /** how often an adopted run's lock is checked (default 5 s) */
     pollMs?: number;
 }
@@ -29,6 +31,8 @@ export declare function writeState(home: string, s: DaemonState): void;
 export declare class Daemon {
     private d;
     private current?;
+    /** the job last held back by the memory gate (so the reason is logged once) */
+    private waitingOn?;
     constructor(d: DaemonDeps);
     get running(): Job | undefined;
     /** resolves when the job in flight (if any) has finished and been recorded */

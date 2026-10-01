@@ -192,6 +192,7 @@ export async function runDaemon(home = agentosHome()) {
     const d = new Daemon({
         home, gh, now: () => new Date(), freeMemMb: () => os.freemem() / 1048576, log: (l) => log(home, l),
         owns: () => readLock(home)?.token === token,
+        otherOwner: () => { const l = readLock(home); return !!l && l.token !== token; },
         launch: (root, args) => new Promise((resolve) => {
             const out = openSync(logFile(home), "a");
             const child = spawn(process.execPath, [cliPath(), ...args], { cwd: root, stdio: ["ignore", out, out], windowsHide: true });

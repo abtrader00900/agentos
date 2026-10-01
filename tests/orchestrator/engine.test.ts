@@ -493,14 +493,14 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
     expect(s.fixRound).toBe(1);
   });
 
-  it("--quick skips the planner and gives the whole task to the first worker", async () => {
+  it("--quick skips the planner and gives the whole task to the first worker (subtask 'task': 'main' reads like the branch)", async () => {
     let planned = false;
     let workPrompt = "";
     const d = deps({ plan: () => { planned = true; return LIMIT; }, work: (cwd, p) => { workPrompt = p; creates(cwd, p); } });
     const s = await startRun(repo.root, "create q.txt", cfg({ workers: ["codex", "claude"] }), d, "q1", { quick: true });
     expect(s.status).toBe("pr_open");
     expect(planned).toBe(false);
-    expect(s.subtasks.map((t) => [t.id, t.agent])).toEqual([["main", "codex"]]);
+    expect(s.subtasks.map((t) => [t.id, t.agent])).toEqual([["task", "codex"]]);
     expect(workPrompt).toContain("create q.txt");
     expect(sh(repo.remote, ["show", `${s.branch}:q.txt`])).toBe("q.txt");
   });
