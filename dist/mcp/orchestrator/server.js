@@ -9,8 +9,8 @@ import { cancelRun } from "../../orchestrator/engine.js";
 import { runLine } from "../../orchestrator/report.js";
 import { preflight } from "../../commands/run.js";
 /** Options go before "--"; everything after it is the task text. */
-export function runArgs(id, task, quick) {
-    return ["run", "--id", id, ...(quick ? ["--quick"] : []), "--", task];
+export function runArgs(id, task, quick, onto) {
+    return ["run", "--id", id, ...(quick ? ["--quick"] : []), ...(onto ? ["--onto", onto] : []), "--", task];
 }
 /**
  * `agentos run --id <id> -- <task>` as a detached process: the run outlives the chat that asked for it.

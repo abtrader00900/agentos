@@ -56,17 +56,26 @@ export function assertCleanCheckout(root: string): void {
   if (statusOf(root)) throw new Error("Your checkout has uncommitted changes — commit or stash them first (a run starts from a clean base).");
 }
 
+/** the only branches --onto may push to: ones agentos itself opened a PR from */
+export const ONTO_BRANCH = /^agentos\/run-[0-9A-Za-z-]{1,40}$/;
+
 /** Preflight, create the run record, and drive it until it ends or pauses. */
-export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId(), opts: { quick?: boolean } = {}): Promise<RunState> {
+export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId(), opts: { quick?: boolean; onto?: string } = {}): Promise<RunState> {
   if (existsSync(path.join(runDir(root, id), "state.json"))) throw new Error(`run ${id} already exists — pick another id, or resume it`);
+  if (opts.onto !== undefined && !ONTO_BRANCH.test(opts.onto)) {
+    throw new Error(`--onto only takes a branch agentos opened a PR from (agentos/run-…), not "${opts.onto}"`);
+  }
   assertCleanCheckout(root);
   deps.gh(root, ["auth", "status"]);
-  const baseBranch = defaultBranch(root);
+  const baseBranch = opts.onto ?? defaultBranch(root);
+  if (opts.onto && !tryGit(root, ["fetch", "-q", "origin", opts.onto]).ok) throw new Error(`could not fetch origin/${opts.onto}`);
+  const base = git(root, ["rev-parse", opts.onto ? `origin/${opts.onto}` : baseBranch]);
   const now = new Date().toISOString();
   const s: RunState = {
-    id, task, status: "queued", baseBranch, base: git(root, ["rev-parse", baseBranch]),
+    id, task, status: "queued", baseBranch, base,
     branch: `agentos/run-${id}`, runWorktree: path.join(runDir(root, id), "wt", "run"),
-    createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [], ...(opts.quick ? { quick: true } : {}),
+    createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [],
+    ...(opts.quick ? { quick: true } : {}), ...(opts.onto ? { onto: opts.onto } : {}),
   };
   saveRun(root, s);
   logEvent(root, id, { type: "start", task });
@@ -564,10 +573,17 @@ async function gate(c: Ctx): Promise<void> {
   if (hits.length) return move(c, "needs_human", `secret scan blocked the PR: ${hits.join("; ")}`);
   if (cancelled()) return move(c, "cancelled", "cancelled by the owner");
   // remote work runs from the checkout: a relative remote URL (../origin.git) resolves against the cwd
-  git(root, ["push", "-q", "-u", "origin", s.branch]);
-  if (cancelled()) return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
-  const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", prTitle(s.task), "--body", prBody(s)]);
-  s.prUrl = out.trim().split("\n").pop();
+  if (s.onto) {
+    // a CI fix lands on the PR it fixes: no --force, so git itself refuses anything but a fast-forward
+    const pushed = tryGit(root, ["push", "-q", "origin", `${s.branch}:refs/heads/${s.onto}`]);
+    if (!pushed.ok) return move(c, "needs_human", `pushing the fix to ${s.onto} failed: ${redact(pushed.out).slice(0, 300)}`);
+    s.prUrl = c.deps.gh(root, ["pr", "view", s.onto, "--json", "url", "--jq", ".url"]).trim().split("\n").pop() || undefined;
+  } else {
+    git(root, ["push", "-q", "-u", "origin", s.branch]);
+    if (cancelled()) return move(c, "cancelled", `cancelled by the owner after ${s.branch} was pushed (no PR opened; delete the remote branch if unwanted)`);
+    const out = c.deps.gh(root, ["pr", "create", "--base", s.baseBranch, "--head", s.branch, "--title", prTitle(s.task), "--body", prBody(s)]);
+    s.prUrl = out.trim().split("\n").pop();
+  }
   move(c, "pr_open", s.prUrl);
   remember(c);
 }

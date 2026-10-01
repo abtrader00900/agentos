@@ -10,8 +10,8 @@ import { runLine } from "../../orchestrator/report.js";
 import { preflight } from "../../commands/run.js";
 
 /** Options go before "--"; everything after it is the task text. */
-export function runArgs(id: string, task: string, quick?: boolean): string[] {
-  return ["run", "--id", id, ...(quick ? ["--quick"] : []), "--", task];
+export function runArgs(id: string, task: string, quick?: boolean, onto?: string): string[] {
+  return ["run", "--id", id, ...(quick ? ["--quick"] : []), ...(onto ? ["--onto", onto] : []), "--", task];
 }
 
 /**
