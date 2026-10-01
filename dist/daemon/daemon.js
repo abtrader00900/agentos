@@ -134,10 +134,12 @@ export class Daemon {
         const resume = job.status === "paused" && !!job.runId;
         const runId = job.runId ?? newRunId(now);
         const args = resume ? ["run", "--resume", runId] : runArgs(runId, job.task, job.quick, job.onto);
-        if (this.d.owns && !this.d.owns())
-            return; // our lock was taken over while this tick ran: the new daemon decides
-        // compare-and-swap: of two daemons that picked the same job, only one marks it running
-        const started = updateJob(job.id, { status: "running", runId, startedAt: job.startedAt ?? now.toISOString(), attempts: (job.attempts ?? 0) + 1 }, this.d.home, ["queued", "paused"]);
+        // compare-and-swap inside the queue lock: only while the job is still waiting, and only while we
+        // still hold the daemon lock (a takeover during a long tick hands the decision to the new daemon).
+        // ponytail: the two locks are separate files, so a takeover in the instant after this check can still
+        // let one run start late; the engine's own per-run lock still refuses a second engine on the same run
+        const owns = this.d.owns;
+        const started = updateJob(job.id, { status: "running", runId, startedAt: job.startedAt ?? now.toISOString(), attempts: (job.attempts ?? 0) + 1 }, this.d.home, ["queued", "paused"], owns && (() => owns()));
         if (!started)
             return;
         this.d.log(`${resume ? "resume" : "start"} job ${job.id} (${job.source}) as run ${runId}`);

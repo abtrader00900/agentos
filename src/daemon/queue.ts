@@ -91,11 +91,14 @@ export function addJob(
   });
 }
 
-/** `onlyIf`: apply only while the job is in one of these statuses (compare-and-swap), else undefined */
-export function updateJob(id: string, patch: Partial<Job>, home = agentosHome(), onlyIf?: readonly JobStatus[]): Job | undefined {
+/**
+ * `onlyIf`: apply only while the job is in one of these statuses (compare-and-swap), else undefined.
+ * `guard`: checked inside the queue lock, so the caller's condition and the write are one step.
+ */
+export function updateJob(id: string, patch: Partial<Job>, home = agentosHome(), onlyIf?: readonly JobStatus[], guard?: () => boolean): Job | undefined {
   return update(home, (jobs) => {
     const j = jobs.find((x) => x.id === id);
-    if (!j || (onlyIf && !onlyIf.includes(j.status))) return undefined;
+    if (!j || (onlyIf && !onlyIf.includes(j.status)) || (guard && !guard())) return undefined;
     Object.assign(j, patch);
     return j;
   });

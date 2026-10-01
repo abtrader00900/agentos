@@ -144,7 +144,8 @@ export async function stopDaemon(home = agentosHome(), waitMs = 5000, graceMs = 
     const now = readLock(home);
     if (!now) return "stopped";
     if (now.token !== lock.token) {
-      rmSync(stopFile(home), { force: true }); // addressed to a daemon that is gone
+      // ours was addressed to a daemon that is gone; a newer request for the new daemon stays
+      try { if (readFileSync(stopFile(home), "utf8").trim() === lock.token) rmSync(stopFile(home), { force: true }); } catch { /* already gone */ }
       return "replaced";
     }
   }
