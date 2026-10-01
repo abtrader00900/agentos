@@ -10,6 +10,8 @@ import { loadSettings } from "./settings.js";
 
 const TASK_NAME = "agentos daemon";
 const LOG_MAX = 1024 * 1024;
+/** a pid file this many ticks behind the daemon's own heartbeat is a crash leftover, and its pid may have been reused since */
+const STALE_TICKS = 4;
 
 export const pidFile = (home = agentosHome()) => path.join(home, ".agentos", "daemon.pid");
 export const logFile = (home = agentosHome()) => path.join(home, ".agentos", "daemon.log");
@@ -18,11 +20,25 @@ export const cliPath = () => fileURLToPath(new URL("../cli.js", import.meta.url)
 const alive = (pid: number) => {
   try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 };
-function livePid(home: string): number | undefined {
+function recordedPid(home: string): number | undefined {
   try {
     const pid = Number(readFileSync(pidFile(home), "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : undefined;
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
   } catch { return undefined; }
+}
+
+const at = (iso?: string) => (iso ? Date.parse(iso) : 0);
+
+/** a live pid is not proof on its own (pids are reused): the daemon's heartbeat in daemon-state.json has to name it and still be warm */
+function ours(home: string, pid: number): boolean {
+  const s = readState(home);
+  if (s.pid === undefined) return true; // no daemon has written state here, so the pid file is all there is to go on
+  return s.pid === pid && Date.now() - Math.max(at(s.lastTick), at(s.startedAt)) < loadSettings(home).tickSeconds * STALE_TICKS * 1000;
+}
+
+function livePid(home: string): number | undefined {
+  const pid = recordedPid(home);
+  return pid !== undefined && alive(pid) && ours(home, pid) ? pid : undefined;
 }
 
 export function daemonStatus(home = agentosHome()) {
@@ -31,7 +47,7 @@ export function daemonStatus(home = agentosHome()) {
   return { running: !!pid, pid, lastTick: s.lastTick, pauseUntil: s.pauseUntil, today: startedOn(listJobs(home), new Date()), maxRunsPerDay: loadSettings(home).maxRunsPerDay };
 }
 
-/** `daemon start`: spawn the loop detached and hidden, then return its pid */
+/** `daemon start`: spawn the loop detached and hidden, then return its pid. The check here is only a friendly early no: the pid file itself is claimed in the child, by `runDaemon`. */
 export function startDaemon(home = agentosHome(), cli = cliPath()): number {
   const running = livePid(home);
   if (running) throw new Error(`the daemon is already running (pid ${running})`);
@@ -55,14 +71,29 @@ function log(home: string, line: string): void {
   appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
 }
 
+/** creates the pid file, or false if someone else already holds it (`wx` is atomic, so of two daemons starting at once exactly one wins) */
+function claimPidFile(home: string): boolean {
+  let fd: number;
+  try { fd = openSync(pidFile(home), "wx"); } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  }
+  writeSync(fd, String(process.pid));
+  closeSync(fd);
+  return true;
+}
+
 /** `daemon run`: the foreground loop (what `start` and the logon task run) */
 export async function runDaemon(home = agentosHome()): Promise<void> {
   mkdirSync(path.join(home, ".agentos"), { recursive: true });
-  const running = livePid(home);
-  if (running && running !== process.pid) throw new Error(`the daemon is already running (pid ${running})`);
-  const fd = openSync(pidFile(home), "w");
-  writeSync(fd, String(process.pid));
-  closeSync(fd);
+  if (!claimPidFile(home)) {
+    const running = livePid(home);
+    if (running && running !== process.pid) throw new Error(`the daemon is already running (pid ${running})`);
+    rmSync(pidFile(home), { force: true }); // a crashed daemon's file, or our own: take it over
+    if (!claimPidFile(home)) throw new Error(`the daemon is already running (pid ${recordedPid(home) ?? "unknown"})`);
+  }
+  // before anything slow: the heartbeat is what makes this pid file ours, so a second daemon cannot mistake it for a leftover
+  writeState(home, { ...readState(home), pid: process.pid, startedAt: new Date().toISOString() });
   let stopping = false;
   const stop = () => { stopping = true; };
   process.on("SIGINT", stop);
@@ -77,8 +108,6 @@ export async function runDaemon(home = agentosHome()): Promise<void> {
       child.on("close", (code) => { closeSync(out); resolve(code ?? -1); });
     }),
   });
-  const state = readState(home);
-  writeState(home, { ...state, pid: process.pid, startedAt: new Date().toISOString() });
   log(home, `daemon started (pid ${process.pid})`);
   d.recover();
   try {
@@ -89,7 +118,7 @@ export async function runDaemon(home = agentosHome()): Promise<void> {
     }
   } finally {
     log(home, "daemon stopped");
-    if (livePid(home) === process.pid) rmSync(pidFile(home), { force: true });
+    if (recordedPid(home) === process.pid) rmSync(pidFile(home), { force: true });
   }
 }
 
