@@ -1,7 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
+import { cronError } from "../daemon/schedule.js";
+import { parseStandbyMinutes } from "../daemon/service.js";
 import { detectDrift } from "../core/manifest.js";
 import { gitCapture, handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 import { HARNESS_MARKER } from "../generators/index.js";
@@ -187,6 +190,21 @@ export function doctor(options = {}) {
                 fix: `Open ${root} in Codex and choose to trust it when asked (Codex app: add it as a project; CLI: run codex there). ` +
                     `agentos does not change trust settings. By hand: add [projects.'${key}'] with trust_level = "trusted" to ${globalToml}`,
             });
+        }
+    }
+    // 9. daemon — schedules that cannot fire, and a machine that sleeps through them
+    if (config.daemon) {
+        const bad = config.daemon.schedules.map((s) => [s.cron, cronError(s.cron)]).filter(([, e]) => e);
+        add(bad.length
+            ? { name: "daemon:schedules", status: "warn", detail: bad.map(([c, e]) => `"${c}": ${e}`).join("; "), fix: "Fix the cron in agent.config.yaml daemon.schedules (5 fields, e.g. \"0 2 * * *\")" }
+            : { name: "daemon:schedules", status: "pass", detail: `${config.daemon.schedules.length} schedule(s)${config.daemon.enabled ? "" : " (daemon.enabled is off)"}` });
+        if (config.daemon.enabled && process.platform === "win32") {
+            try {
+                const min = parseStandbyMinutes(execFileSync("powercfg", ["/query", "SCHEME_CURRENT", "SUB_SLEEP", "STANDBYIDLE"], { encoding: "utf8", windowsHide: true }));
+                if (min)
+                    add({ name: "daemon:sleep", status: "warn", detail: `Windows sleeps after ${min} min on AC power — the daemon does nothing while asleep`, fix: "Settings → System → Power → Screen and sleep → When plugged in, put my device to sleep after: Never" });
+            }
+            catch { /* powercfg unavailable: nothing to report */ }
         }
     }
     return report(checks, options);

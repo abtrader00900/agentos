@@ -62,11 +62,16 @@ export function addJob(input, home = agentosHome(), now = new Date()) {
         return job;
     });
 }
-export function updateJob(id, patch, home = agentosHome()) {
+/**
+ * `onlyIf`: apply only while the job is in one of these statuses (compare-and-swap), else undefined.
+ * `guard`: checked inside the queue lock, so the caller's condition and the write are one step.
+ */
+export function updateJob(id, patch, home = agentosHome(), onlyIf, guard) {
     return update(home, (jobs) => {
         const j = jobs.find((x) => x.id === id);
-        if (j)
-            Object.assign(j, patch);
+        if (!j || (onlyIf && !onlyIf.includes(j.status)) || (guard && !guard()))
+            return undefined;
+        Object.assign(j, patch);
         return j;
     });
 }

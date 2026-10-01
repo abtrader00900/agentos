@@ -11,6 +11,7 @@ import { learn } from "./commands/learn.js";
 import { run, runs } from "./commands/run.js";
 import { ui } from "./commands/ui.js";
 import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "./commands/lessons.js";
+import { daemonCommand, queueCommand } from "./commands/daemon.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -296,6 +297,27 @@ program
     .option("--json", "machine-readable JSON output")
     .action((action, key, opts) => { try {
     lessonsCommand(action, key, opts);
+}
+catch (e) {
+    fail(e);
+} });
+program
+    .command("daemon <action>")
+    .description("24/7 mode: start | stop | status | install | uninstall (logon task) | run (foreground)")
+    .action(async (action) => { try {
+    await daemonCommand(action);
+}
+catch (e) {
+    fail(e);
+} });
+program
+    .command("queue <action> [words...]")
+    .description('The daemon\'s job queue: add "<task>" | list | remove <id>')
+    .option("--project <path>", "the project folder (default: the current one)")
+    .option("--quick", "skip the planner for this task")
+    .option("--json", "machine-readable list")
+    .action((action, words, opts) => { try {
+    queueCommand(action, words, opts);
 }
 catch (e) {
     fail(e);
