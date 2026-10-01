@@ -161,8 +161,10 @@
     el.appendChild(h("a", { className: "brand", href: "#/" }, L("nav.brand")));
     el.appendChild(h("a", { className: r.screen === "home" ? "navlink sel" : "navlink", href: "#/" }, L("nav.projects")));
     el.appendChild(h("a", { className: r.screen === "queue" ? "navlink sel" : "navlink", href: "#/queue" }, L("nav.queue")));
-    // a daemon we could not ask about reads as stopped; the banner already says why
-    el.appendChild(text("p", "dstatus", daemon && daemon.running
+    // only a status we actually read is shown: a later screen request clears this
+    // one's banner, so claiming "stopped" for a daemon we could not ask about would
+    // leave a false status on screen with nothing to explain it
+    if (daemon) el.appendChild(text("p", "dstatus", daemon.running
       ? L("daemon.running") + " · " + daemon.today + "/" + daemon.maxRunsPerDay + " " + L("daemon.today")
       : L("daemon.stopped")));
     if (!projects.length) el.appendChild(text("p", "muted", L("nav.noProjects")));
