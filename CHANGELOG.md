@@ -1,12 +1,22 @@
 # Changelog
 
-## Unreleased (0.5.0)
+## 0.5.0 — 2026-10-01
+
+PRD 3: a local dashboard, built task by task by `agentos run` itself. The runs are recorded in `bench/dashboard-e2e.md`.
 
 ### Added
 - **Local dashboard (`agentos ui`).** All projects, runs, run detail with live events and controls, lessons, skill drafts and new-run preflight are available in the browser. It binds only to loopback and protects every request with a per-process token cookie or Bearer token, Host and Origin checks, JSON/body limits, packaged-only static files, string-free DOM construction and a strict CSP.
 - **Project registry.** Every `agentos run` records its project in `~/.agentos/projects.json` for dashboard discovery.
 - **Run cost accounting.** A new `usage` run event records each agent's tokens and cost so the dashboard can show run cost.
 - **Packaged dashboard assets.** The npm package now ships the `ui/` files.
+- **`orchestrator.build`.** Shell commands (for example `["npm run compile"]`) that run in the run worktree before the final secret scan and push. Their output is committed, so committed build output such as `dist/` stays current. A failing build stops the run at `needs_human` and opens no PR.
+- **Dashboard "Starting…".** Right after **Start run**, the run detail retries a not-yet-written run for up to 15 s instead of showing "no such run".
+
+### Fixed
+- **Registry paths.** Windows 8.3 short paths (`RUNNER~1`) and long paths of one folder now register as one project. Run worktrees under `.agentos/runs/` are never registered.
+- **Live events.** The stream detects a replaced `events.jsonl` by file identity, not only by a smaller size.
+- **Lock ownership.** The stale-lock takeover in `withLock` can no longer delete another holder's lock.
+- **Tests.** Tests never write the real `~/.agentos`, because `tests/setup.ts` sets `AGENTOS_HOME`.
 
 ## 0.4.0 — 2026-09-30
 
