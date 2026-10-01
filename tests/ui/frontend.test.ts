@@ -41,6 +41,15 @@ describe("frontend", () => {
     for (const k of ["approve", "forget", "promote", "reject", "startRun", "heldBySafety", "confirmForget"]) expect(app).toContain(`L("${k}")`);
   });
 
+  it("offers quick runs and only sends the true flag", () => {
+    const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
+    vm.runInNewContext(read("labels.js"), ctx);
+    const app = read("app.js");
+    expect(app).toContain('L("new.quick")');
+    expect(ctx.window.LABELS!["new.quick"]).toBeTruthy();
+    expect(app).toContain("quick.checked ? { quick: true } : {}");
+  });
+
   it("says a run is starting while it waits out the 404", () => {
     const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
     vm.runInNewContext(read("labels.js"), ctx);
