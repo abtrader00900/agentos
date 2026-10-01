@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -32,6 +32,11 @@ function startFrom(url: URL, req: IncomingMessage): number {
   return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
+/** Birth time is what survives an append; `ctimeMs` is the fallback where it is not recorded. */
+function identity(st: { ino: number; birthtimeMs: number; ctimeMs: number }): string {
+  return `${st.ino}:${st.birthtimeMs || st.ctimeMs}`;
+}
+
 export function liveEvents(
   projectId: string,
   runId: string,
@@ -61,6 +66,10 @@ export function liveEvents(
   let offset = 0;
   let partial = "";
   let seen = 0;
+  let id = "";
+  try {
+    id = identity(statSync(file));
+  } catch { /* the first logEvent has not created it yet, so the identity comes from the first poll */ }
 
   /** A closed request can still have a timer in flight for one more tick. */
   const write = (frame: string): void => { if (!res.writableEnded && !res.destroyed) res.write(frame); };
@@ -73,14 +82,18 @@ export function liveEvents(
       return; // the first logEvent has not created it yet
     }
     try {
-      if (fstatSync(fd).size < offset) {
-        // A replaced or truncated log starts a new sequence from its first line.
+      const st = fstatSync(fd);
+      const now = identity(st);
+      // A replaced or truncated log starts a new sequence from its first line; a
+      // replacement that is not smaller only shows as a change of file identity.
+      if (st.size < offset || (id && now !== id)) {
         offset = 0;
         partial = "";
         decoder = new StringDecoder("utf8");
         seen = 0;
         since = 0;
       }
+      id = now;
       for (;;) {
         const n = readSync(fd, buf, 0, buf.length, offset);
         if (!n) break;
