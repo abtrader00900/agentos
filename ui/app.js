@@ -59,6 +59,14 @@
   }
 
   /**
+   * What `api(path, { allow404: true })` resolves to instead of bannering a
+   * 404. Only identity matters: a caller waiting for something the server does
+   * not have yet can tell "not there" from "went wrong" without reading status
+   * codes, and every other failure still comes back as null.
+   */
+  const NOT_FOUND = {};
+
+  /**
    * One fetch wrapper for the whole app. It resolves to the parsed body, or to
    * null after putting the server's `{ error }` in the banner — callers bail
    * on null and leave whatever is already on screen alone.
@@ -84,6 +92,7 @@
       body = await res.json();
     } catch (e) { /* an empty or non-JSON body is still a usable status */ }
     if (!res.ok) {
+      if (res.status === 404 && o.allow404) return NOT_FOUND;
       banner((body && body.error) || L("err.generic"));
       return null;
     }
@@ -270,13 +279,13 @@
   const STAGES = ["queued", "planning", "working", "verifying", "fixing", "pr", "learning"];
   const STAGE_OF = { queued: "queued", planning: "planning", working: "working", verifying: "verifying", fixing: "fixing", pr_open: "pr" };
   const MAX_EVENTS = 3000;
+  const START_TRIES = 15;                        // one a second: preflight takes a few, so 15s covers a slow start
 
   async function renderRun(main, p, id, seq) {
     clear(main);
     main.appendChild(text("p", "muted", L("common.loading")));
-    const run = await api(runApi(p, id));
-    if (stale(seq)) return;
-    if (!run) { clear(main); return; }
+    const run = await loadRun(main, p, id, seq);
+    if (!run) return;                            // the route moved on, or loadRun gave up and said why
 
     const ctx = { p: p, id: id, run: run, events: [], showAgent: false, seq: seq };
     clear(main);
@@ -287,6 +296,32 @@
     main.appendChild(diffSection(ctx));
     main.appendChild(eventsSection(ctx));
     openStream(ctx);
+  }
+
+  /**
+   * `agentos run` is spawned detached and writes its state file only once
+   * preflight is through, so the run a click just created is a 404 for the next
+   * few seconds. That is "starting", not "no such run": ask again every second
+   * while saying so, and let the last try banner the 404 like any other error.
+   */
+  function loadRun(main, p, id, seq) {
+    return new Promise((resolve) => {
+      let tries = 0;
+      const attempt = async () => {
+        const last = ++tries > START_TRIES;
+        const run = await api(runApi(p, id), last ? null : { allow404: true });
+        if (stale(seq)) return resolve(null);
+        if (run === NOT_FOUND) {
+          clear(main);
+          main.appendChild(text("p", "muted", L("run.starting")));
+          starting = setTimeout(() => { starting = null; attempt(); }, 1000);
+          return;
+        }
+        if (!run) clear(main);                   // the banner says why
+        resolve(run);
+      };
+      attempt();
+    });
   }
 
   function paintRun(ctx) {
@@ -670,6 +705,7 @@
   let timer = null;                              // runs refresh or active-run elapsed tick
   let stream = null;                             // the run detail's EventSource
   let refreshPending = null;                     // a coalesced run-detail refresh
+  let starting = null;                           // loadRun waiting on a run that has not been written yet
   let seqNo = 0;                                 // a render in flight when the route changed must not paint
   const stale = (seq) => seq !== seqNo;
 
@@ -681,6 +717,7 @@
   function teardown() {
     if (timer) { clearInterval(timer); timer = null; }
     if (refreshPending) { clearTimeout(refreshPending); refreshPending = null; }
+    if (starting) { clearTimeout(starting); starting = null; }
     if (stream) { stream.close(); stream = null; }
   }
 
