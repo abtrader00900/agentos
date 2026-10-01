@@ -90,11 +90,14 @@ describe("daemon tick", { timeout: 30_000 }, () => {
     expect(listJobs(home)[0]).toMatchObject({ status: "running", runId: "theirs" });
   });
 
-  it("waits for free memory", async () => {
+  it("waits for free memory, and says why once", async () => {
     addJob({ projectId: pid, task: "big", source: "manual" }, home, clock);
-    const d = new Daemon(deps({ freeMemMb: () => 10 }));
+    const lines: string[] = [];
+    const d = new Daemon(deps({ freeMemMb: () => 10, log: (l) => lines.push(l) }));
+    await d.tick();
     await d.tick();
     expect(launched).toHaveLength(0);
+    expect(lines.filter((l) => l.includes("waits for memory"))).toEqual([expect.stringContaining("10 MB free, 1500 MB needed")]);
   });
 
   it("pauses the whole queue after a rate limit, then resumes that run first", async () => {

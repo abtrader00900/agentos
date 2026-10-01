@@ -29,6 +29,8 @@ export declare function writeState(home: string, s: DaemonState): void;
 export declare class Daemon {
     private d;
     private current?;
+    /** the job last held back by the memory gate (so the reason is logged once) */
+    private waitingOn?;
     constructor(d: DaemonDeps);
     get running(): Job | undefined;
     /** resolves when the job in flight (if any) has finished and been recorded */
