@@ -67,6 +67,19 @@ export const learningSchema = z.object({
     /** successful runs of one task kind before a skill is drafted */
     skillAfterRuns: z.number().int().min(2).max(20).default(3),
 });
+/** agentos daemon (PRD 4): what the daemon may do in this project; off unless enabled */
+export const daemonScheduleSchema = z.object({
+    /** 5-field cron, local time, e.g. "0 2 * * *" (checked by the daemon and doctor) */
+    cron: z.string().min(1),
+    task: z.string().min(3).max(2000),
+    quick: z.boolean().default(false),
+});
+export const daemonSchema = z.object({
+    enabled: z.boolean().default(false),
+    /** watch this project's agentos/run-* PRs and fix failed CI on the same branch */
+    ciFix: z.boolean().default(false),
+    schedules: z.array(daemonScheduleSchema).default([]),
+});
 export const agentConfigSchema = z.object({
     /** Project display name */
     project: z.object({
@@ -98,6 +111,8 @@ export const agentConfigSchema = z.object({
     orchestrator: orchestratorSchema.optional(),
     /** learning from agentos runs — defaults apply whenever `orchestrator` is set */
     learning: learningSchema.optional(),
+    /** agentos daemon — absent means the daemon ignores this project */
+    daemon: daemonSchema.optional(),
 });
 export const ALL_HARNESSES = ["claude-code", "codex", "antigravity", "cursor", "windsurf"];
 export function rulesForHarness(config, harness) {
