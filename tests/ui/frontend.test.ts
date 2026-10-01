@@ -41,6 +41,13 @@ describe("frontend", () => {
     for (const k of ["approve", "forget", "promote", "reject", "startRun", "heldBySafety", "confirmForget"]) expect(app).toContain(`L("${k}")`);
   });
 
+  it("says a run is starting while it waits out the 404", () => {
+    const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
+    vm.runInNewContext(read("labels.js"), ctx);
+    expect(read("app.js")).toContain('L("run.starting")');
+    expect(ctx.window.LABELS!["run.starting"]).toBeTruthy();
+  });
+
   it("serves the app files with the right types", async () => {
     t = await startTestServer();
     for (const [f, type] of [["/", /text\/html/], ["/app.js", /javascript/], ["/labels.js", /javascript/], ["/style.css", /text\/css/]] as const) {

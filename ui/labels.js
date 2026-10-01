@@ -46,6 +46,7 @@ window.LABELS = {
   "runs.empty": "No runs yet",
 
   // run detail
+  "run.starting": "Starting…",
   "run.round": "Fix round",
   "run.elapsed": "Elapsed",
   "run.cost": "Cost",
