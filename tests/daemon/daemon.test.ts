@@ -77,6 +77,19 @@ describe("daemon tick", { timeout: 30_000 }, () => {
     expect(launched).toHaveLength(7);
   });
 
+  it("starts nothing once its lock was taken over, and never launches a job another daemon already marked running", async () => {
+    const j = addJob({ projectId: pid, task: "contested", source: "manual" }, home, clock)!;
+    await new Daemon(deps({ owns: () => false })).tick();
+    expect(launched).toHaveLength(0);
+    // the other daemon marked it running between our nextJob() and our start
+    let raced = false;
+    const d = new Daemon(deps({ freeMemMb: () => { if (!raced) { raced = true; updateJob(j.id, { status: "running", runId: "theirs" }, home); } return 1e6; } }));
+    await d.tick();
+    await d.idle();
+    expect(launched).toHaveLength(0);
+    expect(listJobs(home)[0]).toMatchObject({ status: "running", runId: "theirs" });
+  });
+
   it("waits for free memory", async () => {
     addJob({ projectId: pid, task: "big", source: "manual" }, home, clock);
     const d = new Daemon(deps({ freeMemMb: () => 10 }));

@@ -31,10 +31,16 @@ export declare function daemonStatus(home?: string): {
     maxRunsPerDay: number;
 };
 type Spawn = (cli: string) => number;
-/** `daemon start`: refuse if a daemon answers, else spawn the loop detached and hidden (the loop claims the lock itself) */
-export declare function startDaemon(home?: string, cli?: string, launch?: Spawn, waitMs?: number): Promise<number>;
-/** asks the daemon to stop after its current tick: a run in flight keeps going, and the next daemon adopts it */
-export declare function stopDaemon(home?: string, waitMs?: number): Promise<boolean>;
+/**
+ * `daemon start`: refuse if a daemon answers, else spawn the loop detached and hidden; the loop
+ * claims the lock itself, so wait until it holds it. Of two starts at once, the loser says who won.
+ */
+export declare function startDaemon(home?: string, cli?: string, launch?: Spawn, waitMs?: number, claimMs?: number): Promise<number>;
+/**
+ * Asks the daemon to stop after its current tick (a run in flight keeps going; the next daemon
+ * adopts it). "asked": it has not let go of its lock yet; "replaced": another daemon holds it now.
+ */
+export declare function stopDaemon(home?: string, waitMs?: number, graceMs?: number): Promise<"stopped" | "asked" | "replaced" | "not-running">;
 /** `daemon run`: the foreground loop (what `start` and the logon task run) */
 export declare function runDaemon(home?: string): Promise<void>;
 export declare const taskArgs: (node: string, cli: string) => string[];

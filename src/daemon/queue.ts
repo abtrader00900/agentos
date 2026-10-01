@@ -91,10 +91,12 @@ export function addJob(
   });
 }
 
-export function updateJob(id: string, patch: Partial<Job>, home = agentosHome()): Job | undefined {
+/** `onlyIf`: apply only while the job is in one of these statuses (compare-and-swap), else undefined */
+export function updateJob(id: string, patch: Partial<Job>, home = agentosHome(), onlyIf?: readonly JobStatus[]): Job | undefined {
   return update(home, (jobs) => {
     const j = jobs.find((x) => x.id === id);
-    if (j) Object.assign(j, patch);
+    if (!j || (onlyIf && !onlyIf.includes(j.status))) return undefined;
+    Object.assign(j, patch);
     return j;
   });
 }

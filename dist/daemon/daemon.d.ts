@@ -8,6 +8,8 @@ export interface DaemonDeps {
     /** runs `agentos <args>` in the project root; resolves with its exit code when it ends */
     launch(root: string, args: string[]): Promise<number>;
     log(line: string): void;
+    /** whether this daemon still holds its lock (absent: always) */
+    owns?(): boolean;
     /** how often an adopted run's lock is checked (default 5 s) */
     pollMs?: number;
 }

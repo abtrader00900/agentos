@@ -113,25 +113,44 @@ const spawnLoop = (cli) => {
     child.unref();
     return child.pid ?? 0;
 };
-/** `daemon start`: refuse if a daemon answers, else spawn the loop detached and hidden (the loop claims the lock itself) */
-export async function startDaemon(home = agentosHome(), cli = cliPath(), launch = spawnLoop, waitMs = 5000) {
+/**
+ * `daemon start`: refuse if a daemon answers, else spawn the loop detached and hidden; the loop
+ * claims the lock itself, so wait until it holds it. Of two starts at once, the loser says who won.
+ */
+export async function startDaemon(home = agentosHome(), cli = cliPath(), launch = spawnLoop, waitMs = 5000, claimMs = 10_000) {
     const running = await answering(home, waitMs);
     if (running)
         throw new Error(`the daemon is already running (pid ${running.pid})`);
     rmSync(stopFile(home), { force: true }); // a stop request nobody picked up must not stop the new daemon
-    return launch(cli);
+    const pid = launch(cli);
+    for (const until = Date.now() + claimMs; Date.now() < until; await sleep(100)) {
+        const lock = readLock(home);
+        if (lock?.pid === pid)
+            return pid;
+        if (lock && lock.pid !== pid && (await answering(home, 1000)))
+            throw new Error(`the daemon is already running (pid ${lock.pid})`);
+    }
+    throw new Error(`the daemon (pid ${pid}) did not start within ${Math.round(claimMs / 1000)} s — see ${logFile(home)}`);
 }
-/** asks the daemon to stop after its current tick: a run in flight keeps going, and the next daemon adopts it */
-export async function stopDaemon(home = agentosHome(), waitMs = 5000) {
+/**
+ * Asks the daemon to stop after its current tick (a run in flight keeps going; the next daemon
+ * adopts it). "asked": it has not let go of its lock yet; "replaced": another daemon holds it now.
+ */
+export async function stopDaemon(home = agentosHome(), waitMs = 5000, graceMs = 15_000) {
     const lock = await answering(home, waitMs);
     if (!lock)
-        return false;
+        return "not-running";
     writeFileSync(stopFile(home), lock.token);
-    for (const until = Date.now() + 15_000; Date.now() < until; await sleep(200)) {
-        if (readLock(home)?.token !== lock.token)
-            break;
+    for (const until = Date.now() + graceMs; Date.now() < until; await sleep(200)) {
+        const now = readLock(home);
+        if (!now)
+            return "stopped";
+        if (now.token !== lock.token) {
+            rmSync(stopFile(home), { force: true }); // addressed to a daemon that is gone
+            return "replaced";
+        }
     }
-    return true;
+    return "asked";
 }
 function log(home, line) {
     const file = logFile(home);
@@ -167,6 +186,7 @@ export async function runDaemon(home = agentosHome()) {
     const gh = (cwd, args) => execFileSync("gh", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const d = new Daemon({
         home, gh, now: () => new Date(), freeMemMb: () => os.freemem() / 1048576, log: (l) => log(home, l),
+        owns: () => readLock(home)?.token === token,
         launch: (root, args) => new Promise((resolve) => {
             const out = openSync(logFile(home), "a");
             const child = spawn(process.execPath, [cliPath(), ...args], { cwd: root, stdio: ["ignore", out, out], windowsHide: true });

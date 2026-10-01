@@ -40,20 +40,45 @@ describe("daemon service", () => {
   it("treats a live pid that does not answer as stale, so a reused PID never blocks or gets signalled", async () => {
     lockAs("old"); // process.pid is alive, but nothing answers for token "old"
     expect(await answering(home, 300)).toBeUndefined();
+    expect(await stopDaemon(home, 300)).toBe("not-running"); // nothing to stop, and nothing was killed
     const launched: string[] = [];
-    await startDaemon(home, "/x/cli.js", (cli) => { launched.push(cli); return 1; }, 300);
+    // the new loop claims the lock as itself
+    const pid = await startDaemon(home, "/x/cli.js", (cli) => { launched.push(cli); setTimeout(() => lockAs("new", 4242), 200); return 4242; }, 300, 3000);
+    expect(pid).toBe(4242);
     expect(launched).toEqual(["/x/cli.js"]);
-    expect(await stopDaemon(home, 300)).toBe(false); // nothing to stop, and nothing was killed
+  });
+
+  it("tells the loser of two simultaneous starts which daemon won", async () => {
+    let d: ReturnType<typeof fakeDaemon> | undefined;
+    // our child loses: another daemon claims the lock and answers
+    const start = startDaemon(home, "/x/cli.js", () => { lockAs("winner"); d = fakeDaemon("winner"); return 4243; }, 300, 3000);
+    await expect(start).rejects.toThrow(new RegExp(`already running \\(pid ${process.pid}\\)`));
+    d?.stop();
+  });
+
+  it("reports a start whose loop never claims the lock", async () => {
+    await expect(startDaemon(home, "/x/cli.js", () => 4244, 300, 500)).rejects.toThrow(/did not start/);
   });
 
   it("stops the daemon through a stop file holding its token, never by PID", async () => {
     lockAs("t2");
     const d = fakeDaemon("t2");
-    const stopping = stopDaemon(home, 2000);
+    const stopping = stopDaemon(home, 2000, 3000);
     await new Promise((r) => setTimeout(r, 600));
     expect(d.seen).toContain("stop");
     rmSync(lockFile(home)); // the daemon releases its lock as it exits
-    expect(await stopping).toBe(true);
+    expect(await stopping).toBe("stopped");
+    d.stop();
+  });
+
+  it("says when the daemon has not let go yet, or was replaced", async () => {
+    lockAs("t3");
+    const d = fakeDaemon("t3");
+    expect(await stopDaemon(home, 2000, 400)).toBe("asked"); // the fake reads the stop file but keeps its lock
+    const replacing = stopDaemon(home, 2000, 3000);
+    await new Promise((r) => setTimeout(r, 400));
+    lockAs("t4"); // another daemon takes over
+    expect(await replacing).toBe("replaced");
     d.stop();
   });
 

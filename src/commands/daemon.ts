@@ -7,7 +7,16 @@ import { getProject, registerProject } from "../ui/projects.js";
 export async function daemonCommand(action: string): Promise<void> {
   switch (action) {
     case "start": console.log(`agentos daemon started (pid ${await startDaemon()}) — log: ${logFile()}`); return;
-    case "stop": console.log((await stopDaemon()) ? "agentos daemon stopped (a run in flight keeps going; the next start adopts it)" : "the daemon is not running"); return;
+    case "stop": {
+      const r = await stopDaemon();
+      console.log({
+        stopped: "agentos daemon stopped (a run in flight keeps going; the next start adopts it)",
+        asked: "asked the daemon to stop; it stops when its current tick ends",
+        replaced: "that daemon is gone, but another one holds the lock now — run: agentos daemon status",
+        "not-running": "the daemon is not running",
+      }[r]);
+      return;
+    }
     case "run": return runDaemon();
     case "install": installTask(); console.log('installed: Task Scheduler starts the daemon at logon ("agentos daemon"); undo with: agentos daemon uninstall'); return;
     case "uninstall": uninstallTask(); console.log("removed the logon task"); return;

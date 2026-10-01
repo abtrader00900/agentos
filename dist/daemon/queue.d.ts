@@ -31,7 +31,8 @@ export declare function addJob(input: {
     onto?: string;
     dedupeKey?: string;
 }, home?: string, now?: Date): Job | undefined;
-export declare function updateJob(id: string, patch: Partial<Job>, home?: string): Job | undefined;
+/** `onlyIf`: apply only while the job is in one of these statuses (compare-and-swap), else undefined */
+export declare function updateJob(id: string, patch: Partial<Job>, home?: string, onlyIf?: readonly JobStatus[]): Job | undefined;
 export declare function removeJob(id: string, home?: string): "removed" | "not-found" | "not-queued";
 /** A paused run (rate limit, crash) continues before anything new starts. */
 export declare function nextJob(jobs: Job[]): Job | undefined;

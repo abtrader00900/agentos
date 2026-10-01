@@ -18,6 +18,8 @@ export interface DaemonDeps {
   /** runs `agentos <args>` in the project root; resolves with its exit code when it ends */
   launch(root: string, args: string[]): Promise<number>;
   log(line: string): void;
+  /** whether this daemon still holds its lock (absent: always) */
+  owns?(): boolean;
   /** how often an adopted run's lock is checked (default 5 s) */
   pollMs?: number;
 }
@@ -154,7 +156,10 @@ export class Daemon {
     const resume = job.status === "paused" && !!job.runId;
     const runId = job.runId ?? newRunId(now);
     const args = resume ? ["run", "--resume", runId] : runArgs(runId, job.task, job.quick, job.onto);
-    const started = updateJob(job.id, { status: "running", runId, startedAt: job.startedAt ?? now.toISOString(), attempts: (job.attempts ?? 0) + 1 }, this.d.home)!;
+    if (this.d.owns && !this.d.owns()) return; // our lock was taken over while this tick ran: the new daemon decides
+    // compare-and-swap: of two daemons that picked the same job, only one marks it running
+    const started = updateJob(job.id, { status: "running", runId, startedAt: job.startedAt ?? now.toISOString(), attempts: (job.attempts ?? 0) + 1 }, this.d.home, ["queued", "paused"]);
+    if (!started) return;
     this.d.log(`${resume ? "resume" : "start"} job ${job.id} (${job.source}) as run ${runId}`);
     const done = this.d.launch(root, args).catch(() => -1).then(() => this.finish(started, root));
     this.track(started, done);
