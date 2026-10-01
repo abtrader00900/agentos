@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 — 2026-10-01
+
+PRD 4: agentos keeps working unattended (`agentos daemon`), plus a faster run engine. Built task by task by `agentos run`; the e2e is in `bench/daemon-e2e.md`.
+
+### Added
+- **`agentos daemon start|stop|status|install|uninstall|run`.** A local background loop that ticks every 30 s. It runs a job queue, fires cron schedules, and fixes failed CI on agentos's own PRs, one run at a time. Limits are at most 6 runs a day and 2 CI fixes per PR. It needs enough free memory and pauses after a rate limit. All limits live in `~/.agentos/daemon.yaml`. `install` creates a Windows Task Scheduler logon task (not elevated). A project takes part only with `daemon: { enabled: true }` in its `agent.config.yaml`.
+- **`agentos queue add|list|remove`** and a dashboard **Queue** page with the daemon's status in the sidebar.
+- **`agentos run --onto <agentos/run-*>`.** This fixes an agentos PR in place: it works on that branch, pushes fast-forward only, and opens no new PR. Other branches are refused.
+- **`agentos run --quick`.** It skips the planner, so one agent does the whole task. The dashboard Start run form has a "Quick" checkbox.
+- **Bundled skills `ponytail` and `saas-builder`.** `ponytail` is MIT, from DietrichGebert/ponytail. `saas-builder` is agentos's own playbook for taking an app to a sellable SaaS, layer by layer.
+- **`doctor` checks** the daemon's cron schedules and warns when Windows sleeps on AC power.
+
+### Changed
+- **Faster runs.** Tests and the cross-model review now run at the same time. After a fix round the reviewer checks only the fixer's change against its earlier findings, and a base merge still triggers a full review. A real run went from about 27 min to 8–14 min.
+
+### Fixed
+- **Daemon identity.** The daemon is identified by a lock token it answers itself, so `daemon stop` never kills by PID: a reused PID can never be signalled. Starting is compare-and-swap, so two daemons never run at once and one job is never launched twice.
+- **Daemon memory wait.** A job held back by the memory gate is now logged. A stopped daemon leaves a run's result to the daemon that adopted it.
+- **Test runner shutdown.** A verify command that times out or is cancelled is killed with its whole process tree.
+
 ## 0.5.0 — 2026-10-01
 
 PRD 3: a local dashboard, built task by task by `agentos run` itself. The runs are recorded in `bench/dashboard-e2e.md`.
