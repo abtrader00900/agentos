@@ -17,9 +17,12 @@ export interface EngineDeps {
 }
 /** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
 export declare function assertCleanCheckout(root: string): void;
+/** the only branches --onto may push to: ones agentos itself opened a PR from */
+export declare const ONTO_BRANCH: RegExp;
 /** Preflight, create the run record, and drive it until it ends or pauses. */
 export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string, opts?: {
     quick?: boolean;
+    onto?: string;
 }): Promise<RunState>;
 /** Continue a paused run, or one whose engine died mid-step. */
 export declare function resumeRun(root: string, id: string, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState>;
