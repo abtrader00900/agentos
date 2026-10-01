@@ -313,7 +313,7 @@ function notes(c: Ctx, role: Role): string {
 /** --quick: the whole task as one subtask for the first worker, with no planner call */
 function quickPlan(task: string, agent: AgentName): Plan {
   const title = task.split("\n")[0].slice(0, 80);
-  return { summary: title, subtasks: [{ id: "main", title, prompt: task, files: [], dependsOn: [], agent }] };
+  return { summary: title, subtasks: [{ id: "task", title, prompt: task, files: [], dependsOn: [], agent }] };
 }
 
 async function plan(c: Ctx): Promise<void> {
