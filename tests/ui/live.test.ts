@@ -1,7 +1,7 @@
 // tests/ui/live.test.ts
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import http from "node:http";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { startTestServer, TOKEN } from "./helpers.js";
 import { makeRepo } from "../orchestrator/helpers.js";
@@ -44,6 +44,7 @@ describe("live events", () => {
     expect(text).toMatch(/id: 1\ndata: .*planning/);
     expect(text).toMatch(/id: 2\ndata: .*"working"/);
     expect(text).toMatch(/id: 3\ndata: .*verifying/);
+    expect(text.split("id: 1\n").length - 1).toBe(1); // an append is not a replacement, so nothing is re-sent
   });
 
   it("resumes after since= or Last-Event-ID", async () => {
@@ -57,6 +58,17 @@ describe("live events", () => {
     setTimeout(() => writeFileSync(path.join(repo.root, ".agentos", "runs", "s1", "events.jsonl"), '{"type":"new"}\n'), 800);
     const text = await stream(`/api/p/${pid}/runs/s1/events?since=2`, {}, (s) => s.includes('data: {"type":"new"}'));
     expect(text).toContain('id: 1\ndata: {"type":"new"}');
+  });
+
+  it("restarts at id 1 when the event log is replaced by a larger file", async () => {
+    const log = path.join(repo.root, ".agentos", "runs", "s1", "events.jsonl");
+    const pad = "p".repeat(400);
+    const next = `{"type":"fresh"}\n{"type":"pad","pad":"${pad}"}\n{"type":"pad","pad":"${pad}"}\n`;
+    expect(Buffer.byteLength(next)).toBeGreaterThan(statSync(log).size); // not the shrink case above
+    // rename, not writeFileSync: an in-place truncate keeps the inode and the birth time
+    setTimeout(() => { writeFileSync(`${log}.new`, next); renameSync(`${log}.new`, log); }, 800);
+    const text = await stream(`/api/p/${pid}/runs/s1/events?since=2`, {}, (s) => s.includes('data: {"type":"fresh"}'));
+    expect(text).toContain('id: 1\ndata: {"type":"fresh"}');
   });
 
   it("404s for an unknown run", async () => {
