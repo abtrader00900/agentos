@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, statSync, type Stats } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -33,15 +33,22 @@ function startFrom(url: URL, req: IncomingMessage): number {
 }
 
 /**
- * The inode is the only field that both survives an append and changes on a
- * rename-replace. No timestamp is: where a filesystem records no birth time Node
- * reports `ctimeMs` (or 0) in its place, and `ctimeMs` moves on every append, so
- * mixing one in would read an appended line as a replacement and re-send the log.
- * ponytail: where `ino` is 0 (not every filesystem records one) identity is
- * constant and only a shrinking file is caught, as before.
+ * The inode survives an append and changes on a rename-replace. The birth time
+ * covers what it misses — a replacement that lands on a reused inode, or a
+ * filesystem that reports no inode at all — but only where it is a real birth
+ * time: Node hands back `ctimeMs` where the filesystem records none, and
+ * `ctimeMs` moves on every append, so a birth time equal to the change time is
+ * no evidence of anything and is dropped rather than re-sending the whole log
+ * once a second.
  */
-function identity(st: { dev: number; ino: number }): string {
-  return `${st.dev}:${st.ino}`;
+type Id = { key: string; birth: number };
+function identity(st: Stats): Id {
+  return { key: `${st.dev}:${st.ino}`, birth: st.birthtimeMs === st.ctimeMs ? 0 : st.birthtimeMs };
+}
+
+/** Both birth times have to be known for a difference between them to mean a different file. */
+function replaced(a: Id, b: Id): boolean {
+  return a.key !== b.key || (!!a.birth && !!b.birth && a.birth !== b.birth);
 }
 
 export function liveEvents(
@@ -73,7 +80,7 @@ export function liveEvents(
   let offset = 0;
   let partial = "";
   let seen = 0;
-  let id = "";
+  let id: Id | null = null;
   try {
     id = identity(statSync(file));
   } catch { /* the first logEvent has not created it yet, so the identity comes from the first poll */ }
@@ -93,7 +100,7 @@ export function liveEvents(
       const now = identity(st);
       // A replaced or truncated log starts a new sequence from its first line; a
       // replacement that is not smaller only shows as a change of file identity.
-      if (st.size < offset || (id && now !== id)) {
+      if (st.size < offset || (id && replaced(id, now))) {
         offset = 0;
         partial = "";
         decoder = new StringDecoder("utf8");
