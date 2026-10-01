@@ -389,13 +389,13 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
   const high = (issue: string) => JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue }]);
 
   it("reviews while the tests run, not after them", async () => {
-    // the test command holds a flag file for 1.5 s; a review that starts after the tests never sees it
-    const verify = [`node -e "const f=require('fs');f.writeFileSync('testing.flag','');setTimeout(()=>f.unlinkSync('testing.flag'),1500)"`];
+    // the test command holds a flag file for 4 s; a review that starts after the tests never sees it
+    const verify = [`node -e "const f=require('fs');f.writeFileSync('testing.flag','');setTimeout(()=>f.unlinkSync('testing.flag'),4000)"`];
     let sawTests = false;
     const d = deps({
       plan: planOf(sub("a")), work: creates,
       review: async (_p, cwd) => {
-        for (let i = 0; i < 40 && !sawTests; i++) { sawTests = existsSync(path.join(cwd, "testing.flag")); await new Promise((r) => setTimeout(r, 25)); }
+        for (let i = 0; i < 160 && !sawTests; i++) { sawTests = existsSync(path.join(cwd, "testing.flag")); await new Promise((r) => setTimeout(r, 25)); }
         return "[]";
       },
     });
@@ -456,6 +456,41 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
     const s = await startRun(repo.root, "flaky reviewer", cfg({ verify }), d);
     expect(s.status).toBe("pr_open");
     expect(prompts[1]).toContain("new file mode");
+  });
+
+  it("stops when a verify command commits while the review runs", async () => {
+    const verify = [`git commit -q --allow-empty -m sneaky`];
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const s = await startRun(repo.root, "committing verify", cfg({ verify }), d);
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("orchestrator.build");
+    expect(prCalls(d)).toHaveLength(0);
+  });
+
+  it("keeps the earlier findings without asking the reviewer again when the fixer changed nothing", async () => {
+    let reviews = 0;
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => { reviews++; return high("still wrong"); },
+      work: (cwd, p) => (p.includes("does not pass yet") ? undefined : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "lazy fixer", cfg({ maxFixRounds: 2 }), d);
+    expect(s.status).toBe("needs_human");
+    expect(reviews).toBe(1);
+    expect(s.findings[0].issue).toBe("still wrong");
+  });
+
+  it("sends failing tests to the fixer when the reviewer hits a rate limit, instead of pausing", async () => {
+    const verify = [`node -e "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1)"`];
+    const results: (string | RunnerResult)[] = [LIMIT, "[]"];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: () => results.shift() ?? "[]",
+      work: (cwd, p) => (p.includes("does not pass yet") ? writeFileSync(path.join(cwd, "fixed.txt"), "ok") : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "limited reviewer", cfg({ verify }), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.fixRound).toBe(1);
   });
 
   it("--quick skips the planner and gives the whole task to the first worker", async () => {

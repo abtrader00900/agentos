@@ -1,5 +1,6 @@
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { z } from "zod";
+import { killTree } from "./runners.js";
 import type { Finding } from "./types.js";
 
 const tail = (s: string, n = 4000) => (s.length > n ? `…${s.slice(-n)}` : s);
@@ -11,22 +12,33 @@ export function excerpt(text: string, max = 600): string {
   return `${text.slice(0, half)}\n…\n${text.slice(-half)}`;
 }
 
-/** one shell command, async so the engine can review while the tests run */
-function sh(cmd: string, cwd: string, timeoutMs: number): Promise<{ ok: boolean; out: string }> {
+/**
+ * One shell command, async so the engine can review while the tests run. Its own process group,
+ * so a timeout or a cancel (through `live`) kills the test runner too, not just the shell.
+ */
+function sh(cmd: string, cwd: string, timeoutMs: number, live?: Set<number>): Promise<{ ok: boolean; out: string }> {
   return new Promise((resolve) => {
     // the commands come from the owner's own agent.config.yaml, never from an agent
-    const child = exec(cmd, { cwd, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) =>
-      resolve(err ? { ok: false, out: `${stdout}${stderr}` || err.message } : { ok: true, out: stdout }),
-    );
-    child.stdin?.end();
+    const child = spawn(cmd, { cwd, shell: true, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const pid = child.pid ?? 0;
+    if (pid) live?.add(pid);
+    let out = "";
+    let timedOut = false;
+    const add = (d: string) => { out = (out + d).slice(-8_000_000); };
+    child.stdout.setEncoding("utf8").on("data", add);
+    child.stderr.setEncoding("utf8").on("data", add);
+    const timer = setTimeout(() => { timedOut = true; if (pid) killTree(pid); }, timeoutMs);
+    const done = (ok: boolean, extra = "") => { clearTimeout(timer); live?.delete(pid); resolve({ ok, out: out + extra }); };
+    child.on("error", (e) => done(false, e.message));
+    child.on("close", (code) => done(code === 0 && !timedOut, timedOut ? `\n(timed out after ${Math.round(timeoutMs / 1000)} s)` : ""));
   });
 }
 
 /** Run the configured commands through the shell, in order, stopping at the first failure. */
-export async function runVerify(cwd: string, commands: string[], timeoutMs: number): Promise<{ ok: boolean; output: string }> {
+export async function runVerify(cwd: string, commands: string[], timeoutMs: number, live?: Set<number>): Promise<{ ok: boolean; output: string }> {
   let output = "";
   for (const cmd of commands) {
-    const r = await sh(cmd, cwd, timeoutMs);
+    const r = await sh(cmd, cwd, timeoutMs, live);
     if (!r.ok) return { ok: false, output: `${output}$ ${cmd}  ✗ FAILED\n${tail(r.out)}\n` };
     output += `$ ${cmd}\n${tail(r.out, 1500)}\n`;
   }
@@ -80,13 +92,13 @@ export function reviewPrompt(task: string, diff: string, notes = ""): string {
  * The review after a fix round: the earlier findings plus only the fixer's diff, so the reviewer
  * checks the fix instead of re-reading the whole change (and finding new nits in it) every round.
  */
-export function reReviewPrompt(task: string, earlier: Finding[], fixDiff: string, base: string, notes = ""): string {
+export function reReviewPrompt(task: string, earlier: Finding[], fixDiff: string, base: string, changedFiles: string[], notes = ""): string {
   const listed = earlier.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n");
   return [
     "You reviewed a change another AI agent made and reported problems; a fixer has since edited it. Do not edit any files.",
     `The task was: ${task}`,
     `Your earlier findings:\n${listed || "(none: only the tests failed)"}`,
-    `Check that each earlier finding is really fixed, and that the fix broke nothing and left no part of the task undone. The diff below is only the fixer's change; run \`git diff ${base}..HEAD\` in this directory to see the whole change. Report real problems that remain or that the fix caused; ignore style.`,
+    `Check that each earlier finding is really fixed, and that the fix broke nothing and left no part of the task undone. The diff below is only the fixer's change. The whole change touches: ${changedFiles.join(", ") || "(no files)"}; read those files (or run \`git diff ${base}..HEAD\` if you can) for context. Report real problems that remain or that the fix caused; ignore style.`,
     FORMAT,
     notes,
     "The fixer's diff:",

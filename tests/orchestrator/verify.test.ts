@@ -16,6 +16,14 @@ describe("runVerify", () => {
     expect(await runVerify(tmpdir(), [], 1000)).toEqual({ ok: true, output: "" });
   });
 
+  it("kills a command that runs past its timeout", async () => {
+    const started = Date.now();
+    const r = await runVerify(tmpdir(), [`node -e "setTimeout(() => {}, 20000)"`], 800);
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("timed out");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it("does not block the event loop while a command runs", async () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 20);
@@ -59,13 +67,14 @@ describe("reviewPrompt", () => {
 describe("reReviewPrompt", () => {
   it("lists the earlier findings and carries only the fix diff, with the way to see the whole change", () => {
     const prior: Finding[] = [{ severity: "high", file: "a.ts", line: 3, issue: "crash on empty input" }];
-    const p = reReviewPrompt("add x", prior, "diff --git a/a.ts b/a.ts\n+guard", "abc123");
+    const p = reReviewPrompt("add x", prior, "diff --git a/a.ts b/a.ts\n+guard", "abc123", ["a.ts", "b.ts"]);
     expect(p).toContain("add x");
+    expect(p).toContain("a.ts, b.ts");
     expect(p).toContain("[high] a.ts:3 crash on empty input");
     expect(p).toContain("+guard");
     expect(p).toContain("git diff abc123..HEAD");
     expect(p).toContain("JSON array");
-    expect(reReviewPrompt("t", [], "", "b")).toContain("(the fixer changed nothing)");
+    expect(reReviewPrompt("t", [], "", "b", [])).toContain("(the fixer changed nothing)");
   });
 });
 

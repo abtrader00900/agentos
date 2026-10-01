@@ -435,36 +435,46 @@ async function review(c) {
     const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
     const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
     const last = s.reviewed;
+    // nothing changed since the last review: its findings still stand, deterministically
+    if (last?.head === head)
+        return { ran: true, findings: last.findings, head, kind: "unchanged" };
     const scoped = !!last && tryGit(s.runWorktree, ["merge-base", "--is-ancestor", last.head, "HEAD"]).ok;
     const prompt = scoped
-        ? reReviewPrompt(s.task, blocking(last.findings), git(s.runWorktree, ["diff", `${last.head}..HEAD`]), s.base, notes(c, "reviewer"))
+        ? reReviewPrompt(s.task, blocking(last.findings), git(s.runWorktree, ["diff", `${last.head}..HEAD`]), s.base, git(s.runWorktree, ["diff", "--name-only", `${s.base}..HEAD`]).split("\n").filter(Boolean), notes(c, "reviewer"))
         : reviewPrompt(s.task, git(s.runWorktree, ["diff", `${s.base}..HEAD`]), notes(c, "reviewer"));
     const res = await agentRunner(c, reviewer, "read")({ prompt, cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
     if (res.rateLimited)
-        return { rateLimited: true };
+        return { ran: false, rateLimited: true, error: `the reviewer (${reviewer}) hit a rate limit` };
     if (!res.ok)
-        return { rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}`, findings: [], head, scoped };
+        return { ran: false, rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}` };
     const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
-    return { rateLimited: false, findings, head, scoped };
+    return { ran: true, findings, head, kind: scoped ? "fix" : "full" };
 }
 async function verify(c) {
     const { s, cfg } = c;
+    const before = git(s.runWorktree, ["rev-parse", "HEAD"]);
     // tests and review at the same time: failing tests and review findings reach the fixer in one round
-    const [v, r] = await Promise.all([runVerify(s.runWorktree, cfg.verify, minutes(cfg.subtaskMinutes)), review(c)]);
+    const [v, r] = await Promise.all([runVerify(s.runWorktree, cfg.verify, minutes(cfg.subtaskMinutes), c.live), review(c)]);
     s.verifyOk = v.ok;
     s.verifyOutput = redact(v.output);
-    if (r.rateLimited)
-        return pause(c, "verifying");
-    // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so.
-    // Failing tests go to the fixer anyway, and the next review starts from the last one that ran.
-    if (r.error && v.ok)
-        return move(c, "needs_human", r.error);
-    s.findings = r.findings;
-    if (!r.error)
+    // the review saw `before`; a commit made meanwhile would reach the PR unreviewed
+    if (git(s.runWorktree, ["rev-parse", "HEAD"]) !== before) {
+        return move(c, "needs_human", "a verify command committed to the run branch while the review ran; put commands that change files in orchestrator.build");
+    }
+    if (!r.ran) {
+        // with passing tests a review must run: pause for a limit, and no PR on a failed reviewer's say-so.
+        // Failing tests go to the fixer anyway; the next review starts from the last one that ran.
+        if (v.ok)
+            return r.rateLimited ? pause(c, "verifying") : move(c, "needs_human", r.error);
+        s.findings = [{ severity: "low", file: "", line: 0, issue: `the review did not run: ${r.error}` }];
+    }
+    else {
+        s.findings = r.findings;
         s.reviewed = { head: r.head, findings: r.findings };
+    }
     saveRun(c.root, s);
     logEvent(c.root, s.id, {
-        type: "verify", ok: v.ok, findings: s.findings, review: r.error ? "failed" : r.scoped ? "fix" : "full",
+        type: "verify", ok: v.ok, findings: s.findings, review: r.ran ? r.kind : "failed",
         ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: excerpt(s.verifyOutput, 600) }),
     });
     if (v.ok && blocking(s.findings).length === 0)
@@ -517,6 +527,9 @@ async function gate(c) {
     const fetched = tryGit(root, ["fetch", "-q", "origin", s.baseBranch]).ok;
     const latest = git(root, ["rev-parse", fetched ? `origin/${s.baseBranch}` : s.baseBranch]);
     if (!tryGit(s.runWorktree, ["merge-base", "--is-ancestor", latest, "HEAD"]).ok) {
+        // saved before the merge: an engine that dies after it must not resume into a review of "the fix" that is really the base
+        s.reviewed = undefined;
+        saveRun(root, s);
         const m = mergeBranch(s.runWorktree, latest, `agentos: merge ${s.baseBranch}`);
         const merged = m.ok ? "ok" : await resolveConflicts(c, m.conflicts, s.subtasks[0]?.agent ?? c.cfg.workers[0]);
         if (merged === "paused")
@@ -524,12 +537,11 @@ async function gate(c) {
         if (merged === "failed")
             return move(c, "needs_human", `${s.baseBranch} moved during the run and merging it conflicted`);
         s.base = latest;
-        s.reviewed = undefined; // the merge brought in code no review has seen
         return move(c, "verifying"); // the tests must pass on the new base too
     }
     // built output goes in before the scan, so it is scanned too, and before the push, so it reaches the branch
     if (c.cfg.build.length) {
-        const b = await runVerify(s.runWorktree, c.cfg.build, minutes(c.cfg.subtaskMinutes));
+        const b = await runVerify(s.runWorktree, c.cfg.build, minutes(c.cfg.subtaskMinutes), c.live);
         logEvent(root, s.id, { type: "build", ok: b.ok, output: excerpt(redact(b.output), 600) });
         if (!b.ok)
             return move(c, "needs_human", `build command failed: ${excerpt(redact(b.output), 600)}`);
