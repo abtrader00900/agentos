@@ -16,7 +16,7 @@ export declare const registryFile: (home?: string) => string;
 /** readable but unique enough to appear in a URL */
 export declare function projectId(root: string): string;
 /** Add the folder if it is new, otherwise just refresh lastSeen. Returns the stored entry. */
-export declare function registerProject(root: string, home?: string): Project;
+export declare function registerProject(root: string, home?: string): Project | undefined;
 export declare const listProjects: (home?: string) => Array<Project & {
     missing: boolean;
 }>;

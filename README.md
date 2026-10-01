@@ -93,6 +93,7 @@ Leave the version out of `agent.config.yaml`: `sync` pins the servers to the CLI
 | `agentos handoff --to <harness> --task "..."` | Context bundle export (task, decisions, memory, git) |
 | `agentos handoff --clear` | Kaam khatam: `HANDOFF.md` hatao (bundle `.agentos/handoffs/` mein rehta hai), phir `agentos sync` |
 | `agentos learn [--apply]` | Git history se rule suggestions |
+| `agentos ui [--port <n>] [--no-open]` | Local dashboard (default port `4455`; `--no-open` browser nahi kholta) |
 | `agentos mcp memory \| supersearch \| codegraph` | MCP servers (stdio — har harness ke liye) |
 
 ### MCP Tools
@@ -279,6 +280,29 @@ learning:            # optional; these are the defaults
   maxLessonsInPrompt: 5
   skillAfterRuns: 3
 ```
+
+## Dashboard
+
+Start the local dashboard with:
+
+```bash
+agentos ui [--port <n>] [--no-open]
+```
+
+The default port is `4455`; `--no-open` keeps the browser closed. The command prints `agentos dashboard: http://127.0.0.1:<port>/?t=<token>`, where the token is a fresh random 32-byte hex value for each `agentos ui` process. Opening that URL sets an `HttpOnly; SameSite=Strict` cookie and redirects to `/`. After that, every page and API request needs the cookie; scripts can use the token as a Bearer token instead. Token comparison is constant-time.
+
+The server listens only on `127.0.0.1`. Its `Host` header must be `127.0.0.1:<port>` or `localhost:<port>`, which blocks DNS rebinding. `POST` and `DELETE` requests also need a matching `Origin` and `application/json`, and request bodies are capped at 16 KB. Static files come only from the packaged `ui/` folder. The frontend never builds HTML from strings (no `innerHTML`) and uses no inline scripts or styles. Its CSP is `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`.
+
+Projects come from `~/.agentos/projects.json`; every `agentos run` registers its project there. A folder that no longer exists is marked `missing` and can be removed from the list without touching the folder itself.
+
+- **All projects:** one card per project with running, needs-you, pending lessons, skill drafts, and the week's runs, PRs and cost, plus a "Needs you" list.
+- **Runs:** task, status, fix rounds, cost and age, newest first; it refreshes automatically while a run is active.
+- **Run detail:** status, fix round, elapsed time, cost and agents; Cancel while running or Resume when possible; stage bar, subtasks, last verify result, review findings, lessons used and PR link; live SSE events with a "Show agent output" toggle, plus "Show diff".
+- **Lessons:** pending lessons first with Approve and Forget, safety-held lessons marked, then active lessons with Promote and Forget.
+- **Skill drafts:** kind, description and full `SKILL.md`, with Approve and Reject.
+- **New run:** task box, preflight problems and Start run; starting opens the run detail page.
+
+Runs are detached processes. Closing the dashboard or stopping `agentos ui` does not stop a run; reopen the dashboard and the run is still there.
 
 ## Storage
 

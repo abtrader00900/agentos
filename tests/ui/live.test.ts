@@ -30,7 +30,7 @@ function stream(p: string, headers: Record<string, string>, until: (text: string
 beforeEach(async () => {
   t = await startTestServer();
   repo = makeRepo();
-  pid = registerProject(repo.root, t.home).id;
+  pid = registerProject(repo.root, t.home)!.id;
   saveRun(repo.root, run("s1"));
   logEvent(repo.root, "s1", { type: "status", status: "planning" });
   logEvent(repo.root, "s1", { type: "status", status: "working" });
