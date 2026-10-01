@@ -308,8 +308,8 @@
     return new Promise((resolve) => {
       let tries = 0;
       const attempt = async () => {
-        const last = ++tries > START_TRIES;
-        const run = await api(runApi(p, id), last ? null : { allow404: true });
+        // the try after the last one lets the 404 banner itself, like any other error
+        const run = await api(runApi(p, id), { allow404: ++tries <= START_TRIES });
         if (stale(seq)) return resolve(null);
         if (run === NOT_FOUND) {
           clear(main);
