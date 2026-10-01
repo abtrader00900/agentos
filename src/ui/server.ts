@@ -20,7 +20,7 @@ export interface UiOptions {
   home?: string;                                   // registry home (tests)
   staticDir?: string;                              // default: <package>/ui (works from src/ and dist/)
   // injection points for Tasks 3-5 (defaults are the real implementations)
-  spawnRun?: (root: string, id: string, task: string) => void;
+  spawnRun?: (root: string, id: string, task: string, quick?: boolean) => void;
   spawnResume?: (root: string, id: string) => void;
   preflight?: (root: string) => void;              // throws the reason
 }

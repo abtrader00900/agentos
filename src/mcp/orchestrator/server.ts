@@ -9,13 +9,18 @@ import { cancelRun } from "../../orchestrator/engine.js";
 import { runLine } from "../../orchestrator/report.js";
 import { preflight } from "../../commands/run.js";
 
+/** Options go before "--"; everything after it is the task text. */
+export function runArgs(id: string, task: string, quick?: boolean): string[] {
+  return ["run", "--id", id, ...(quick ? ["--quick"] : []), "--", task];
+}
+
 /**
  * `agentos run --id <id> -- <task>` as a detached process: the run outlives the chat that asked for it.
  * No shell, so the task text is never parsed; "--" keeps a task that starts with a dash from being read as an option.
  */
-export function spawnDetachedRun(root: string, id: string, task: string): void {
+export function spawnDetachedRun(root: string, id: string, task: string, quick?: boolean): void {
   const cli = fileURLToPath(new URL("../../cli.js", import.meta.url));
-  spawn(process.execPath, [cli, "run", "--id", id, "--", task], { cwd: root, detached: true, stdio: "ignore", windowsHide: true }).unref();
+  spawn(process.execPath, [cli, ...runArgs(id, task, quick)], { cwd: root, detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
