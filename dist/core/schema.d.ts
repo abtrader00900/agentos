@@ -142,6 +142,57 @@ export declare const learningSchema: z.ZodObject<{
     skillAfterRuns?: number | undefined;
 }>;
 export type LearningConfig = z.infer<typeof learningSchema>;
+/** agentos daemon (PRD 4): what the daemon may do in this project; off unless enabled */
+export declare const daemonScheduleSchema: z.ZodObject<{
+    /** 5-field cron, local time, e.g. "0 2 * * *" (checked by the daemon and doctor) */
+    cron: z.ZodString;
+    task: z.ZodString;
+    quick: z.ZodDefault<z.ZodBoolean>;
+}, "strip", z.ZodTypeAny, {
+    cron: string;
+    task: string;
+    quick: boolean;
+}, {
+    cron: string;
+    task: string;
+    quick?: boolean | undefined;
+}>;
+export declare const daemonSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    /** watch this project's agentos/run-* PRs and fix failed CI on the same branch */
+    ciFix: z.ZodDefault<z.ZodBoolean>;
+    schedules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        /** 5-field cron, local time, e.g. "0 2 * * *" (checked by the daemon and doctor) */
+        cron: z.ZodString;
+        task: z.ZodString;
+        quick: z.ZodDefault<z.ZodBoolean>;
+    }, "strip", z.ZodTypeAny, {
+        cron: string;
+        task: string;
+        quick: boolean;
+    }, {
+        cron: string;
+        task: string;
+        quick?: boolean | undefined;
+    }>, "many">>;
+}, "strip", z.ZodTypeAny, {
+    enabled: boolean;
+    ciFix: boolean;
+    schedules: {
+        cron: string;
+        task: string;
+        quick: boolean;
+    }[];
+}, {
+    enabled?: boolean | undefined;
+    ciFix?: boolean | undefined;
+    schedules?: {
+        cron: string;
+        task: string;
+        quick?: boolean | undefined;
+    }[] | undefined;
+}>;
+export type DaemonConfig = z.infer<typeof daemonSchema>;
 export declare const agentConfigSchema: z.ZodObject<{
     /** Project display name */
     project: z.ZodObject<{
@@ -313,6 +364,42 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxLessonsInPrompt?: number | undefined;
         skillAfterRuns?: number | undefined;
     }>>;
+    /** agentos daemon — absent means the daemon ignores this project */
+    daemon: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        /** watch this project's agentos/run-* PRs and fix failed CI on the same branch */
+        ciFix: z.ZodDefault<z.ZodBoolean>;
+        schedules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            /** 5-field cron, local time, e.g. "0 2 * * *" (checked by the daemon and doctor) */
+            cron: z.ZodString;
+            task: z.ZodString;
+            quick: z.ZodDefault<z.ZodBoolean>;
+        }, "strip", z.ZodTypeAny, {
+            cron: string;
+            task: string;
+            quick: boolean;
+        }, {
+            cron: string;
+            task: string;
+            quick?: boolean | undefined;
+        }>, "many">>;
+    }, "strip", z.ZodTypeAny, {
+        enabled: boolean;
+        ciFix: boolean;
+        schedules: {
+            cron: string;
+            task: string;
+            quick: boolean;
+        }[];
+    }, {
+        enabled?: boolean | undefined;
+        ciFix?: boolean | undefined;
+        schedules?: {
+            cron: string;
+            task: string;
+            quick?: boolean | undefined;
+        }[] | undefined;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     project: {
         name: string;
@@ -365,6 +452,15 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxLessonsInPrompt: number;
         skillAfterRuns: number;
     } | undefined;
+    daemon?: {
+        enabled: boolean;
+        ciFix: boolean;
+        schedules: {
+            cron: string;
+            task: string;
+            quick: boolean;
+        }[];
+    } | undefined;
 }, {
     project: {
         name: string;
@@ -416,6 +512,15 @@ export declare const agentConfigSchema: z.ZodObject<{
         retroAgent?: "codex" | "claude" | undefined;
         maxLessonsInPrompt?: number | undefined;
         skillAfterRuns?: number | undefined;
+    } | undefined;
+    daemon?: {
+        enabled?: boolean | undefined;
+        ciFix?: boolean | undefined;
+        schedules?: {
+            cron: string;
+            task: string;
+            quick?: boolean | undefined;
+        }[] | undefined;
     } | undefined;
 }>;
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
