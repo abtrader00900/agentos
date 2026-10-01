@@ -713,7 +713,7 @@
     clear(main);
     main.appendChild(text("p", "muted", L("common.loading")));
     const jobs = await api("/api/queue");
-    const projects = await api("/api/projects");
+    const projects = jobs && await api("/api/projects");   // a second request would clear the first one's banner
     if (stale(seq)) return;
     if (!jobs || !projects) { clear(main); return; }   // the banner says why
     clear(main);
@@ -825,7 +825,7 @@
     const main = document.getElementById("main");
     document.getElementById("sidebar").classList.remove("open");
     const projects = await api("/api/projects");
-    const daemon = await api("/api/daemon");
+    const daemon = projects && await api("/api/daemon");   // a second request would clear the first one's banner
     if (stale(seq)) return;
     renderSidebar(projects || [], r, daemon);
     if (r.screen === "runs" && r.id) await renderRun(main, r.p, r.id, seq);
