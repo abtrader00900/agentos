@@ -258,6 +258,52 @@ mcpServers:
     args: ["-y", "@basit0090/agent-os@0.3.0", "mcp", "orchestrator"]
 ```
 
+## 24/7: `agentos daemon`
+
+The daemon keeps agentos working while you are away: it fires the schedules you set, fixes failed CI on agentos's own pull requests, and runs the jobs you queue — one at a time, within a daily cap. Every job still ends at a pull request; nothing merges, deploys or pushes your default branch.
+
+Turn it on per project in `agent.config.yaml` (a project without this block is ignored, registered or not):
+
+```yaml
+daemon:
+  enabled: true            # without this the daemon ignores the project
+  ciFix: true              # watch this project's agentos/run-* PRs and fix failed CI
+  schedules:
+    - cron: "0 2 * * *"    # 02:00 every night, local time (5-field cron)
+      task: "update dependencies' patch versions and keep npm test green"
+      quick: false
+```
+
+```bash
+agentos daemon start                      # spawn the loop in the background; it logs to ~/.agentos/daemon.log
+agentos daemon status                     # running? last tick, runs today, the log path
+agentos daemon stop                       # stops the loop; a run in flight keeps going and the next start adopts it
+agentos daemon install                    # Windows: a Task Scheduler task that starts it at logon (uninstall undoes it)
+agentos daemon run                        # the loop in the foreground (what start and the logon task run)
+
+agentos queue add "add a discount field"  # queue a job for the project in this folder (--project, --quick)
+agentos queue list                        # the last 50 jobs, newest first (--json)
+agentos queue remove <id>                 # only a job that has not started
+```
+
+The machine-wide limits live in `~/.agentos/daemon.yaml` (the file is optional; these are the defaults):
+
+```yaml
+maxRunsPerDay: 6           # jobs started per local calendar day; a resumed job does not count again
+maxCiFixesPerPr: 2         # fix rounds the daemon spends on one pull request
+tickSeconds: 30            # how often it checks schedules and the queue
+ciEverySeconds: 300        # how often it asks gh for failed checks
+pauseMinutesOnLimit: 30    # how long the queue waits after a rate limit
+```
+
+A job also waits while another run is in flight or free RAM is below the project's `orchestrator.minFreeMemoryMb`.
+
+CI fixes work on the pull request they fix: the daemon pushes to that `agentos/run-*` branch only, only as a fast-forward, and opens no second PR. CI log text reaches the agent as quoted, redacted data, never as instructions.
+
+The daemon does nothing while the machine sleeps; a missed schedule fires once on wake. On Windows, `agentos doctor` warns when the AC sleep timeout is not "Never".
+
+Billing: the daemon runs the same agent CLIs you run by hand, so `claude -p` draws from your Claude subscription's usage limits — see Anthropic's "Use the Claude Agent SDK with your Claude plan" (June 2026). The daily cap exists to leave quota for your interactive work.
+
 ## Learning from runs
 
 After every `agentos run`, agentos records what went wrong and how it was fixed: failing checks that a fix round turned green, review findings that were fixed, CLI fallbacks and merge conflicts. A read-only agent turns that into up to three short lessons. Later runs get the relevant lessons in their planner, worker, reviewer and fixer prompts. Your normal Claude and Codex chats see them too, through `memory_recall`.
