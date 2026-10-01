@@ -1,19 +1,20 @@
 import { loadConfig } from "../core/loader.js";
 import { git } from "../orchestrator/workspace.js";
 import { addJob, listJobs, removeJob } from "../daemon/queue.js";
-import { daemonStatus, hasLog, installTask, logFile, runDaemon, startDaemon, stopDaemon, uninstallTask } from "../daemon/service.js";
+import { answering, daemonStatus, hasLog, installTask, logFile, runDaemon, startDaemon, stopDaemon, uninstallTask } from "../daemon/service.js";
 import { getProject, registerProject } from "../ui/projects.js";
 
 export async function daemonCommand(action: string): Promise<void> {
   switch (action) {
-    case "start": console.log(`agentos daemon started (pid ${startDaemon()}) — log: ${logFile()}`); return;
-    case "stop": console.log(stopDaemon() ? "agentos daemon stopped (a run in flight keeps going; the next start adopts it)" : "the daemon is not running"); return;
+    case "start": console.log(`agentos daemon started (pid ${await startDaemon()}) — log: ${logFile()}`); return;
+    case "stop": console.log((await stopDaemon()) ? "agentos daemon stopped (a run in flight keeps going; the next start adopts it)" : "the daemon is not running"); return;
     case "run": return runDaemon();
     case "install": installTask(); console.log('installed: Task Scheduler starts the daemon at logon ("agentos daemon"); undo with: agentos daemon uninstall'); return;
     case "uninstall": uninstallTask(); console.log("removed the logon task"); return;
     case "status": {
       const s = daemonStatus();
-      console.log(s.running ? `running (pid ${s.pid}), last tick ${s.lastTick ?? "—"}` : "stopped — start it with: agentos daemon start");
+      const lock = await answering(undefined, 3000);
+      console.log(lock ? `running (pid ${lock.pid}), last tick ${s.lastTick ?? "—"}` : "stopped — start it with: agentos daemon start");
       console.log(`runs today: ${s.today} / ${s.maxRunsPerDay}${s.pauseUntil && Date.parse(s.pauseUntil) > Date.now() ? ` · paused for a rate limit until ${s.pauseUntil}` : ""}`);
       if (hasLog()) console.log(`log: ${logFile()}`);
       return;
