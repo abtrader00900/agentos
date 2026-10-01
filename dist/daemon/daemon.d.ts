@@ -10,6 +10,8 @@ export interface DaemonDeps {
     log(line: string): void;
     /** whether this daemon still holds its lock (absent: always) */
     owns?(): boolean;
+    /** whether another daemon holds the lock now (absent: never) */
+    otherOwner?(): boolean;
     /** how often an adopted run's lock is checked (default 5 s) */
     pollMs?: number;
 }

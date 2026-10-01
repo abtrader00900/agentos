@@ -90,13 +90,24 @@ describe("daemon tick", { timeout: 30_000 }, () => {
     expect(listJobs(home)[0]).toMatchObject({ status: "running", runId: "theirs" });
   });
 
-  it("leaves the result to the new daemon when it lost its lock while the run was going", async () => {
-    let mine = true;
-    addJob({ projectId: pid, task: "handed over", source: "manual" }, home, clock);
-    const d = new Daemon(deps({ owns: () => mine, launch: async (root, args) => { launched.push(args); mine = false; saveRun(root, runState(args[args.indexOf("--id") + 1], { status: "pr_open", prUrl: "u" })); return 0; } }));
-    await d.tick();
-    await d.idle();
-    expect(listJobs(home)[0].status).toBe("running"); // the adopting daemon finishes it, not us
+  it("leaves the result to a newer daemon that took the lock, but records it itself when nobody did", async () => {
+    let other = false;
+    const run = (taken: boolean) => async (root: string, args: string[]) => {
+      launched.push(args);
+      other = taken; // while the run went on, this daemon was stopped (and maybe replaced)
+      saveRun(root, runState(args[args.indexOf("--id") + 1], { status: "pr_open", prUrl: "u" }));
+      return 0;
+    };
+    const a = addJob({ projectId: pid, task: "handed over", source: "manual" }, home, clock)!;
+    let d = new Daemon(deps({ otherOwner: () => other, launch: run(true) }));
+    await d.tick(); await d.idle();
+    expect(listJobs(home).find((j) => j.id === a.id)!.status).toBe("running"); // the adopting daemon finishes it
+    updateJob(a.id, { status: "done" }, home);
+    const b = addJob({ projectId: pid, task: "nobody took over", source: "manual" }, home, clock)!;
+    other = false;
+    d = new Daemon(deps({ otherOwner: () => other, launch: run(false) }));
+    await d.tick(); await d.idle();
+    expect(listJobs(home).find((j) => j.id === b.id)).toMatchObject({ status: "done", result: "u" }); // never stuck running
   });
 
   it("waits for free memory, and says why once", async () => {

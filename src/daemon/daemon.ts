@@ -20,6 +20,8 @@ export interface DaemonDeps {
   log(line: string): void;
   /** whether this daemon still holds its lock (absent: always) */
   owns?(): boolean;
+  /** whether another daemon holds the lock now (absent: never) */
+  otherOwner?(): boolean;
   /** how often an adopted run's lock is checked (default 5 s) */
   pollMs?: number;
 }
@@ -188,8 +190,9 @@ export class Daemon {
   }
 
   private finish(job: Job, root: string): void {
-    // a stopped daemon lingers until its run ends; the daemon that now holds the lock adopted the run and records it
-    if (this.d.owns && !this.d.owns()) return;
+    // a stopped daemon lingers until its run ends: when a newer daemon holds the lock it adopted the run and
+    // records it; with no daemon holding it, nobody else will, so this one still does
+    if (this.d.otherOwner?.()) return;
     const now = this.d.now();
     let s;
     try {
