@@ -8,6 +8,7 @@ export declare function run(task: string, opts: {
     cancel?: string;
     status?: string;
     id?: string;
+    quick?: boolean;
     cwd?: string;
 }): Promise<number>;
 /** agentos runs */

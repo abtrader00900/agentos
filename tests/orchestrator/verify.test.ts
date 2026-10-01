@@ -1,19 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
-import { runVerify, parseFindings, blocking, reviewPrompt, excerpt } from "../../src/orchestrator/verify.js";
+import { runVerify, parseFindings, blocking, reviewPrompt, reReviewPrompt, excerpt } from "../../src/orchestrator/verify.js";
 import type { Finding } from "../../src/orchestrator/types.js";
 
 describe("runVerify", () => {
-  it("runs commands in order and stops at the first failure", () => {
-    const r = runVerify(tmpdir(), [`node -e "console.log('first-ran')"`, `node -e "process.exit(3)"`, `node -e "console.log('third-ran')"`], 30_000);
+  it("runs commands in order and stops at the first failure", async () => {
+    const r = await runVerify(tmpdir(), [`node -e "console.log('first-ran')"`, `node -e "process.exit(3)"`, `node -e "console.log('third-ran')"`], 30_000);
     expect(r.ok).toBe(false);
     expect(r.output).toContain("first-ran\n");
     expect(r.output).toContain("FAILED");
     expect(r.output).not.toContain("third-ran\n");
   });
 
-  it("passes with no commands", () => {
-    expect(runVerify(tmpdir(), [], 1000)).toEqual({ ok: true, output: "" });
+  it("passes with no commands", async () => {
+    expect(await runVerify(tmpdir(), [], 1000)).toEqual({ ok: true, output: "" });
+  });
+
+  it("does not block the event loop while a command runs", async () => {
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 20);
+    await runVerify(tmpdir(), [`node -e "setTimeout(() => {}, 600)"`], 30_000);
+    clearInterval(timer);
+    expect(ticks).toBeGreaterThan(5);
   });
 });
 
@@ -45,6 +53,19 @@ describe("reviewPrompt", () => {
     expect(p).toContain("add x");
     expect(p).toContain("+x");
     expect(reviewPrompt("t", "y".repeat(200_000))).toContain("(diff truncated)");
+  });
+});
+
+describe("reReviewPrompt", () => {
+  it("lists the earlier findings and carries only the fix diff, with the way to see the whole change", () => {
+    const prior: Finding[] = [{ severity: "high", file: "a.ts", line: 3, issue: "crash on empty input" }];
+    const p = reReviewPrompt("add x", prior, "diff --git a/a.ts b/a.ts\n+guard", "abc123");
+    expect(p).toContain("add x");
+    expect(p).toContain("[high] a.ts:3 crash on empty input");
+    expect(p).toContain("+guard");
+    expect(p).toContain("git diff abc123..HEAD");
+    expect(p).toContain("JSON array");
+    expect(reReviewPrompt("t", [], "", "b")).toContain("(the fixer changed nothing)");
   });
 });
 

@@ -18,7 +18,9 @@ export interface EngineDeps {
 /** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
 export declare function assertCleanCheckout(root: string): void;
 /** Preflight, create the run record, and drive it until it ends or pauses. */
-export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string): Promise<RunState>;
+export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string, opts?: {
+    quick?: boolean;
+}): Promise<RunState>;
 /** Continue a paused run, or one whose engine died mid-step. */
 export declare function resumeRun(root: string, id: string, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState>;
 /** Whether an engine holds the run's lock: "live" (its PID is running), "stale" (a dead engine's) or "free". */

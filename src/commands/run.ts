@@ -52,7 +52,7 @@ function recordFailedStart(root: string, id: string, task: string, e: Error): vo
 }
 
 /** agentos run: start, resume, cancel or inspect a run. Returns the exit code. */
-export async function run(task: string, opts: { resume?: string; cancel?: string; status?: string; id?: string; cwd?: string }): Promise<number> {
+export async function run(task: string, opts: { resume?: string; cancel?: string; status?: string; id?: string; quick?: boolean; cwd?: string }): Promise<number> {
   const root = repoRoot(opts.cwd);
   try { registerProject(root); } catch { /* a registry problem never blocks a run */ }
   if (opts.status) {
@@ -77,7 +77,7 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
   } else {
     try {
       const cfg = preflight(root);
-      s = await startRun(root, task, cfg, deps(cfg), opts.id);
+      s = await startRun(root, task, cfg, deps(cfg), opts.id, { quick: opts.quick });
     } catch (e) {
       if (opts.id) recordFailedStart(root, opts.id, task, e as Error);
       throw e;

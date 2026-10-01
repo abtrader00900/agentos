@@ -6,14 +6,14 @@ import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import { lessonsFor } from "../learning/inject.js";
 import { learnFromRun } from "../learning/learn-run.js";
 import type { Role } from "../learning/lessons.js";
-import type { AgentName, Runner, RunnerRequest, Subtask } from "./types.js";
+import type { AgentName, Finding, Plan, Runner, RunnerRequest, Subtask } from "./types.js";
 import {
   type RunState, type RunStatus, type SubtaskState, TERMINAL, newRunId, runDir, saveRun, loadRun,
   setStatus, logEvent, requestCancel, cancelRequested,
 } from "./run.js";
 import { makePlan } from "./planner.js";
 import { runScheduled } from "./scheduler.js";
-import { runVerify, parseFindings, blocking, reviewPrompt, excerpt } from "./verify.js";
+import { runVerify, parseFindings, blocking, reviewPrompt, reReviewPrompt, excerpt } from "./verify.js";
 import { scanDiff, redact } from "./safety.js";
 import { finalText, killTree } from "./runners.js";
 import {
@@ -57,7 +57,7 @@ export function assertCleanCheckout(root: string): void {
 }
 
 /** Preflight, create the run record, and drive it until it ends or pauses. */
-export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId()): Promise<RunState> {
+export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId(), opts: { quick?: boolean } = {}): Promise<RunState> {
   if (existsSync(path.join(runDir(root, id), "state.json"))) throw new Error(`run ${id} already exists — pick another id, or resume it`);
   assertCleanCheckout(root);
   deps.gh(root, ["auth", "status"]);
@@ -66,7 +66,7 @@ export async function startRun(root: string, task: string, cfg: OrchestratorConf
   const s: RunState = {
     id, task, status: "queued", baseBranch, base: git(root, ["rev-parse", baseBranch]),
     branch: `agentos/run-${id}`, runWorktree: path.join(runDir(root, id), "wt", "run"),
-    createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [],
+    createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [], ...(opts.quick ? { quick: true } : {}),
   };
   saveRun(root, s);
   logEvent(root, id, { type: "start", task });
@@ -301,19 +301,31 @@ function notes(c: Ctx, role: Role): string {
   }
 }
 
+/** --quick: the whole task as one subtask for the first worker, with no planner call */
+function quickPlan(task: string, agent: AgentName): Plan {
+  const title = task.split("\n")[0].slice(0, 80);
+  return { summary: title, subtasks: [{ id: "main", title, prompt: task, files: [], dependsOn: [], agent }] };
+}
+
 async function plan(c: Ctx): Promise<void> {
   const { s, cfg, root } = c;
+  if (s.quick) return planned(c, quickPlan(s.task, cfg.workers[0]));
   const files = git(s.runWorktree, ["ls-files"]).split("\n").filter(Boolean).slice(0, 300);
   const r = await makePlan(agentRunner(c, cfg.planner, "read"), { task: s.task, facts: recall(root, s.task), files, workers: cfg.workers, notes: notes(c, "planner") }, s.runWorktree, minutes(cfg.subtaskMinutes));
   if (r.rateLimited) return pause(c, "planning");
   if (!r.plan) return move(c, "needs_human", `planner: ${r.error}`);
   if (r.rejected) logEvent(root, s.id, { type: "planner-retry", error: redact(r.rejected).slice(0, 300) });
-  s.plan = r.plan;
-  s.subtasks = r.plan.subtasks.map((t) => ({
+  return planned(c, r.plan);
+}
+
+function planned(c: Ctx, p: Plan): void {
+  const { s, root } = c;
+  s.plan = p;
+  s.subtasks = p.subtasks.map((t) => ({
     id: t.id, agent: t.agent, status: "pending", branch: `${s.branch}-${t.id}`,
     worktree: path.join(runDir(root, s.id), "wt", `sub-${t.id}`),
   }));
-  logEvent(root, s.id, { type: "plan", plan: r.plan });
+  logEvent(root, s.id, { type: "plan", plan: p });
   return move(c, "working");
 }
 
@@ -423,26 +435,41 @@ async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Prom
   return "ok";
 }
 
+type Review = { rateLimited: true } | { rateLimited: false; error?: string; findings: Finding[]; head: string; scoped: boolean };
+
+/** The cross-model review. After a fix round it sees only the fix, checked against its earlier findings. */
+async function review(c: Ctx): Promise<Review> {
+  const { s, cfg } = c;
+  const authors = new Set(s.subtasks.map((t) => t.agent));
+  const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
+  const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
+  const last = s.reviewed;
+  const scoped = !!last && tryGit(s.runWorktree, ["merge-base", "--is-ancestor", last.head, "HEAD"]).ok;
+  const prompt = scoped
+    ? reReviewPrompt(s.task, blocking(last!.findings), git(s.runWorktree, ["diff", `${last!.head}..HEAD`]), s.base, notes(c, "reviewer"))
+    : reviewPrompt(s.task, git(s.runWorktree, ["diff", `${s.base}..HEAD`]), notes(c, "reviewer"));
+  const res = await agentRunner(c, reviewer, "read")({ prompt, cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+  if (res.rateLimited) return { rateLimited: true };
+  if (!res.ok) return { rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}`, findings: [], head, scoped };
+  const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
+  return { rateLimited: false, findings, head, scoped };
+}
+
 async function verify(c: Ctx): Promise<void> {
   const { s, cfg } = c;
-  const v = runVerify(s.runWorktree, cfg.verify, minutes(cfg.subtaskMinutes));
+  // tests and review at the same time: failing tests and review findings reach the fixer in one round
+  const [v, r] = await Promise.all([runVerify(s.runWorktree, cfg.verify, minutes(cfg.subtaskMinutes)), review(c)]);
   s.verifyOk = v.ok;
   s.verifyOutput = redact(v.output);
-  s.findings = [];
-  if (v.ok) {
-    // tests first; the review only runs on a change that passes them
-    const authors = new Set(s.subtasks.map((t) => t.agent));
-    const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
-    const diff = git(s.runWorktree, ["diff", `${s.base}..HEAD`]);
-    const res = await agentRunner(c, reviewer, "read")({ prompt: reviewPrompt(s.task, diff, notes(c, "reviewer")), cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
-    if (res.rateLimited) return pause(c, "verifying");
-    // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so
-    if (!res.ok) return move(c, "needs_human", `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}`);
-    s.findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
-  }
+  if (r.rateLimited) return pause(c, "verifying");
+  // a reviewer that crashed, timed out or was killed reviewed nothing: no PR on its say-so.
+  // Failing tests go to the fixer anyway, and the next review starts from the last one that ran.
+  if (r.error && v.ok) return move(c, "needs_human", r.error);
+  s.findings = r.findings;
+  if (!r.error) s.reviewed = { head: r.head, findings: r.findings };
   saveRun(c.root, s);
   logEvent(c.root, s.id, {
-    type: "verify", ok: v.ok, findings: s.findings,
+    type: "verify", ok: v.ok, findings: s.findings, review: r.error ? "failed" : r.scoped ? "fix" : "full",
     ...(v.ok ? {} : { command: /^\$ (.+?)\s+✗ FAILED/m.exec(s.verifyOutput)?.[1] ?? "", output: excerpt(s.verifyOutput, 600) }),
   });
   if (v.ok && blocking(s.findings).length === 0) return gate(c);
@@ -502,11 +529,12 @@ async function gate(c: Ctx): Promise<void> {
     if (merged === "paused") return pause(c, "verifying");
     if (merged === "failed") return move(c, "needs_human", `${s.baseBranch} moved during the run and merging it conflicted`);
     s.base = latest;
+    s.reviewed = undefined; // the merge brought in code no review has seen
     return move(c, "verifying"); // the tests must pass on the new base too
   }
   // built output goes in before the scan, so it is scanned too, and before the push, so it reaches the branch
   if (c.cfg.build.length) {
-    const b = runVerify(s.runWorktree, c.cfg.build, minutes(c.cfg.subtaskMinutes));
+    const b = await runVerify(s.runWorktree, c.cfg.build, minutes(c.cfg.subtaskMinutes));
     logEvent(root, s.id, { type: "build", ok: b.ok, output: excerpt(redact(b.output), 600) });
     if (!b.ok) return move(c, "needs_human", `build command failed: ${excerpt(redact(b.output), 600)}`);
     commitAll(s.runWorktree, "agentos: build");

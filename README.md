@@ -235,12 +235,15 @@ orchestrator:
 
 ```bash
 agentos run "add a discount field to customers"   # plan → parallel agents → tests + review → PR
+agentos run --quick "fix the typo in the footer"    # small task: no planner, one agent does it all
 agentos runs                                        # list runs
 agentos run --resume <id>                           # continue after a rate limit or a crash
 agentos run --cancel <id>
 ```
 
 The `build` commands run in the run worktree right before the PR and their output is committed as `agentos: build`, so generated files you keep in git go out with the change; a failing build command stops the run with that command's output instead of opening a PR.
+
+The tests and the cross-model review run at the same time, so a fix round gets failing checks and review findings together. After a fix round the reviewer sees only the fixer's change, checked against its earlier findings; a full review runs again whenever the base branch is merged in.
 
 A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
 

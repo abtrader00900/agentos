@@ -38,6 +38,10 @@ export interface RunState {
   findings: Finding[];
   verifyOk?: boolean;
   verifyOutput?: string;
+  /** --quick: no planner, the whole task is one subtask */
+  quick?: boolean;
+  /** the last review that ran: the commit it saw and what it found; the next one checks only the fix since */
+  reviewed?: { head: string; findings: Finding[] };
   prUrl?: string;
   enginePid?: number;
   /** lessons injected into this run's prompts (PRD 2) */
