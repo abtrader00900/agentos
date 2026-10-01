@@ -678,6 +678,7 @@
 
     // a textarea is not one of h()'s props, so its value and handler are set here
     const area = h("textarea", { className: "task" });
+    const quick = h("input", { type: "checkbox" });
     const counter = text("p", "note", "");
     const start = h("button", { className: "btn" }, L("startRun"));
     const sync = () => {
@@ -688,12 +689,12 @@
     area.oninput = sync;
     start.onclick = async () => {
       start.disabled = true;
-      const r = await api(projectApi(p) + "/runs", { method: "POST", body: { task: area.value.trim() } });
+      const r = await api(projectApi(p) + "/runs", { method: "POST", body: { task: area.value.trim(), ...(quick.checked ? { quick: true } : {}) } });
       if (!r || !r.id) { sync(); return; }       // the banner says why; the task stays for a retry
       location.hash = "#/p/" + encodeURIComponent(p) + "/runs/" + encodeURIComponent(r.id);
     };
 
-    main.appendChild(section(L("new.task"), area, counter));
+    main.appendChild(section(L("new.task"), area, counter, h("label", { className: "quick" }, quick, L("new.quick"))));
     if (problems.length) main.appendChild(section(L("new.problems"), h("ul", { className: "problems" }, problems.map((s) => h("li", null, s)))));
     main.appendChild(h("div", { className: "acts" }, start));
     sync();

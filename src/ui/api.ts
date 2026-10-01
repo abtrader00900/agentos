@@ -253,8 +253,9 @@ export const actionRoutes: Array<{ method: string; pattern: RegExp; handler: Rou
     method: "POST",
     pattern: /^\/api\/p\/([^/]+)\/runs$/,
     handler: act(async (root, _m, body, opts) => {
-      const task = (body as { task?: unknown } | undefined)?.task;
+      const { task, quick } = (body ?? {}) as { task?: unknown; quick?: unknown };
       if (typeof task !== "string" || task.trim().length < 3 || task.length > 2000) throw new Http(400, "task must be 3-2000 characters");
+      if (quick !== undefined && typeof quick !== "boolean") throw new Http(400, "quick must be a boolean");
       // the detached run has no one to tell why it could not start, so the reason is reported here
       try {
         (opts.preflight ?? realPreflight)(root);
@@ -262,7 +263,7 @@ export const actionRoutes: Array<{ method: string; pattern: RegExp; handler: Rou
         throw new Http(409, (e as Error).message);
       }
       const id = newRunId();
-      (opts.spawnRun ?? spawnDetachedRun)(root, id, task);
+      (opts.spawnRun ?? spawnDetachedRun)(root, id, task, quick);
       return { status: 201, json: { id } };
     }),
   },

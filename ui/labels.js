@@ -174,6 +174,7 @@ window.LABELS = {
 
   "new.title": "New run",
   "new.task": "Task",
+  "new.quick": "Quick: one agent, no planner",
   "new.counter": "characters (3 minimum)",
   "new.problems": "Cannot start a run yet",
 };

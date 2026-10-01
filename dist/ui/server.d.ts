@@ -11,7 +11,7 @@ export interface UiOptions {
     token: string;
     home?: string;
     staticDir?: string;
-    spawnRun?: (root: string, id: string, task: string) => void;
+    spawnRun?: (root: string, id: string, task: string, quick?: boolean) => void;
     spawnResume?: (root: string, id: string) => void;
     preflight?: (root: string) => void;
 }

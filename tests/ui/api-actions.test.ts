@@ -8,6 +8,7 @@ import { registerProject, listProjects } from "../../src/ui/projects.js";
 import { saveRun, loadRun, runDir, type RunState } from "../../src/orchestrator/run.js";
 import { saveLessons, listLessons } from "../../src/learning/lessons.js";
 import { draftsDir } from "../../src/learning/skilldraft.js";
+import { runArgs } from "../../src/mcp/orchestrator/server.js";
 
 let t: Awaited<ReturnType<typeof startTestServer>>;
 let repo: ReturnType<typeof makeRepo>;
@@ -20,7 +21,7 @@ beforeEach(async () => {
   spawned = [];
   preflightError = null;
   t = await startTestServer({
-    spawnRun: (root, id, task) => spawned.push(["run", root, id, task]),
+    spawnRun: (root, id, task, quick) => spawned.push(["run", root, id, task, String(!!quick)]),
     spawnResume: (root, id) => spawned.push(["resume", root, id]),
     preflight: () => { if (preflightError) throw new Error(preflightError); },
   });
@@ -35,7 +36,32 @@ describe("actions API", () => {
     expect(r.status).toBe(201);
     const { id } = JSON.parse(r.body);
     expect(id).toMatch(/^\d{14}-[0-9a-f]{4}$/);
-    expect(spawned).toEqual([["run", repo.root, id, "add a profit report"]]);
+    expect(spawned).toEqual([["run", repo.root, id, "add a profit report", "false"]]);
+  });
+
+  it("passes quick through only when asked, and rejects a non-boolean", async () => {
+    const q = await post(t.port, `/api/p/${pid}/runs`, { task: "add a profit report", quick: true });
+    expect(q.status).toBe(201);
+    expect(spawned).toEqual([["run", repo.root, JSON.parse(q.body).id, "add a profit report", "true"]]);
+
+    spawned = [];
+    const plain = await post(t.port, `/api/p/${pid}/runs`, { task: "add a profit report" });
+    expect(plain.status).toBe(201);
+    expect(spawned).toEqual([["run", repo.root, JSON.parse(plain.body).id, "add a profit report", "false"]]);
+
+    spawned = [];
+    const bad = await post(t.port, `/api/p/${pid}/runs`, { task: "add a profit report", quick: "yes" });
+    expect(bad.status).toBe(400);
+    expect(JSON.parse(bad.body).error).toContain("quick");
+    expect(spawned).toEqual([]);
+  });
+
+  it("puts --quick before the -- separator, and only when asked", () => {
+    const args = runArgs("20260101000000-abcd", "add a profit report", true);
+    expect(args.indexOf("--quick")).toBeGreaterThan(-1);
+    expect(args.indexOf("--quick")).toBeLessThan(args.indexOf("--"));
+    expect(args[args.length - 1]).toBe("add a profit report");
+    expect(runArgs("20260101000000-abcd", "add a profit report")).not.toContain("--quick");
   });
 
   it("rejects a bad task and reports preflight problems without starting anything", async () => {
