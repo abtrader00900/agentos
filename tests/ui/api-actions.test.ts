@@ -64,6 +64,12 @@ describe("actions API", () => {
     expect(runArgs("20260101000000-abcd", "add a profit report")).not.toContain("--quick");
   });
 
+  it("puts --onto before the -- separator, and only when asked", () => {
+    const args = runArgs("20260101000000-abcd", "fix ci", true, "agentos/run-x");
+    expect(args).toEqual(["run", "--id", "20260101000000-abcd", "--quick", "--onto", "agentos/run-x", "--", "fix ci"]);
+    expect(runArgs("20260101000000-abcd", "t")).toEqual(["run", "--id", "20260101000000-abcd", "--", "t"]);
+  });
+
   it("rejects a bad task and reports preflight problems without starting anything", async () => {
     expect((await post(t.port, `/api/p/${pid}/runs`, { task: "x" })).status).toBe(400);
     expect((await post(t.port, `/api/p/${pid}/runs`, { task: "y".repeat(2001) })).status).toBe(400);
