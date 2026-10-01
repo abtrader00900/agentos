@@ -14,7 +14,7 @@ A prompt can produce a working demo. A product people pay for needs a dozen laye
 3. **Prove it, don't claim it.** "Done" means lint, typecheck and tests ran and you show the output. Not "should work".
 4. **Never weaken a test to make it pass.** Do not skip, delete, loosen an assertion, or mock away the thing under test. If a test is wrong, say why and ask.
 5. **Report honestly at the end:** what changed (files), what you stubbed or left out, what you assumed, what you could not verify.
-6. **No secrets in code or logs.** Config comes from environment variables, documented (names only) in `.env.example`.
+6. **No secrets in code or logs.** Secrets come from the host's secret store or environment, never the repo; document the names (not values) in `.env.example`. Prefer a managed secret store with rotation once there are paying users.
 7. **Ask before adding a dependency.** Prefer the standard library and what the project already uses.
 8. **Write the decision down.** Any choice that is hard to reverse (database, auth provider, tenancy model, hosting) gets a short record in `docs/decisions/NNNN-title.md`: context, options, choice, why.
 
@@ -51,9 +51,9 @@ For each layer: **Goal** · **Agents miss** · **Owner decides** · **Done when*
 
 **3. Data and storage**
 - Goal: a schema that keeps data correct and each customer's data separate.
-- Agents miss: editing the database by hand, no migrations, floats for money, no tenant/owner column, no indexes for the obvious queries, no backup.
-- Owner decides: database, ID style, money representation (integer minor units), retention and backup schedule.
-- Done when: every change is a migration; money is integer; each tenant-owned table has the owner key and an index; backups run automatically and **one restore has been tested**.
+- Agents miss: editing the database by hand, no migrations, floats for money, no tenant/owner column, no indexes for the obvious queries, no backup, schema changes that break the running version during a deploy.
+- Owner decides: database, ID style, money representation (integer minor units, or exact fixed-precision decimals where the currency or domain needs it — never floats), retention and backup schedule.
+- Done when: every change is a migration, and risky ones go in compatible steps (add new, migrate data, then remove old); money is exact (never float); each tenant-owned table has the owner key and an index, and every query on it is scoped by an authorization rule (row-level security where the database supports it); backups run automatically and **one restore has been tested**.
 
 **4. Authentication and permissions**
 - Goal: the right person sees the right data, always.
@@ -65,7 +65,7 @@ For each layer: **Goal** · **Agents miss** · **Owner decides** · **Done when*
 - Goal: endpoints that validate, authorize and fail predictably.
 - Agents miss: trusting input, leaking stack traces, non-idempotent webhooks, N+1 queries, inconsistent error shapes.
 - Owner decides: REST vs RPC, versioning, error format, which actions need an audit trail.
-- Done when: every endpoint has input validation, an authz check and tests; errors share one shape; webhooks verify signatures and are safe to receive twice.
+- Done when: routes are classified public or protected, and protected ones deny by default; every endpoint validates input and has tests; errors share one shape; webhooks verify signatures and are safe to receive twice.
 
 ### Product
 
@@ -93,7 +93,7 @@ For each layer: **Goal** · **Agents miss** · **Owner decides** · **Done when*
 - Goal: repeatable deploys with a place to try changes before customers see them.
 - Agents miss: deploying from a laptop, no staging, config baked into images, migrations run by hand.
 - Owner decides: provider, region, budget, staging yes/no (default yes once there are paying users).
-- Done when: deploy is one documented command or automatic from the main branch; migrations run as part of it; there is a staging environment or a written reason why not.
+- Done when: deploy is one documented command or automatic from the main branch; migrations run as a controlled step of it and are backward-compatible with the version still running; there is a staging environment or a written reason why not.
 
 ### Harden
 
@@ -101,7 +101,7 @@ For each layer: **Goal** · **Agents miss** · **Owner decides** · **Done when*
 - Goal: no easy way in.
 - Agents miss: missing security headers, open CORS, unescaped output, outdated dependencies, debug mode on in production.
 - Owner decides: compliance needs (e.g. GDPR), data that must be encrypted, who gets production access.
-- Done when: headers set, CORS restricted, debug off, dependency audit clean or triaged, secrets only in the host's env store; a review by a fresh session or second model — and a professional audit before handling sensitive data.
+- Done when: headers set, CORS restricted, debug off, dependency audit clean or triaged, secrets only in the host's secret store; a short threat model of the app exists; an independent review (a fresh session or second model helps, but does not replace it) — and a professional security test before handling sensitive data.
 
 **11. Rate limiting and abuse**
 - Goal: one bad client cannot hurt everyone else or run up your bill.
@@ -121,13 +121,13 @@ For each layer: **Goal** · **Agents miss** · **Owner decides** · **Done when*
 - Goal: you learn about a failure before the customer emails you.
 - Agents miss: logging to a container file that disappears on redeploy, logging secrets or personal data, no error tracker.
 - Owner decides: error tracking service, log retention, what is personal data.
-- Done when: unhandled errors reach a tracker with alerts; logs go to persistent storage with request IDs; no secrets or passwords in logs.
+- Done when: unhandled errors reach a tracker with alerts; structured logs with request IDs go to central, access-controlled storage with a retention period; no secrets, passwords or unneeded personal data in logs.
 
 **14. Monitoring and alerts**
 - Goal: you know the app is up and healthy.
-- Agents miss: a health endpoint that checks nothing, no uptime alerts, no backup monitoring.
+- Agents miss: a health endpoint that checks nothing (or one so deep that a database blip restarts every server), no uptime alerts, no backup monitoring.
 - Owner decides: who gets alerted and how (email, phone), what counts as an incident.
-- Done when: an external uptime check hits a health endpoint that touches the database; alerts reach a person; failed backups alert too.
+- Done when: a shallow liveness check (the process answers) is separate from a readiness/health check that touches the database; an external uptime check watches the readiness one; alerts reach a person; failed backups alert too.
 
 ### Grow
 
@@ -144,17 +144,17 @@ Transactional email (with SPF/DKIM), payments and invoices, analytics, feature f
 ## Pre-launch checklist
 
 - [ ] Scope, architecture and tenancy decisions recorded in `docs/decisions/`
-- [ ] All schema changes are migrations; money is integer; backups automatic **and a restore was tested**
+- [ ] All schema changes are migrations (risky ones in compatible steps); money is exact, never float; backups automatic **and a restore was tested**
 - [ ] Central authorization; per-role tests; cross-tenant "cannot see" test passes
-- [ ] Every endpoint validates input and checks permission; webhooks verified and idempotent
+- [ ] Routes classified public/protected, protected ones deny by default; every endpoint validates input; webhooks verified and idempotent
 - [ ] Every screen has loading/empty/error states and works on a phone
 - [ ] CI blocks merges on lint/typecheck/test failure; default branch protected
 - [ ] Core journeys have end-to-end tests; no skipped tests
 - [ ] Staging exists; deploys and migrations are automatic or one documented command
-- [ ] Security headers, restricted CORS, debug off, dependency audit triaged, secrets only in env
+- [ ] Security headers, restricted CORS, debug off, dependency audit triaged, secrets only in the host's secret store, threat model written
 - [ ] Login/reset/signup and expensive endpoints rate-limited; AI spend capped
 - [ ] Errors go to a tracker with alerts; logs persistent and free of secrets
-- [ ] Uptime check on a real health endpoint; alerts reach a person
+- [ ] Separate liveness and readiness checks; uptime monitoring on readiness; alerts reach a person
 - [ ] Privacy policy, terms, data export/delete path
 
 ## How to use with agentos
