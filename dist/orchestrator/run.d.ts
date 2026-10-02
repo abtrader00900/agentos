@@ -1,3 +1,4 @@
+import type { AgentReport, RiskFlag } from "./gates.js";
 import type { AgentName, Finding, Plan } from "./types.js";
 export declare const RUN_STATUSES: readonly ["queued", "planning", "working", "verifying", "fixing", "paused", "pr_open", "needs_human", "failed", "cancelled"];
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -9,6 +10,8 @@ export interface SubtaskState {
     branch: string;
     worktree: string;
     summary?: string;
+    /** the worker's closing report (PRD 4.5); null when it gave none */
+    report?: AgentReport | null;
 }
 export interface RunState {
     id: string;
@@ -34,9 +37,10 @@ export interface RunState {
     quick?: boolean;
     /** --onto: a CI fix that lands on this agentos/run-* branch (its open PR) instead of opening a new PR */
     onto?: string;
-    /** the last review that ran: the commit it saw and what it found; the next one checks only the fix since */
+    /** the last review that ran: the commit and the agents' reports it saw, and what it found; the next one checks only the fix since */
     reviewed?: {
         head: string;
+        reports: string;
         findings: Finding[];
     };
     prUrl?: string;
@@ -48,6 +52,10 @@ export interface RunState {
     learned?: "done" | "skipped" | "failed";
     /** a skill draft this run created */
     draft?: string;
+    /** the last fix round's closing report */
+    fixReport?: AgentReport | null;
+    /** risk rules this run's change tripped (flag only; a block stops the run) */
+    risk?: RiskFlag[];
 }
 export declare const runsDir: (root: string) => string;
 export declare function runDir(root: string, id: string): string;
