@@ -52,6 +52,33 @@ export declare const mcpServerRefSchema: z.ZodObject<{
 }>;
 export declare const agentNameSchema: z.ZodEnum<["claude", "codex"]>;
 export type AgentName = z.infer<typeof agentNameSchema>;
+/** a path or size rule that marks a PR for the owner's attention (flag) or stops it before it opens (block) */
+export declare const riskRuleSchema: z.ZodEffects<z.ZodObject<{
+    name: z.ZodString;
+    action: z.ZodEnum<["flag", "block"]>;
+    paths: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    deletedLines: z.ZodOptional<z.ZodNumber>;
+}, "strict", z.ZodTypeAny, {
+    name: string;
+    action: "flag" | "block";
+    paths?: string[] | undefined;
+    deletedLines?: number | undefined;
+}, {
+    name: string;
+    action: "flag" | "block";
+    paths?: string[] | undefined;
+    deletedLines?: number | undefined;
+}>, {
+    name: string;
+    action: "flag" | "block";
+    paths?: string[] | undefined;
+    deletedLines?: number | undefined;
+}, {
+    name: string;
+    action: "flag" | "block";
+    paths?: string[] | undefined;
+    deletedLines?: number | undefined;
+}>;
 /** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
 export declare const orchestratorSchema: z.ZodObject<{
     /** how far a run may go on its own; merge/deploy come in a later release */
@@ -85,6 +112,33 @@ export declare const orchestratorSchema: z.ZodObject<{
         codex?: string | undefined;
         claude?: string | undefined;
     }>>;
+    /** replaces the built-in risk rules (all "flag") when given */
+    risk: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodObject<{
+        name: z.ZodString;
+        action: z.ZodEnum<["flag", "block"]>;
+        paths: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        deletedLines: z.ZodOptional<z.ZodNumber>;
+    }, "strict", z.ZodTypeAny, {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }, {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }>, {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }, {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }>, "many">>;
 }, "strip", z.ZodTypeAny, {
     autonomy: "pr";
     maxWorkers: number;
@@ -102,6 +156,12 @@ export declare const orchestratorSchema: z.ZodObject<{
         codex?: string | undefined;
         claude?: string | undefined;
     };
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
 }, {
     autonomy?: "pr" | "merge" | "deploy" | undefined;
     maxWorkers?: number | undefined;
@@ -119,6 +179,12 @@ export declare const orchestratorSchema: z.ZodObject<{
         codex?: string | undefined;
         claude?: string | undefined;
     } | undefined;
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
 }>;
 export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
 /** learning from runs (PRD 2): lessons fed into later runs, skill drafts after repeated success */
@@ -309,6 +375,33 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         }>>;
+        /** replaces the built-in risk rules (all "flag") when given */
+        risk: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodObject<{
+            name: z.ZodString;
+            action: z.ZodEnum<["flag", "block"]>;
+            paths: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            deletedLines: z.ZodOptional<z.ZodNumber>;
+        }, "strict", z.ZodTypeAny, {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }, {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }>, {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }, {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }>, "many">>;
     }, "strip", z.ZodTypeAny, {
         autonomy: "pr";
         maxWorkers: number;
@@ -326,6 +419,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         };
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
     }, {
         autonomy?: "pr" | "merge" | "deploy" | undefined;
         maxWorkers?: number | undefined;
@@ -343,6 +442,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         } | undefined;
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
     }>>;
     /** learning from agentos runs — defaults apply whenever `orchestrator` is set */
     learning: z.ZodOptional<z.ZodObject<{
@@ -445,6 +550,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         };
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
     } | undefined;
     learning?: {
         retro: boolean;
@@ -506,6 +617,12 @@ export declare const agentConfigSchema: z.ZodObject<{
             codex?: string | undefined;
             claude?: string | undefined;
         } | undefined;
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
     } | undefined;
     learning?: {
         retro?: boolean | undefined;
