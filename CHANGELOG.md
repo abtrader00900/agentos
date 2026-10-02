@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 — 2026-10-02
+
+### Fixed
+- **`agentos daemon install` works without admin rights.** Windows refused the Task Scheduler logon task: `Access is denied`, and `EPERM` even from an elevated prompt on the owner's machine. The daemon now starts at logon from a small `agentos-daemon.cmd` in the user's Startup folder, which is per user and never elevated. `agentos daemon uninstall` removes it.
+
 ## 0.6.0 — 2026-10-01
 
 PRD 4: agentos keeps working unattended (`agentos daemon`), plus a faster run engine. Built task by task by `agentos run`; the e2e is in `bench/daemon-e2e.md`.

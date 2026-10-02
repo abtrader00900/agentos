@@ -10,7 +10,6 @@ import { Daemon, readState, writeState } from "./daemon.js";
 import { listJobs, startedOn } from "./queue.js";
 import { loadSettings } from "./settings.js";
 
-const TASK_NAME = "agentos daemon";
 const LOG_MAX = 1024 * 1024;
 
 const dir = (home: string) => path.join(home, ".agentos");
@@ -201,32 +200,39 @@ export async function runDaemon(home = agentosHome()): Promise<void> {
   }
 }
 
-export const taskArgs = (node: string, cli: string): string[] =>
-  ["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON", "/RL", "LIMITED", "/F", "/TR", `"${node}" "${cli}" daemon start`];
+/** Windows runs whatever is in this per-user folder at logon; no admin rights needed (Task Scheduler's logon trigger needs them) */
+export const startupDir = (env = process.env) => path.join(env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+const STARTUP_FILE = "agentos-daemon.cmd";
 
-type Exec = (cmd: string, args: string[]) => string;
-const realExec: Exec = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", windowsHide: true });
+/** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
+export const startupScript = (node: string, cli: string): string =>
+  ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min "${node}" "${cli}" daemon start`, ""].join("\r\n");
 
-/** a Task Scheduler task that starts the daemon at logon, as this user, not elevated */
-export function installTask(cli = cliPath(), exec: Exec = realExec, platform = process.platform): void {
-  if (platform !== "win32") throw new Error("daemon install uses Windows Task Scheduler; on Linux or macOS start it from your own service manager with: agentos daemon start");
+/** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
+export function installTask(cli = cliPath(), dir = startupDir(), platform = process.platform): string {
+  if (platform !== "win32") throw new Error("daemon install uses the Windows Startup folder; on Linux or macOS start it from your own service manager with: agentos daemon start");
   if (/[\\/]_npx[\\/]/.test(cli)) throw new Error(`agentos runs from the npx cache (${cli}), which moves; install it first: npm i -g @basit0090/agent-os`);
-  exec("schtasks", taskArgs(process.execPath, cli));
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, STARTUP_FILE);
+  writeFileSync(file, startupScript(process.execPath, cli));
+  return file;
 }
 
-export function uninstallTask(exec: Exec = realExec): void {
-  exec("schtasks", ["/Delete", "/TN", TASK_NAME, "/F"]);
+/** removes the logon script; false when there was none */
+export function uninstallTask(dir = startupDir()): boolean {
+  const file = path.join(dir, STARTUP_FILE);
+  if (!existsSync(file)) return false;
+  rmSync(file, { force: true });
+  return true;
 }
+
+export const isInstalled = (dir = startupDir()): boolean => existsSync(path.join(dir, STARTUP_FILE));
 
 /** minutes before Windows sleeps on AC power (0 = never), from `powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE` */
 export function parseStandbyMinutes(out: string): number | undefined {
   const m = /Current AC Power Setting Index:\s*0x([0-9a-f]+)/i.exec(out);
   return m ? Math.round(parseInt(m[1], 16) / 60) : undefined;
 }
-
-export const isInstalled = (exec: Exec = realExec): boolean => {
-  try { exec("schtasks", ["/Query", "/TN", TASK_NAME]); return true; } catch { return false; }
-};
 
 /** whether the daemon has written a log yet (status prints its path) */
 export const hasLog = (home = agentosHome()) => existsSync(logFile(home));

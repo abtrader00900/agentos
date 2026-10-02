@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { answering, claimLock, controlTick, daemonStatus, lockFile, taskArgs, installTask, parseStandbyMinutes, startDaemon, stopDaemon } from "../../src/daemon/service.js";
+import { answering, claimLock, controlTick, daemonStatus, lockFile, installTask, isInstalled, startupDir, startupScript, uninstallTask, parseStandbyMinutes, startDaemon, stopDaemon } from "../../src/daemon/service.js";
 import { writeState } from "../../src/daemon/daemon.js";
 
 let home: string;
@@ -90,17 +90,29 @@ describe("daemon service", () => {
     expect(controlTick(home, "b")).toBe("run");
   });
 
-  it("builds a logon task that runs as the user, not elevated", () => {
-    const a = taskArgs("C:\\node\\node.exe", "C:\\npm\\agent-os\\dist\\cli.js");
-    expect(a).toEqual(["/Create", "/TN", "agentos daemon", "/SC", "ONLOGON", "/RL", "LIMITED", "/F", "/TR", '"C:\\node\\node.exe" "C:\\npm\\agent-os\\dist\\cli.js" daemon start']);
+  it("installs a logon script in the user's Startup folder (no admin rights) and uninstall removes it", () => {
+    const dir = path.join(home, "Startup");
+    const cli = "C:\\npm\\agent-os\\dist\\cli.js";
+    expect(isInstalled(dir)).toBe(false);
+    const file = installTask(cli, dir, "win32");
+    expect(path.basename(file)).toBe("agentos-daemon.cmd");
+    expect(readFileSync(file, "utf8")).toBe(startupScript(process.execPath, cli));
+    expect(startupScript("C:\\node\\node.exe", cli)).toContain('start "agentos daemon" /min "C:\\node\\node.exe" "C:\\npm\\agent-os\\dist\\cli.js" daemon start');
+    expect(isInstalled(dir)).toBe(true);
+    expect(uninstallTask(dir)).toBe(true);
+    expect(isInstalled(dir)).toBe(false);
+    expect(uninstallTask(dir)).toBe(false);
   });
 
-  it("refuses to install from the npx cache, whose path is not stable", () => {
-    const calls: string[][] = [];
-    const exec = (_cmd: string, args: string[]) => { calls.push(args); return ""; };
-    expect(() => installTask(path.join("C:", "Users", "u", "AppData", "Local", "npm-cache", "_npx", "abc", "node_modules", "@basit0090", "agent-os", "dist", "cli.js"), exec, "win32")).toThrow(/npm i -g/);
-    expect(() => installTask("/usr/lib/node_modules/@basit0090/agent-os/dist/cli.js", exec, "linux")).toThrow(/Windows/);
-    expect(calls).toEqual([]);
+  it("refuses to install from the npx cache, whose path is not stable, and off Windows", () => {
+    const dir = path.join(home, "Startup");
+    expect(() => installTask(path.join("C:", "Users", "u", "AppData", "Local", "npm-cache", "_npx", "abc", "node_modules", "@basit0090", "agent-os", "dist", "cli.js"), dir, "win32")).toThrow(/npm i -g/);
+    expect(() => installTask("/usr/lib/node_modules/@basit0090/agent-os/dist/cli.js", dir, "linux")).toThrow(/Windows/);
+    expect(isInstalled(dir)).toBe(false);
+  });
+
+  it("finds the Startup folder under APPDATA", () => {
+    expect(startupDir({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" })).toBe(path.join("C:\\Users\\u\\AppData\\Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup"));
   });
 
   it("reads the AC sleep timeout from powercfg output", () => {
