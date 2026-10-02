@@ -636,3 +636,57 @@ describe("orchestrator engine: smart gates", { timeout: 60_000 }, () => {
     expect(workPrompt).toContain("NOT VERIFIED:");
   });
 });
+
+describe("orchestrator engine: decider", { timeout: 60_000 }, () => {
+  const dc = { autoQuick: true, contentRisk: true, quickAbove: 0.8, riskAbove: 0.6, url: "http://127.0.0.1:8017" };
+  /** a fake decider: answers from the map; records what it was asked */
+  const fakeDecide = (answers: Record<string, number> | null) => {
+    const asked: { state: unknown; keys: string[] }[] = [];
+    const decide = async (state: string | object, q: Record<string, string>) => { asked.push({ state, keys: Object.keys(q) }); return answers && Object.fromEntries(Object.keys(q).map((k) => [k, answers[k] ?? 0])); };
+    return { decide, asked };
+  };
+
+  it("skips the planner when the decider is sure the task is small, and says so in the PR", async () => {
+    const f = fakeDecide({ small: 0.91 });
+    const d = Object.assign(deps({ plan: () => { throw new Error("planner must not run"); }, work: creates }), { decide: f.decide, deciderConfig: dc });
+    const s = await startRun(repo.root, "create q.txt", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.quick).toBe(true);
+    expect(s.autoQuick).toEqual({ p: 0.91 });
+    const body = prCalls(d)[0][1][prCalls(d)[0][1].indexOf("--body") + 1];
+    expect(body).toContain("**Planner:** skipped by the decider (jevos 0.91)");
+  });
+
+  it("plans when the decider is unsure, when --plan or --quick is given, and never asks for a CI fix", async () => {
+    const f = fakeDecide({ small: 0.5 });
+    const d = Object.assign(deps({ plan: planOf(sub("a")), work: creates }), { decide: f.decide, deciderConfig: dc });
+    expect((await startRun(repo.root, "add a", cfg(), d, "dq1")).quick).toBeUndefined();
+    const sure = fakeDecide({ small: 0.99 });
+    const d2 = Object.assign(deps({ plan: planOf(sub("a")), work: creates }), { decide: sure.decide, deciderConfig: dc });
+    expect((await startRun(repo.root, "add a", cfg(), d2, "dq2", { plan: true })).quick).toBeUndefined();
+    expect(sure.asked.filter((a) => a.keys.includes("small"))).toHaveLength(0);
+  });
+
+  it("adds a content flag above riskAbove, never blocks, and shows the percentage", async () => {
+    const f = fakeDecide({ small: 0, money: 0.82, "data-loss": 0.1, access: 0.3 });
+    const d = Object.assign(deps({ plan: planOf(sub("a")), work: creates }), { decide: f.decide, deciderConfig: dc });
+    const s = await startRun(repo.root, "add a", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.risk).toEqual([{ rule: "jevos:money", action: "flag", files: [], p: 0.82 }]);
+    const body = prCalls(d)[0][1][prCalls(d)[0][1].indexOf("--body") + 1];
+    expect(body).toContain("- jevos:money (82%)");
+    expect(String(f.asked.find((a) => a.keys.includes("money"))!.state)).toContain("+a.txt");
+  });
+
+  it("changes nothing when the decider is down", async () => {
+    const f = fakeDecide(null);
+    const d = Object.assign(deps({ plan: planOf(sub("a")), work: creates }), { decide: f.decide, deciderConfig: dc });
+    const s = await startRun(repo.root, "add a", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.quick).toBeUndefined();
+    expect(s.risk).toEqual([]);
+    const events = readFileSync(path.join(runDir(repo.root, s.id), "events.jsonl"), "utf8");
+    expect(events).toContain('"use":"auto-quick","skipped":true');
+    expect(events).toContain('"use":"content-risk","skipped":true');
+  });
+});
