@@ -280,7 +280,7 @@ daemon:
 agentos daemon start                      # spawn the loop in the background; it logs to ~/.agentos/daemon.log
 agentos daemon status                     # running? last tick, runs today, the log path
 agentos daemon stop                       # stops the loop; a run in flight keeps going and the next start adopts it
-agentos daemon install                    # Windows: a Task Scheduler task that starts it at logon (uninstall undoes it)
+agentos daemon install                    # Windows: a script in your Startup folder starts it at logon, no admin needed (uninstall removes it)
 agentos daemon run                        # the loop in the foreground (what start and the logon task run)
 
 agentos queue add "add a discount field"  # queue a job for the project in this folder (--project, --quick)

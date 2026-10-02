@@ -43,14 +43,17 @@ export declare function startDaemon(home?: string, cli?: string, launch?: Spawn,
 export declare function stopDaemon(home?: string, waitMs?: number, graceMs?: number): Promise<"stopped" | "asked" | "replaced" | "not-running">;
 /** `daemon run`: the foreground loop (what `start` and the logon task run) */
 export declare function runDaemon(home?: string): Promise<void>;
-export declare const taskArgs: (node: string, cli: string) => string[];
-type Exec = (cmd: string, args: string[]) => string;
-/** a Task Scheduler task that starts the daemon at logon, as this user, not elevated */
-export declare function installTask(cli?: string, exec?: Exec, platform?: NodeJS.Platform): void;
-export declare function uninstallTask(exec?: Exec): void;
+/** Windows runs whatever is in this per-user folder at logon; no admin rights needed (Task Scheduler's logon trigger needs them) */
+export declare const startupDir: (env?: NodeJS.ProcessEnv) => string;
+/** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
+export declare const startupScript: (node: string, cli: string) => string;
+/** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
+export declare function installTask(cli?: string, dir?: string, platform?: NodeJS.Platform): string;
+/** removes the logon script; false when there was none */
+export declare function uninstallTask(dir?: string): boolean;
+export declare const isInstalled: (dir?: string) => boolean;
 /** minutes before Windows sleeps on AC power (0 = never), from `powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE` */
 export declare function parseStandbyMinutes(out: string): number | undefined;
-export declare const isInstalled: (exec?: Exec) => boolean;
 /** whether the daemon has written a log yet (status prints its path) */
 export declare const hasLog: (home?: string) => boolean;
 export {};

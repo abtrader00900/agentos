@@ -9,7 +9,6 @@ import { agentosHome } from "../ui/projects.js";
 import { Daemon, readState, writeState } from "./daemon.js";
 import { listJobs, startedOn } from "./queue.js";
 import { loadSettings } from "./settings.js";
-const TASK_NAME = "agentos daemon";
 const LOG_MAX = 1024 * 1024;
 const dir = (home) => path.join(home, ".agentos");
 export const lockFile = (home = agentosHome()) => path.join(dir(home), "daemon.lock");
@@ -221,33 +220,43 @@ export async function runDaemon(home = agentosHome()) {
         log(home, "daemon stopped");
     }
 }
-export const taskArgs = (node, cli) => ["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON", "/RL", "LIMITED", "/F", "/TR", `"${node}" "${cli}" daemon start`];
-const realExec = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", windowsHide: true });
-/** a Task Scheduler task that starts the daemon at logon, as this user, not elevated */
-export function installTask(cli = cliPath(), exec = realExec, platform = process.platform) {
+/** Windows runs whatever is in this per-user folder at logon; no admin rights needed (Task Scheduler's logon trigger needs them) */
+export const startupDir = (env = process.env) => path.join(env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+const STARTUP_FILE = "agentos-daemon.cmd";
+/** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
+export const startupScript = (node, cli) => {
+    // inside quotes cmd leaves & ^ | < > alone, but still expands %…%: a literal % is written %%
+    const q = (p) => `"${p.replace(/%/g, "%%")}"`;
+    // with delayed expansion off, a ! in a path stays a !
+    return ["@echo off", "setlocal DisableDelayedExpansion", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min ${q(node)} ${q(cli)} daemon start`, ""].join("\r\n");
+};
+/** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
+export function installTask(cli = cliPath(), dir = startupDir(), platform = process.platform) {
     if (platform !== "win32")
-        throw new Error("daemon install uses Windows Task Scheduler; on Linux or macOS start it from your own service manager with: agentos daemon start");
+        throw new Error("daemon install uses the Windows Startup folder; on Linux or macOS start it from your own service manager with: agentos daemon start");
     if (/[\\/]_npx[\\/]/.test(cli))
         throw new Error(`agentos runs from the npx cache (${cli}), which moves; install it first: npm i -g @basit0090/agent-os`);
-    exec("schtasks", taskArgs(process.execPath, cli));
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, STARTUP_FILE);
+    // written aside, then renamed over: a failed write never leaves a broken logon script behind
+    writeFileSync(`${file}.tmp`, startupScript(process.execPath, cli));
+    renameSync(`${file}.tmp`, file);
+    return file;
 }
-export function uninstallTask(exec = realExec) {
-    exec("schtasks", ["/Delete", "/TN", TASK_NAME, "/F"]);
+/** removes the logon script; false when there was none */
+export function uninstallTask(dir = startupDir()) {
+    const file = path.join(dir, STARTUP_FILE);
+    if (!existsSync(file))
+        return false;
+    rmSync(file, { force: true });
+    return true;
 }
+export const isInstalled = (dir = startupDir()) => existsSync(path.join(dir, STARTUP_FILE));
 /** minutes before Windows sleeps on AC power (0 = never), from `powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE` */
 export function parseStandbyMinutes(out) {
     const m = /Current AC Power Setting Index:\s*0x([0-9a-f]+)/i.exec(out);
     return m ? Math.round(parseInt(m[1], 16) / 60) : undefined;
 }
-export const isInstalled = (exec = realExec) => {
-    try {
-        exec("schtasks", ["/Query", "/TN", TASK_NAME]);
-        return true;
-    }
-    catch {
-        return false;
-    }
-};
 /** whether the daemon has written a log yet (status prints its path) */
 export const hasLog = (home = agentosHome()) => existsSync(logFile(home));
 //# sourceMappingURL=service.js.map

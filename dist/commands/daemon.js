@@ -20,12 +20,10 @@ export async function daemonCommand(action) {
         }
         case "run": return runDaemon();
         case "install":
-            installTask();
-            console.log('installed: Task Scheduler starts the daemon at logon ("agentos daemon"); undo with: agentos daemon uninstall');
+            console.log(`installed: ${installTask()} starts the daemon at logon (no admin rights needed); undo with: agentos daemon uninstall`);
             return;
         case "uninstall":
-            uninstallTask();
-            console.log("removed the logon task");
+            console.log(uninstallTask() ? "removed the logon script; the daemon no longer starts at logon" : "nothing to remove: the daemon was not set to start at logon");
             return;
         case "status": {
             const s = daemonStatus();
