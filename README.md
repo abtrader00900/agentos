@@ -285,6 +285,37 @@ mcpServers:
     args: ["-y", "@basit0090/agent-os@0.3.0", "mcp", "orchestrator"]
 ```
 
+### Local decider (optional, jevos)
+
+A small yes/no model, [jevos](https://github.com/feder-cr/jev), can run on your own machine and make two calls during a run:
+
+- **auto-quick** — when it is sure a task is a single focused change, the run skips the planner (the PR body says so). An explicit `--quick` or `--plan`, or a CI fix, is never second-guessed.
+- **content flags** — it reads the added lines of the diff and adds ⚠️ `jevos:money`, `jevos:data-loss` or `jevos:access` risk flags with their percentage.
+
+It only ever adds. It never blocks a run and never removes a check. When it is not installed, not running, slow (> 3 s) or answers nonsense, the run continues exactly as without it and logs one skipped `decider` event. Nothing leaves your machine: the URL must be a loopback address.
+
+```bash
+agentos decider install     # asks first, then downloads about 650 MB (--yes skips the question, --force reinstalls)
+agentos decider start       # starts jev serve on 127.0.0.1 with a fresh API key (--force starts on little free memory)
+agentos decider status      # installed? running? free memory
+agentos decider stop        # stops it — only a server that answers /health is ever killed
+```
+
+The download takes the binary for your platform (windows-x64, linux-x64, macos-arm64) plus the model, and checks every file against the release's `SHA256SUMS.txt`; a mismatch leaves nothing installed. Everything lands in `~/.agentos/jevos`. jevos needs about 1–1.4 GB of memory, so `start` refuses below 1200 MB free unless you pass `--force`.
+
+Settings (the whole block is optional; these are the defaults):
+
+```yaml
+decider:
+  autoQuick: true                # let it choose --quick
+  contentRisk: true              # let it add content risk flags
+  quickAbove: 0.8                # P(yes) at or above this skips the planner
+  riskAbove: 0.6                 # P(yes) at or above this adds a ⚠️ flag
+  url: http://127.0.0.1:8017     # must be loopback: 127.0.0.1, localhost or [::1]
+```
+
+`agentos doctor` reports whether jevos is installed.
+
 ## 24/7: `agentos daemon`
 
 The daemon keeps agentos working while you are away: it fires the schedules you set, fixes failed CI on agentos's own pull requests, and runs the jobs you queue — one at a time, within a daily cap. Every job still ends at a pull request; nothing merges, deploys or pushes your default branch.

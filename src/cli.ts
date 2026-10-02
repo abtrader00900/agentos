@@ -12,6 +12,7 @@ import { run, runs } from "./commands/run.js";
 import { ui } from "./commands/ui.js";
 import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "./commands/lessons.js";
 import { daemonCommand, queueCommand } from "./commands/daemon.js";
+import { deciderCommand } from "./commands/decider.js";
 import { createMemoryServer } from "./mcp/memory/server.js";
 import { createSupersearchServer } from "./mcp/supersearch/server.js";
 import { createCodegraphServer } from "./mcp/codegraph/server.js";
@@ -251,6 +252,13 @@ program
   .option("--quick", "skip the planner for this task")
   .option("--json", "machine-readable list")
   .action((action: string, words: string[], opts) => { try { queueCommand(action, words, opts); } catch (e) { fail(e); } });
+
+program
+  .command("decider <action>")
+  .description("Optional local yes/no model (jevos): install | start | stop | status")
+  .option("--yes", "install without asking (downloads about 650 MB)")
+  .option("--force", "install: reinstall · start: start even with little free memory")
+  .action(async (action: string, opts) => { try { await deciderCommand(action, opts); } catch (e) { fail(e); } });
 
 function fail(e: unknown): never {
   console.error(`✗ ${(e as Error).message}`);
