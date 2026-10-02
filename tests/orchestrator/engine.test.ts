@@ -551,3 +551,75 @@ describe("orchestrator engine: --onto", { timeout: 60_000 }, () => {
     expect(sh(repo.remote, ["merge-base", "--is-ancestor", pr.tip, pr.name])).toBe("");
   });
 });
+
+describe("orchestrator engine: smart gates", { timeout: 60_000 }, () => {
+  const lockfile = (cwd: string) => writeFileSync(path.join(cwd, "package-lock.json"), "{}\n");
+
+  it("flags a risky file in the PR body and still opens the PR", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: (cwd, p) => { creates(cwd, p); lockfile(cwd); } });
+    const s = await startRun(repo.root, "add a", cfg(), d);
+    expect(s.status).toBe("pr_open");
+    expect(s.risk).toEqual([{ rule: "lockfile", action: "flag", files: ["package-lock.json"] }]);
+    const body = prCalls(d)[0][1][prCalls(d)[0][1].indexOf("--body") + 1];
+    expect(body).toContain("⚠️ Look here");
+    expect(body).toContain("lockfile: package-lock.json");
+  });
+
+  it("stops at needs_human when a block rule matches, and opens no PR", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: (cwd, p) => { creates(cwd, p); lockfile(cwd); } });
+    const s = await startRun(repo.root, "add a", cfg({ risk: [{ name: "lockfile", action: "block", paths: ["package-lock.json"] }] }), d);
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain('risk rule "lockfile" blocks the PR');
+    expect(prCalls(d)).toHaveLength(0);
+  });
+
+  it("hands a skipped test to the fixer as a high finding", async () => {
+    const r2 = makeRepo({ "tests/a.test.js": "it('works', () => { expect(1).toBe(1); });\n" });
+    try {
+      let fixPrompt = "";
+      const d = deps({
+        plan: planOf(sub("a")),
+        work: (cwd, p) => {
+          if (p.includes("does not pass yet")) {
+            fixPrompt = p;
+            writeFileSync(path.join(cwd, "tests/a.test.js"), "it('works', () => { expect(1).toBe(1); });\n");
+          } else writeFileSync(path.join(cwd, "tests/a.test.js"), "it.skip('works', () => { expect(1).toBe(1); });\n");
+        },
+      });
+      const s = await startRun(r2.root, "make it pass", cfg(), d);
+      expect(fixPrompt).toMatch(/\[high\] tests\/a\.test\.js:0 a test was skipped/);
+      expect(s.status).toBe("pr_open");
+    } finally { r2.cleanup(); }
+  });
+
+  it("puts the agents' reports in the PR body and tells the reviewer to check them", async () => {
+    let reviewPromptText = "";
+    const d = deps({
+      plan: planOf(sub("a")),
+      work: (cwd, p) => { creates(cwd, p); return reply("Made a.txt.\nCHANGED: a.txt\nNOT DONE: the docs\nASSUMED: UTF-8\nNOT VERIFIED: none"); },
+      review: (p) => { reviewPromptText = p; return "[]"; },
+    });
+    const s = await startRun(repo.root, "add a", cfg(), d);
+    expect(s.subtasks[0].report).toEqual({ changed: ["a.txt"], notDone: ["the docs"], assumed: ["UTF-8"], notVerified: [] });
+    const body = prCalls(d)[0][1][prCalls(d)[0][1].indexOf("--body") + 1];
+    expect(body).toContain("What the agents report");
+    expect(body).toContain("Not done: the docs");
+    expect(body).toContain("Assumed: UTF-8");
+    expect(reviewPromptText).toContain("NOT DONE: the docs");
+    expect(reviewPromptText).toContain("Tests made weaker to pass");
+  });
+
+  it("says when an agent gave no report", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    await startRun(repo.root, "add a", cfg(), d);
+    const body = prCalls(d)[0][1][prCalls(d)[0][1].indexOf("--body") + 1];
+    expect(body).toContain("a (claude): no report");
+  });
+
+  it("asks workers for the report", async () => {
+    let workPrompt = "";
+    const d = deps({ plan: planOf(sub("a")), work: (cwd, p) => { workPrompt = p; creates(cwd, p); } });
+    await startRun(repo.root, "add a", cfg(), d);
+    expect(workPrompt).toContain("NOT VERIFIED:");
+  });
+});

@@ -251,6 +251,28 @@ The tests and the cross-model review run at the same time, so a fix round gets f
 
 A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
 
+### Smart gates
+
+Before a PR opens, agentos checks the change itself and tells you where it needs a human.
+
+**Risky files.** The diff is matched against risk rules. By default they only flag: migrations and `.sql`, CI and deploy files (`.github/workflows/**`, `Dockerfile`, `docker-compose*.yml`, `railway.*`, `Procfile`, `vercel.json`), lockfiles, auth, policies, middleware and permissions, `.env.example` and `config/**`, and any change deleting 200 lines or more. A flagged run leads its PR body with **⚠️ Look here** and the files, and shows up under "Needs you" in the dashboard with a ⚠️ next to its status.
+
+Set your own rules with `orchestrator.risk` — it replaces the built-in list. A rule takes exactly one of `paths` or `deletedLines`, and `action: block` stops the run at `needs_human` instead of opening a PR:
+
+```yaml
+orchestrator:
+  risk:
+    - { name: migration, action: block, paths: ["**/migrations/**", "**/*.sql"] }
+    - { name: lockfile, action: flag, paths: [package-lock.json] }
+    - { name: big-delete, action: flag, deletedLines: 200 }
+```
+
+`**` crosses folders, `*` and `?` stay inside one, and a pattern without a slash matches that name at any depth.
+
+**Weakened tests.** The diff is scanned for tests made to pass rather than made to work: a new `it.skip`/`.only`/`xit`, `markTestSkipped`, `@pytest.mark.skip`, `t.Skip`, `@Ignore`, a deleted test file, or fewer assertions than before. A skipped or deleted test is a high finding and a thinner one is medium, so both go to the fixer — unless the task itself asked for it ("remove the old login test"), in which case they drop to low and only appear as a note in the PR. The reviewer is told to look for the same thing in prose.
+
+**The agents' own account.** Every worker and fixer ends with a four-line report — `CHANGED`, `NOT DONE`, `ASSUMED`, `NOT VERIFIED`. It goes to the reviewer, which checks each claim against the diff, and into the PR body under "What the agents report", so what was left out, assumed or never run is written down instead of implied. An agent that gives no report is listed as "no report"; that alone never blocks a PR.
+
 To hand work over from inside a Claude Code or Codex chat, register the MCP server and call `run_task`:
 
 ```yaml

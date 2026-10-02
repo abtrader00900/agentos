@@ -45,6 +45,8 @@ window.LABELS = {
   "runs.age": "Age",
   "runs.new": "+ New run",
   "runs.empty": "No runs yet",
+  "runs.flagged": "⚠️",
+  "runs.flaggedTitle": "This change touches risky files — see “Look here” in the PR",
 
   // run detail
   "run.starting": "Starting…",
