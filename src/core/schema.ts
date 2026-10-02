@@ -107,6 +107,23 @@ export const daemonSchema = z.object({
 });
 export type DaemonConfig = z.infer<typeof daemonSchema>;
 
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/** the optional local decider (PRD 4.5b): a yes/no model on this machine; nothing is sent elsewhere */
+export const deciderSchema = z
+  .object({
+    autoQuick: z.boolean().default(true),
+    contentRisk: z.boolean().default(true),
+    quickAbove: z.number().min(0).max(1).default(0.8),
+    riskAbove: z.number().min(0).max(1).default(0.6),
+    url: z
+      .string()
+      .url()
+      .default("http://127.0.0.1:8017")
+      .refine((u) => LOOPBACK.has(new URL(u).hostname), { message: "decider.url must be a loopback address (127.0.0.1, localhost or [::1]): tasks and diffs never leave this machine" }),
+  })
+  .strict();
+export type DeciderConfigSchema = z.infer<typeof deciderSchema>;
+
 export const agentConfigSchema = z.object({
   /** Project display name */
   project: z.object({
@@ -140,6 +157,8 @@ export const agentConfigSchema = z.object({
   learning: learningSchema.optional(),
   /** agentos daemon — absent means the daemon ignores this project */
   daemon: daemonSchema.optional(),
+  /** local decider (jevos) — absent means defaults; it does nothing unless a decider is running */
+  decider: deciderSchema.optional(),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;

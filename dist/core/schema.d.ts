@@ -259,6 +259,27 @@ export declare const daemonSchema: z.ZodObject<{
     }[] | undefined;
 }>;
 export type DaemonConfig = z.infer<typeof daemonSchema>;
+/** the optional local decider (PRD 4.5b): a yes/no model on this machine; nothing is sent elsewhere */
+export declare const deciderSchema: z.ZodObject<{
+    autoQuick: z.ZodDefault<z.ZodBoolean>;
+    contentRisk: z.ZodDefault<z.ZodBoolean>;
+    quickAbove: z.ZodDefault<z.ZodNumber>;
+    riskAbove: z.ZodDefault<z.ZodNumber>;
+    url: z.ZodEffects<z.ZodDefault<z.ZodString>, string, string | undefined>;
+}, "strict", z.ZodTypeAny, {
+    autoQuick: boolean;
+    contentRisk: boolean;
+    quickAbove: number;
+    riskAbove: number;
+    url: string;
+}, {
+    autoQuick?: boolean | undefined;
+    contentRisk?: boolean | undefined;
+    quickAbove?: number | undefined;
+    riskAbove?: number | undefined;
+    url?: string | undefined;
+}>;
+export type DeciderConfigSchema = z.infer<typeof deciderSchema>;
 export declare const agentConfigSchema: z.ZodObject<{
     /** Project display name */
     project: z.ZodObject<{
@@ -505,6 +526,26 @@ export declare const agentConfigSchema: z.ZodObject<{
             quick?: boolean | undefined;
         }[] | undefined;
     }>>;
+    /** local decider (jevos) — absent means defaults; it does nothing unless a decider is running */
+    decider: z.ZodOptional<z.ZodObject<{
+        autoQuick: z.ZodDefault<z.ZodBoolean>;
+        contentRisk: z.ZodDefault<z.ZodBoolean>;
+        quickAbove: z.ZodDefault<z.ZodNumber>;
+        riskAbove: z.ZodDefault<z.ZodNumber>;
+        url: z.ZodEffects<z.ZodDefault<z.ZodString>, string, string | undefined>;
+    }, "strict", z.ZodTypeAny, {
+        autoQuick: boolean;
+        contentRisk: boolean;
+        quickAbove: number;
+        riskAbove: number;
+        url: string;
+    }, {
+        autoQuick?: boolean | undefined;
+        contentRisk?: boolean | undefined;
+        quickAbove?: number | undefined;
+        riskAbove?: number | undefined;
+        url?: string | undefined;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     project: {
         name: string;
@@ -572,6 +613,13 @@ export declare const agentConfigSchema: z.ZodObject<{
             quick: boolean;
         }[];
     } | undefined;
+    decider?: {
+        autoQuick: boolean;
+        contentRisk: boolean;
+        quickAbove: number;
+        riskAbove: number;
+        url: string;
+    } | undefined;
 }, {
     project: {
         name: string;
@@ -638,6 +686,13 @@ export declare const agentConfigSchema: z.ZodObject<{
             task: string;
             quick?: boolean | undefined;
         }[] | undefined;
+    } | undefined;
+    decider?: {
+        autoQuick?: boolean | undefined;
+        contentRisk?: boolean | undefined;
+        quickAbove?: number | undefined;
+        riskAbove?: number | undefined;
+        url?: string | undefined;
     } | undefined;
 }>;
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
