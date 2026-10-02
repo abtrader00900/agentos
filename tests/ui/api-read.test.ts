@@ -43,6 +43,15 @@ describe("read API", () => {
     expect((await get(`/api/p/nope-0000/runs`)).status).toBe(404);
   });
 
+  it("marks an open PR whose change tripped a risk rule, and counts it under needsYou", async () => {
+    saveRun(repo.root, run("f1", { risk: [{ rule: "lockfile", action: "flag", files: ["package-lock.json"] }] }));
+    saveRun(repo.root, run("f2"));
+    const list = await get(`/api/p/${pid}/runs`);
+    expect(list.json.find((r: { id: string }) => r.id === "f1")).toMatchObject({ flagged: true });
+    expect(list.json.find((r: { id: string }) => r.id === "f2")).toMatchObject({ flagged: false });
+    expect((await get("/api/projects")).json[0]).toMatchObject({ id: pid, needsYou: 1 });
+  });
+
   it("lists lessons pending-first with their safety verdict, and drafts with their text", async () => {
     saveLessons(repo.root, "r", undefined, [
       { text: "Run php artisan test before seeding", roles: ["worker"], evidence: ["E1: verify_fixed: x"] },

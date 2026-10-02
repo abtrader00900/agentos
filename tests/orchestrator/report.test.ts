@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { prTitle } from "../../src/orchestrator/report.js";
+import { prBody, prTitle } from "../../src/orchestrator/report.js";
+import type { RunState } from "../../src/orchestrator/run.js";
 
 describe("prTitle", () => {
   it("keeps a short task whole", () => {
@@ -15,5 +16,21 @@ describe("prTitle", () => {
 
   it("flattens newlines", () => {
     expect(prTitle("line one\nline two")).toBe("agentos: line one line two");
+  });
+});
+
+describe("prBody", () => {
+  const base: RunState = {
+    id: "r1", task: "add a discount field", status: "pr_open", baseBranch: "main", base: "abc", branch: "agentos/run-r1",
+    runWorktree: "w", createdAt: new Date().toISOString(), updatedAt: "", subtasks: [], fixRound: 0, findings: [],
+  };
+
+  it("leads with the risk flags and lists what the agents did not do", () => {
+    const body = prBody({ ...base, risk: [{ rule: "migration", action: "flag", files: ["db/migrations/1.sql"] }],
+      subtasks: [{ id: "a", agent: "claude", status: "done", branch: "b", worktree: "w", report: { changed: ["x"], notDone: ["y"], assumed: [], notVerified: ["z"] } }] });
+    expect(body.indexOf("⚠️ Look here")).toBeLessThan(body.indexOf("| Subtask |"));
+    expect(body).toContain("migration: db/migrations/1.sql");
+    expect(body).toContain("Not done: y");
+    expect(body).toContain("Not verified: z");
   });
 });

@@ -11,6 +11,7 @@ import {
   type RunState, type RunStatus, type SubtaskState, TERMINAL, newRunId, runDir, saveRun, loadRun,
   setStatus, logEvent, requestCancel, cancelRequested,
 } from "./run.js";
+import { DEFAULT_RISK, REPORT_INSTRUCTIONS, REVIEW_GATES, parseNumstat, parseReport, riskFlags, tamperFindings, type AgentReport } from "./gates.js";
 import { makePlan } from "./planner.js";
 import { runScheduled } from "./scheduler.js";
 import { runVerify, parseFindings, blocking, reviewPrompt, reReviewPrompt, excerpt } from "./verify.js";
@@ -310,6 +311,21 @@ function notes(c: Ctx, role: Role): string {
   }
 }
 
+const reportLine = (r: AgentReport | null | undefined) =>
+  r ? `CHANGED: ${r.changed.join("; ") || "none"}\nNOT DONE: ${r.notDone.join("; ") || "none"}\nASSUMED: ${r.assumed.join("; ") || "none"}\nNOT VERIFIED: ${r.notVerified.join("; ") || "none"}` : "(no report)";
+
+/** the claims the reviewer must check against the diff; also the review's cache key, so a new claim is never left unchecked */
+const reportsBlock = (s: RunState): string =>
+  [
+    ...s.subtasks.map((t) => `${t.id} (${t.agent}):\n${reportLine(t.report)}`),
+    ...(s.fixReport ? [`last fix round:\n${reportLine(s.fixReport)}`] : []),
+  ].join("\n\n");
+
+/** the reviewer's extra instructions: weakened tests, and the workers' claims to check against the diff */
+function reviewNotes(c: Ctx): string {
+  return [notes(c, "reviewer"), REVIEW_GATES, `Workers' reports:\n${reportsBlock(c.s)}`].filter(Boolean).join("\n\n");
+}
+
 /** --quick: the whole task as one subtask for the first worker, with no planner call */
 function quickPlan(task: string, agent: AgentName): Plan {
   const title = task.split("\n")[0].slice(0, 80);
@@ -346,6 +362,7 @@ function workerPrompt(s: RunState, sub: Subtask, note = ""): string {
     sub.files.length ? `Files you are expected to change: ${sub.files.join(", ")}` : "",
     "Rules: work only inside the current directory. Do not commit, push, deploy, run migrations against real databases, or delete anything outside this directory. agentos commits your changes and runs the tests.",
     note,
+    REPORT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -372,6 +389,7 @@ async function work(c: Ctx): Promise<void> {
     }
     commitAll(t.worktree, `agentos: ${sub.title}`);
     t.summary = redact(finalText(res.output)).slice(0, 1500);
+    t.report = parseReport(redact(finalText(res.output)));
     const changed = Number(git(root, ["rev-list", "--count", `${s.branch}..${t.branch}`])) > 0;
     let ok = res.ok && changed;
     if (ok) {
@@ -446,7 +464,7 @@ async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Prom
 
 type Review =
   | { ran: false; rateLimited: boolean; error: string }
-  | { ran: true; findings: Finding[]; head: string; kind: "full" | "fix" | "unchanged" };
+  | { ran: true; findings: Finding[]; head: string; reports: string; kind: "full" | "fix" | "unchanged" };
 
 /** The cross-model review. After a fix round it sees only the fix, checked against its earlier findings. */
 async function review(c: Ctx): Promise<Review> {
@@ -455,20 +473,21 @@ async function review(c: Ctx): Promise<Review> {
   const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
   const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
   const last = s.reviewed;
-  // nothing changed since the last review: its findings still stand, deterministically
-  if (last?.head === head) return { ran: true, findings: last.findings, head, kind: "unchanged" };
+  const reports = reportsBlock(s);
+  // same commit and the same claims to check since the last review: its findings still stand, deterministically
+  if (last?.head === head && last.reports === reports) return { ran: true, findings: last.findings, head, reports, kind: "unchanged" };
   const scoped = !!last && tryGit(s.runWorktree, ["merge-base", "--is-ancestor", last.head, "HEAD"]).ok;
   const prompt = scoped
     ? reReviewPrompt(
         s.task, blocking(last!.findings), git(s.runWorktree, ["diff", `${last!.head}..HEAD`]), s.base,
-        git(s.runWorktree, ["diff", "--name-only", `${s.base}..HEAD`]).split("\n").filter(Boolean), notes(c, "reviewer"),
+        git(s.runWorktree, ["diff", "--name-only", `${s.base}..HEAD`]).split("\n").filter(Boolean), reviewNotes(c),
       )
-    : reviewPrompt(s.task, git(s.runWorktree, ["diff", `${s.base}..HEAD`]), notes(c, "reviewer"));
+    : reviewPrompt(s.task, git(s.runWorktree, ["diff", `${s.base}..HEAD`]), reviewNotes(c));
   const res = await agentRunner(c, reviewer, "read")({ prompt, cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
   if (res.rateLimited) return { ran: false, rateLimited: true, error: `the reviewer (${reviewer}) hit a rate limit` };
   if (!res.ok) return { ran: false, rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}` };
   const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
-  return { ran: true, findings, head, kind: scoped ? "fix" : "full" };
+  return { ran: true, findings, head, reports, kind: scoped ? "fix" : "full" };
 }
 
 async function verify(c: Ctx): Promise<void> {
@@ -476,6 +495,7 @@ async function verify(c: Ctx): Promise<void> {
   const before = git(s.runWorktree, ["rev-parse", "HEAD"]);
   // tests and review at the same time: failing tests and review findings reach the fixer in one round
   const [v, r] = await Promise.all([runVerify(s.runWorktree, cfg.verify, minutes(cfg.subtaskMinutes), c.live), review(c)]);
+  const tamper = tamperFindings(git(s.runWorktree, ["diff", `${s.base}..HEAD`]), s.task);
   s.verifyOk = v.ok;
   s.verifyOutput = redact(v.output);
   // the review saw `before`; a commit made meanwhile would reach the PR unreviewed
@@ -486,10 +506,11 @@ async function verify(c: Ctx): Promise<void> {
     // with passing tests a review must run: pause for a limit, and no PR on a failed reviewer's say-so.
     // Failing tests go to the fixer anyway; the next review starts from the last one that ran.
     if (v.ok) return r.rateLimited ? pause(c, "verifying") : move(c, "needs_human", r.error);
-    s.findings = [{ severity: "low", file: "", line: 0, issue: `the review did not run: ${r.error}` }];
+    s.findings = [...tamper, { severity: "low", file: "", line: 0, issue: `the review did not run: ${r.error}` }];
   } else {
-    s.findings = r.findings;
-    s.reviewed = { head: r.head, findings: r.findings };
+    s.findings = [...r.findings, ...tamper];
+    // reviewer findings only: tampering is recomputed on every verify
+    s.reviewed = { head: r.head, reports: r.reports, findings: r.findings };
   }
   saveRun(c.root, s);
   logEvent(c.root, s.id, {
@@ -511,6 +532,7 @@ function fixPrompt(s: RunState, note = ""): string {
     s.verifyOk === false ? `Failing checks:\n${s.verifyOutput}` : "",
     found.length ? `Review findings to fix:\n${found.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n")}` : "",
     note,
+    REPORT_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -526,6 +548,7 @@ async function fix(c: Ctx): Promise<void> {
     s.fixRound--;
     return pause(c, "fixing");
   }
+  s.fixReport = parseReport(redact(finalText(res.output)));
   const committed = commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
   const diff = committed ? tryGit(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]) : undefined; // logging must never fail the run
   const files = diff?.ok ? diff.out.split("\n").filter(Boolean) : [];
@@ -571,6 +594,18 @@ async function gate(c: Ctx): Promise<void> {
   const history = git(s.runWorktree, ["log", "-p", "--cc", "--format=", `${s.base}..HEAD`]);
   const hits = [...new Set([...scanDiff(history), ...scanDiff(git(s.runWorktree, ["diff", `${s.base}..HEAD`]))])];
   if (hits.length) return move(c, "needs_human", `secret scan blocked the PR: ${hits.join("; ")}`);
+  const numstat = tryGit(s.runWorktree, ["diff", "--numstat", "--no-renames", `${s.base}..HEAD`]);
+  if (numstat.ok) {
+    const flags = riskFlags(parseNumstat(numstat.out), c.cfg.risk ?? DEFAULT_RISK);
+    const blocked = flags.filter((f) => f.action === "block");
+    if (blocked.length) {
+      return move(c, "needs_human", blocked.map((f) => `risk rule "${f.rule}" blocks the PR: ${f.files.slice(0, 5).join(", ")}`).join("; "));
+    }
+    s.risk = flags;
+  } else {
+    s.findings = [...s.findings, { severity: "low", file: "", line: 0, issue: "the risk check could not read the diff (git diff --numstat failed)" }];
+  }
+  saveRun(root, s);
   if (cancelled()) return move(c, "cancelled", "cancelled by the owner");
   // remote work runs from the checkout: a relative remote URL (../origin.git) resolves against the cwd
   if (s.onto) {

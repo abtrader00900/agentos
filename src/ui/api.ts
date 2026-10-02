@@ -99,7 +99,7 @@ function summarise(p: ProjectRow) {
     return {
       ...row,
       running: runs.filter((r) => RUNNING.includes(r.status)).length,
-      needsYou: week.filter((r) => NEEDS_YOU.includes(r.status)).length,
+      needsYou: week.filter((r) => NEEDS_YOU.includes(r.status) || (r.status === "pr_open" && (r.risk?.length ?? 0) > 0)).length,
       pendingLessons: listLessons(p.path, { status: ["pending"] }).length,
       drafts: listDrafts(p.path).length,
       week: {
@@ -122,6 +122,8 @@ interface RunRow {
   prUrl?: string;
   reason?: string;
   costUsd?: number;
+  /** the run's change tripped a risk rule (PRD 4.5) */
+  flagged?: boolean;
 }
 
 /** run folders, without loading them: one unreadable run must not cost the list. */
@@ -135,7 +137,7 @@ function runList(root: string): RunRow[] {
     .map((id): RunRow => {
       try {
         const r = loadRun(root, id);
-        return { id, task: r.task, status: r.status, fixRound: r.fixRound, createdAt: r.createdAt, prUrl: r.prUrl, reason: r.reason, costUsd: runUsage(root, id).costUsd };
+        return { id, task: r.task, status: r.status, fixRound: r.fixRound, createdAt: r.createdAt, prUrl: r.prUrl, reason: r.reason, costUsd: runUsage(root, id).costUsd, flagged: (r.risk?.length ?? 0) > 0 };
       } catch {
         return { id, status: "unreadable" };
       }

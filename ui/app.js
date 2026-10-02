@@ -216,7 +216,7 @@
       if (p.needsYou > 0) {
         const runs = await api(projectApi(p.id) + "/runs");
         if (stale(seq)) return;
-        for (const r of (runs || []).filter((r) => NEEDS_YOU.indexOf(r.status) >= 0)) {
+        for (const r of (runs || []).filter((r) => NEEDS_YOU.indexOf(r.status) >= 0 || r.flagged)) {
           items.push(h("a", { className: "item", href: runHref(p.id, r.id) }, statusSpan(r.status), truncate(r.task || r.id, 90)));
         }
       }
@@ -275,7 +275,7 @@
       h("thead", null, head),
       h("tbody", null, rows.map((r) => h("tr", null,
         h("td", null, h("a", { href: runHref(p, r.id), title: r.task || r.id }, truncate(r.task || r.id, 70))),
-        h("td", null, statusSpan(r.status)),
+        h("td", { title: r.flagged ? L("runs.flaggedTitle") : null }, r.flagged ? L("runs.flagged") + " " : null, statusSpan(r.status)),
         h("td", null, r.fixRound ? String(r.fixRound) : ""),
         h("td", null, r.costUsd === undefined || r.costUsd === null ? "" : money(r.costUsd)),
         h("td", { title: r.createdAt || "" }, ago(r.createdAt)))))));
