@@ -37,21 +37,42 @@ const pidFile = (home: string) => path.join(deciderDir(home), "jev.pid");
 
 const portOf = (url: string) => new URL(url).port || "8017";
 
-/** the pids holding a tcp socket on this local port, or undefined when no tool on this box could say */
-const portOwners = (port: string): Set<number> | undefined => {
+/**
+ * The local addresses, spelled as netstat, ss and `lsof -F` print them, whose listener answers this url:
+ * the url's own host, or a wildcard of the same family. The port alone is not enough — a listener on
+ * another interface (`192.168.1.5:8017`) shares the port yet never serves the configured loopback host.
+ */
+const localAddrs = (url: string): Set<string> => {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const port = portOf(url);
+  const hosts = host === "localhost"
+    ? ["127.0.0.1", "0.0.0.0", "[::1]", "[::]"] // whichever family fetch() picked, so a listener of either answers for it
+    : host.includes(":") ? [`[${host}]`, "[::]"] : [host, "0.0.0.0"];
+  // lsof, and ss before iproute2 4.x, spell both wildcards "*", so it has to be taken for either family
+  return new Set([...hosts, "*"].map((h) => `${h}:${port}`));
+};
+
+/** the pids listening on the url's own address, or undefined when no tool on this box could say */
+const addrOwners = (url: string): Set<number> | undefined => {
   const run = (bin: string, args: string[]) => execFileSync(bin, args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  const want = localAddrs(url);
   const pids = new Set<number>();
   const add = (n: number) => { if (Number.isInteger(n) && n > 0) pids.add(n); };
-  const localIsPort = (cols: string[], at: number) => (cols[at] ?? "").endsWith(`:${port}`);
+  const mine = (addr: string | undefined) => want.has((addr ?? "").trim().toLowerCase());
   try {
     if (process.platform === "win32") {
       // "TCP  127.0.0.1:8017  0.0.0.0:0  LISTENING  1234": the state word is localized, "TCP" and the columns are not
       for (const line of run("netstat", ["-ano", "-p", "tcp"]).split("\n")) {
         const cols = line.trim().split(/\s+/);
-        if (cols[0] === "TCP" && cols.length >= 5 && localIsPort(cols, 1)) add(Number(cols[cols.length - 1]));
+        if (cols[0] === "TCP" && cols.length >= 5 && mine(cols[1])) add(Number(cols[cols.length - 1]));
       }
     } else {
-      for (const line of run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]).split("\n")) add(Number(line.trim()));
+      // -F prints one field per line, "p1234" then that process's "n127.0.0.1:8017", so the address is never a padded column
+      let pid = 0;
+      for (const line of run("lsof", ["-nP", `-iTCP:${portOf(url)}`, "-sTCP:LISTEN", "-Fpn"]).split("\n")) {
+        if (line[0] === "p") pid = Number(line.slice(1));
+        else if (line[0] === "n" && mine(line.slice(1))) add(pid);
+      }
     }
     return pids;
   } catch {
@@ -60,20 +81,20 @@ const portOwners = (port: string): Set<number> | undefined => {
   try {
     // "LISTEN 0 4096 127.0.0.1:8017 0.0.0.0:* users:((\"jev\",pid=1234,fd=7))"
     for (const line of run("ss", ["-ltnpH"]).split("\n")) {
-      if (localIsPort(line.trim().split(/\s+/), 3)) for (const m of line.matchAll(/pid=(\d+)/g)) add(Number(m[1]));
+      if (mine(line.trim().split(/\s+/)[3])) for (const m of line.matchAll(/pid=(\d+)/g)) add(Number(m[1]));
     }
     return pids;
   } catch {
-    return undefined; // nothing here can name the owner of the port, so nothing may be killed
+    return undefined; // nothing here can name the owner of the address, so nothing may be killed
   }
 };
 
 /**
- * The real kill: only the process that holds the port of the url whose /health just answered.
- * A stale pid, a reused pid and a pid belonging to some other jevos all own no socket there, so none of them is killed.
+ * The real kill: only the process listening on the address of the url whose /health just answered.
+ * A stale pid, a reused pid, and a jevos on another interface or port, all own no listener there, so none of them is killed.
  */
 const killOwner: Kill = (pid, url) => {
-  if (pid <= 0 || !portOwners(portOf(url))?.has(pid)) return false;
+  if (pid <= 0 || !addrOwners(url)?.has(pid)) return false;
   try {
     process.kill(pid);
     return true;
@@ -115,7 +136,7 @@ export async function startDecider(o: {
   throw new Error(`jevos (pid ${pid}) is not ready after ${Math.round((o.waitMs ?? 60_000) / 1000)} s — see ${path.join(deciderDir(home), "jev.log")}`);
 }
 
-/** stops jevos only when its /health answers and the recorded pid is the process holding that url's port: a stale or reused pid is never killed, only its files are removed */
+/** stops jevos only when its /health answers and the recorded pid is the process listening on that url's address: a stale or reused pid is never killed, only its files are removed */
 export async function stopDecider(o: { home?: string; url?: string; health?: Health; kill?: Kill }): Promise<"stopped" | "not-running"> {
   const home = o.home ?? agentosHome();
   const url = o.url ?? DEFAULT_URL;
