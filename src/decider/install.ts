@@ -65,6 +65,8 @@ export async function installDecider(opts: {
   const unpack = opts.unpack ?? realUnpack;
   const log = opts.log ?? (() => {});
   if (isInstalled(home) && !opts.force) return "already";
+  // a forced reinstall drops the marker first: if it fails halfway, the half-written tree does not count as installed
+  if (opts.force) rmSync(path.join(deciderDir(home), "version"), { force: true });
   mkdirSync(dir, { recursive: true });
   const assets = [binaryAsset(opts.platform, opts.arch), MODEL_ASSET];
   const sumsFile = path.join(dir, "SHA256SUMS.txt");

@@ -11,6 +11,7 @@ export declare function startDecider(o: {
     health?: Health;
     waitMs?: number;
     pollMs?: number;
+    processPath?: (pid: number) => string | undefined;
 }): Promise<number>;
 /**
  * Stops jevos only when its /health answers and the recorded pid runs the jev binary agentos installed.

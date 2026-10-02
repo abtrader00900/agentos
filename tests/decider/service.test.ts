@@ -18,7 +18,7 @@ describe("decider service", () => {
     await expect(startDecider({ home, freeMb: () => 5000, spawnFn: () => 1, health: async () => true })).rejects.toThrow(/agentos decider install/);
     install();
     await expect(startDecider({ home, freeMb: () => 700, spawnFn: () => 1, health: async () => true })).rejects.toThrow(/700 MB free.*1200/);
-    expect(await startDecider({ home, freeMb: () => 700, force: true, spawnFn: () => 4321, health: async () => true })).toBe(4321);
+    expect(await startDecider({ home, freeMb: () => 700, force: true, spawnFn: () => 4321, health: async () => true, processPath: () => path.join(deciderDir(home), "jev", process.platform === "win32" ? "jev.exe" : "jev") })).toBe(4321);
   });
 
   it("starts jev serve on loopback with a fresh key, and waits for /health", async () => {
@@ -28,7 +28,7 @@ describe("decider service", () => {
     const pid = await startDecider({
       home, url: "http://127.0.0.1:8123", freeMb: () => 5000,
       spawnFn: (_bin, args, env) => { calls.push({ args, env }); return 777; },
-      health: async () => ++ready >= 3, pollMs: 5,
+      health: async () => ++ready >= 3, pollMs: 5, processPath: () => path.join(deciderDir(home), "jev", process.platform === "win32" ? "jev.exe" : "jev"),
     });
     expect(pid).toBe(777);
     expect(calls[0].args).toEqual(["serve", "--host", "127.0.0.1", "--port", "8123"]);
@@ -36,6 +36,12 @@ describe("decider service", () => {
     expect(key).toMatch(/^[0-9a-f]{32}$/);
     expect(calls[0].env.JEV_API_KEY).toBe(key);
     expect(readFileSync(path.join(deciderDir(home), "jev.pid"), "utf8").trim()).toBe("777");
+  });
+
+  it("refuses a /health answer that does not come from the jev it started", async () => {
+    install();
+    await expect(startDecider({ home, freeMb: () => 5000, spawnFn: () => 1234, health: async () => true, processPath: () => "C:\other\server.exe" })).rejects.toThrow(/not from the jev agentos started/);
+    expect(existsSync(path.join(deciderDir(home), "jev.pid"))).toBe(false);
   });
 
   it("gives up when /health never says ready", async () => {

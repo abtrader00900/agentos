@@ -62,6 +62,15 @@ describe("decider install", () => {
     expect(isInstalled(home)).toBe(false);
   });
 
+  it("a forced reinstall that fails leaves nothing counted as installed", async () => {
+    const good = release();
+    await installDecider({ home, platform: "win32", arch: "x64", download: good.download, unpack: good.unpack, confirm: async () => true });
+    expect(isInstalled(home)).toBe(true);
+    const bad = release(MODEL_ASSET);
+    await expect(installDecider({ home, force: true, platform: "win32", arch: "x64", download: bad.download, unpack: bad.unpack, confirm: async () => true })).rejects.toThrow(/SHA-256 mismatch/);
+    expect(isInstalled(home)).toBe(false);
+  });
+
   it("refuses a file whose hash does not match, and leaves nothing unpacked", async () => {
     const r = release(MODEL_ASSET);
     await expect(installDecider({ home, platform: "win32", arch: "x64", download: r.download, unpack: r.unpack, confirm: async () => true })).rejects.toThrow(/SHA-256 mismatch.*jevos-v2-openvino-int8\.zip/);

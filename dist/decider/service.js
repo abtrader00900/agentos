@@ -58,6 +58,8 @@ const owned = (home, pid, which) => {
     const p = which(pid);
     return !!p && canonical(p) === canonical(binary(home));
 };
+// ponytail: checking the executable and killing are two steps, so a pid that exits and is reused in between
+// could still be hit; no OS offers an atomic check-and-kill here, and the window is microseconds
 const realKill = (pid) => {
     try {
         process.kill(pid);
@@ -96,10 +98,16 @@ export async function startDecider(o) {
     writeFileSync(pidFile(home), `${pid}\n`);
     const health = o.health ?? realHealth;
     for (const until = Date.now() + (o.waitMs ?? 60_000); Date.now() < until; await new Promise((r) => setTimeout(r, o.pollMs ?? 500))) {
-        if (await health(url))
-            return pid;
+        if (await health(url)) {
+            // the answer must come from the jev we just started, not from something else already on that port
+            if (owned(home, pid, o.processPath ?? processPath))
+                return pid;
+            rmSync(pidFile(home), { force: true });
+            rmSync(keyPath, { force: true });
+            throw new Error(`${url} answers /health, but not from the jev agentos started (pid ${pid}): another server holds that address — stop it or set decider.url to a free port`);
+        }
     }
-    if (pid > 0 && owned(home, pid, processPath))
+    if (pid > 0 && owned(home, pid, o.processPath ?? processPath))
         realKill(pid); // a jev that never got ready is not left behind
     rmSync(pidFile(home), { force: true });
     rmSync(keyPath, { force: true });
