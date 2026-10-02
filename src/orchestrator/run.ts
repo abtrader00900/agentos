@@ -45,8 +45,8 @@ export interface RunState {
   quick?: boolean;
   /** --onto: a CI fix that lands on this agentos/run-* branch (its open PR) instead of opening a new PR */
   onto?: string;
-  /** the last review that ran: the commit it saw and what it found; the next one checks only the fix since */
-  reviewed?: { head: string; findings: Finding[] };
+  /** the last review that ran: the commit and the agents' reports it saw, and what it found; the next one checks only the fix since */
+  reviewed?: { head: string; reports: string; findings: Finding[] };
   prUrl?: string;
   enginePid?: number;
   /** lessons injected into this run's prompts (PRD 2) */

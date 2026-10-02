@@ -314,13 +314,16 @@ function notes(c: Ctx, role: Role): string {
 const reportLine = (r: AgentReport | null | undefined) =>
   r ? `CHANGED: ${r.changed.join("; ") || "none"}\nNOT DONE: ${r.notDone.join("; ") || "none"}\nASSUMED: ${r.assumed.join("; ") || "none"}\nNOT VERIFIED: ${r.notVerified.join("; ") || "none"}` : "(no report)";
 
+/** the claims the reviewer must check against the diff; also the review's cache key, so a new claim is never left unchecked */
+const reportsBlock = (s: RunState): string =>
+  [
+    ...s.subtasks.map((t) => `${t.id} (${t.agent}):\n${reportLine(t.report)}`),
+    ...(s.fixReport ? [`last fix round:\n${reportLine(s.fixReport)}`] : []),
+  ].join("\n\n");
+
 /** the reviewer's extra instructions: weakened tests, and the workers' claims to check against the diff */
 function reviewNotes(c: Ctx): string {
-  const reports = [
-    ...c.s.subtasks.map((t) => `${t.id} (${t.agent}):\n${reportLine(t.report)}`),
-    ...(c.s.fixRound > 0 ? [`last fix round:\n${reportLine(c.s.fixReport)}`] : []),
-  ].join("\n\n");
-  return [notes(c, "reviewer"), REVIEW_GATES, `Workers' reports:\n${reports}`].filter(Boolean).join("\n\n");
+  return [notes(c, "reviewer"), REVIEW_GATES, `Workers' reports:\n${reportsBlock(c.s)}`].filter(Boolean).join("\n\n");
 }
 
 /** --quick: the whole task as one subtask for the first worker, with no planner call */
@@ -461,7 +464,7 @@ async function resolveConflicts(c: Ctx, files: string[], agent: AgentName): Prom
 
 type Review =
   | { ran: false; rateLimited: boolean; error: string }
-  | { ran: true; findings: Finding[]; head: string; kind: "full" | "fix" | "unchanged" };
+  | { ran: true; findings: Finding[]; head: string; reports: string; kind: "full" | "fix" | "unchanged" };
 
 /** The cross-model review. After a fix round it sees only the fix, checked against its earlier findings. */
 async function review(c: Ctx): Promise<Review> {
@@ -470,8 +473,9 @@ async function review(c: Ctx): Promise<Review> {
   const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
   const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
   const last = s.reviewed;
-  // nothing changed since the last review: its findings still stand, deterministically
-  if (last?.head === head) return { ran: true, findings: last.findings, head, kind: "unchanged" };
+  const reports = reportsBlock(s);
+  // same commit and the same claims to check since the last review: its findings still stand, deterministically
+  if (last?.head === head && last.reports === reports) return { ran: true, findings: last.findings, head, reports, kind: "unchanged" };
   const scoped = !!last && tryGit(s.runWorktree, ["merge-base", "--is-ancestor", last.head, "HEAD"]).ok;
   const prompt = scoped
     ? reReviewPrompt(
@@ -483,7 +487,7 @@ async function review(c: Ctx): Promise<Review> {
   if (res.rateLimited) return { ran: false, rateLimited: true, error: `the reviewer (${reviewer}) hit a rate limit` };
   if (!res.ok) return { ran: false, rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}` };
   const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
-  return { ran: true, findings, head, kind: scoped ? "fix" : "full" };
+  return { ran: true, findings, head, reports, kind: scoped ? "fix" : "full" };
 }
 
 async function verify(c: Ctx): Promise<void> {
@@ -506,7 +510,7 @@ async function verify(c: Ctx): Promise<void> {
   } else {
     s.findings = [...r.findings, ...tamper];
     // reviewer findings only: tampering is recomputed on every verify
-    s.reviewed = { head: r.head, findings: r.findings };
+    s.reviewed = { head: r.head, reports: r.reports, findings: r.findings };
   }
   saveRun(c.root, s);
   logEvent(c.root, s.id, {

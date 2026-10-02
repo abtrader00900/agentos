@@ -480,6 +480,19 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
     expect(s.findings[0].issue).toBe("still wrong");
   });
 
+  it("asks the reviewer again when a fixer that changed nothing still made claims", async () => {
+    const prompts: string[] = [];
+    const d = deps({
+      plan: planOf(sub("a")),
+      review: (p) => { prompts.push(p); return high("still wrong"); },
+      work: (cwd, p) => (p.includes("does not pass yet") ? reply("CHANGED: a.txt\nNOT DONE: none") : creates(cwd, p)),
+    });
+    const s = await startRun(repo.root, "claiming fixer", cfg({ maxFixRounds: 1 }), d);
+    expect(s.status).toBe("needs_human");
+    expect(prompts).toHaveLength(2); // the claim is new even though the commit is not
+    expect(prompts[1]).toContain("CHANGED: a.txt");
+  });
+
   it("sends failing tests to the fixer when the reviewer hits a rate limit, instead of pausing", async () => {
     const verify = [`node -e "process.exit(require('fs').existsSync('fixed.txt') ? 0 : 1)"`];
     const results: (string | RunnerResult)[] = [LIMIT, "[]"];
