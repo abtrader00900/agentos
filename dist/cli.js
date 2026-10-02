@@ -217,6 +217,7 @@ program
     .option("--status <id>", "print a run's full state as JSON")
     .option("--id <id>", "use this run id (used by the orchestrator MCP server)")
     .option("--quick", "skip the planner: one agent does the whole task (faster for small tasks)")
+    .option("--plan", "always run the planner (never let the decider choose --quick)")
     .option("--onto <branch>", "fix an agentos PR in place: work on its agentos/run-* branch and push there (no new PR)")
     .action(async (words, opts) => {
     try {

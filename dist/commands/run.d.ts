@@ -9,6 +9,7 @@ export declare function run(task: string, opts: {
     status?: string;
     id?: string;
     quick?: boolean;
+    plan?: boolean;
     onto?: string;
     cwd?: string;
 }): Promise<number>;

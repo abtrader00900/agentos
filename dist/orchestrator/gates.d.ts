@@ -14,10 +14,12 @@ export interface RiskRule {
     paths?: string[];
     deletedLines?: number;
 }
+/** `p` is the decider's P(yes) on `jevos:` flags (PRD 4.5b); path and line rules have none */
 export interface RiskFlag {
     rule: string;
     action: "flag" | "block";
     files: string[];
+    p?: number;
 }
 export interface AgentReport {
     changed: string[];

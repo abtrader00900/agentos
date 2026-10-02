@@ -20,9 +20,10 @@ export function prBody(s) {
     return [
         `**Task:** ${s.task}`,
         s.risk?.length
-            ? `**⚠️ Look here** — risky parts of this change:\n${s.risk.map((f) => `- ${f.rule}: ${f.files.slice(0, 5).join(", ")}${f.files.length > 5 ? ` (+${f.files.length - 5} more)` : ""}`).join("\n")}`
+            ? `**⚠️ Look here** — risky parts of this change:\n${s.risk.map((f) => `- ${f.rule}${f.p !== undefined ? ` (${Math.round(f.p * 100)}%)` : ""}${f.files.length ? `: ${f.files.slice(0, 5).join(", ")}${f.files.length > 5 ? ` (+${f.files.length - 5} more)` : ""}` : ""}`).join("\n")}`
             : "",
         s.plan ? `**Plan:** ${s.plan.summary}` : "",
+        s.autoQuick ? `**Planner:** skipped by the decider (jevos ${s.autoQuick.p.toFixed(2)})` : "",
         `| Subtask | Agent | Status | Summary |\n|---|---|---|---|\n${rows}`,
         agentReports(s),
         // verify output stays out of the PR: test logs can hold connection strings and keys that redact() does not know
