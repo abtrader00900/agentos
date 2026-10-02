@@ -8,7 +8,8 @@ import type { Finding } from "./types.js";
 
 export interface Change { path: string; added: number; deleted: number }
 export interface RiskRule { name: string; action: "flag" | "block"; paths?: string[]; deletedLines?: number }
-export interface RiskFlag { rule: string; action: "flag" | "block"; files: string[] }
+/** `p` is the decider's P(yes) on `jevos:` flags (PRD 4.5b); path and line rules have none */
+export interface RiskFlag { rule: string; action: "flag" | "block"; files: string[]; p?: number }
 export interface AgentReport { changed: string[]; notDone: string[]; assumed: string[]; notVerified: string[] }
 
 /** `**` crosses folders, `*` and `?` stay inside one; everything else is literal */
