@@ -34,6 +34,17 @@ export type AgentName = z.infer<typeof agentNameSchema>;
 
 const modelNameSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/, "model names are letters, digits and . _ : - (at most 64)");
 
+/** a path or size rule that marks a PR for the owner's attention (flag) or stops it before it opens (block) */
+export const riskRuleSchema = z
+  .object({
+    name: z.string().min(1),
+    action: z.enum(["flag", "block"]),
+    paths: z.array(z.string().min(1)).min(1).optional(),
+    deletedLines: z.number().int().positive().optional(),
+  })
+  .strict()
+  .refine((r) => (r.paths !== undefined) !== (r.deletedLines !== undefined), { message: "a risk rule needs exactly one of paths or deletedLines" });
+
 /** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
 export const orchestratorSchema = z.object({
   /** how far a run may go on its own; merge/deploy come in a later release */
@@ -64,6 +75,8 @@ export const orchestratorSchema = z.object({
     .object({ claude: modelNameSchema.optional(), codex: modelNameSchema.optional() })
     .strict()
     .default({}),
+  /** replaces the built-in risk rules (all "flag") when given */
+  risk: z.array(riskRuleSchema).optional(),
 });
 export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
 
