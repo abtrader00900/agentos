@@ -14,6 +14,7 @@ import { finalText, killTree } from "./runners.js";
 import { git, tryGit, head, defaultBranch, statusOf, ensureExcluded, addWorktree, linkDeps, commitAll, mergeBranch, mergeInProgress, abortMerge, removeWorktree, } from "./workspace.js";
 import { prBody, prTitle } from "./report.js";
 import { usageFromLine } from "../ui/usage.js";
+import { AUTO_QUICK, CONTENT_RISK } from "../decider/questions.js";
 const minutes = (m) => m * 60_000;
 const other = (a) => (a === "claude" ? "codex" : "claude");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -40,15 +41,23 @@ export async function startRun(root, task, cfg, deps, id = newRunId(), opts = {}
     if (opts.onto && !tryGit(root, ["fetch", "-q", "origin", opts.onto]).ok)
         throw new Error(`could not fetch origin/${opts.onto}`);
     const base = git(root, ["rev-parse", opts.onto ? `origin/${opts.onto}` : baseBranch]);
+    // the decider may choose --quick; an explicit --quick/--plan, or a CI fix (--onto), is never second-guessed
+    const dc = deps.deciderConfig;
+    const askQuick = !!deps.decide && !!dc?.autoQuick && !opts.quick && !opts.plan && !opts.onto;
+    const answer = askQuick ? await deps.decide(task, AUTO_QUICK) : null;
+    const quick = !!opts.quick || (!!answer && answer.small >= dc.quickAbove);
     const now = new Date().toISOString();
     const s = {
         id, task, status: "queued", baseBranch, base,
         branch: `agentos/run-${id}`, runWorktree: path.join(runDir(root, id), "wt", "run"),
         createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [],
-        ...(opts.quick ? { quick: true } : {}), ...(opts.onto ? { onto: opts.onto } : {}),
+        ...(quick ? { quick: true } : {}), ...(answer && quick && !opts.quick ? { autoQuick: { p: answer.small } } : {}),
+        ...(opts.onto ? { onto: opts.onto } : {}),
     };
     saveRun(root, s);
     logEvent(root, id, { type: "start", task });
+    if (askQuick)
+        logEvent(root, id, answer ? { type: "decider", use: "auto-quick", p: answer.small, quick } : { type: "decider", use: "auto-quick", skipped: true });
     deps.onStatus?.(s);
     return executeRun(root, s, cfg, deps);
 }
@@ -589,6 +598,18 @@ async function gate(c) {
             return move(c, "needs_human", blocked.map((f) => `risk rule "${f.rule}" blocks the PR: ${f.files.slice(0, 5).join(", ")}`).join("; "));
         }
         s.risk = flags;
+        if (c.deps.decide && c.deps.deciderConfig?.contentRisk) {
+            const added = git(s.runWorktree, ["diff", `${s.base}..HEAD`]).split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).join("\n").slice(0, 20_000);
+            const a = added ? await c.deps.decide(added, CONTENT_RISK) : null;
+            if (a) {
+                for (const [k, p] of Object.entries(a))
+                    if (p >= c.deps.deciderConfig.riskAbove)
+                        s.risk.push({ rule: `jevos:${k}`, action: "flag", files: [], p });
+                logEvent(root, s.id, { type: "decider", use: "content-risk", answers: a });
+            }
+            else if (added)
+                logEvent(root, s.id, { type: "decider", use: "content-risk", skipped: true });
+        }
     }
     else {
         s.findings = [...s.findings, { severity: "low", file: "", line: 0, issue: "the risk check could not read the diff (git diff --numstat failed)" }];

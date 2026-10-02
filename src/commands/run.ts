@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
-import { learningSchema, type LearningConfig, type OrchestratorConfig } from "../core/schema.js";
+import { deciderSchema, learningSchema, type LearningConfig, type OrchestratorConfig } from "../core/schema.js";
+import { decider } from "../decider/client.js";
 import { git } from "../orchestrator/workspace.js";
 import { startRun, resumeRun, cancelRun, assertCleanCheckout, type EngineDeps } from "../orchestrator/engine.js";
 import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/run.js";
@@ -51,8 +52,18 @@ function recordFailedStart(root: string, id: string, task: string, e: Error): vo
   logEvent(root, id, { type: "status", status: "failed", reason: e.message });
 }
 
+/** the decider's settings (defaults when the block is absent); a missing server just answers null */
+function deciderDeps(root: string): Pick<EngineDeps, "decide" | "deciderConfig"> {
+  try {
+    const deciderConfig = deciderSchema.parse(loadConfig(root).config.decider ?? {});
+    return { decide: decider(deciderConfig), deciderConfig };
+  } catch {
+    return {};
+  }
+}
+
 /** agentos run: start, resume, cancel or inspect a run. Returns the exit code. */
-export async function run(task: string, opts: { resume?: string; cancel?: string; status?: string; id?: string; quick?: boolean; onto?: string; cwd?: string }): Promise<number> {
+export async function run(task: string, opts: { resume?: string; cancel?: string; status?: string; id?: string; quick?: boolean; plan?: boolean; onto?: string; cwd?: string }): Promise<number> {
   const root = repoRoot(opts.cwd);
   try { registerProject(root); } catch { /* a registry problem never blocks a run */ }
   if (opts.status) {
@@ -69,6 +80,7 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
     learning: learningOf(root),
     onStatus: (s) => console.log(`→ ${s.status}${s.reason ? `: ${s.reason.split("\n")[0]}` : ""}`),
     onLearning: (r) => console.log(r ? `learned: ${r}` : "→ learning…"),
+    ...deciderDeps(root),
   });
   let s;
   if (opts.resume) {
@@ -77,7 +89,7 @@ export async function run(task: string, opts: { resume?: string; cancel?: string
   } else {
     try {
       const cfg = preflight(root);
-      s = await startRun(root, task, cfg, deps(cfg), opts.id, { quick: opts.quick, onto: opts.onto });
+      s = await startRun(root, task, cfg, deps(cfg), opts.id, { quick: opts.quick, onto: opts.onto, plan: opts.plan });
     } catch (e) {
       if (opts.id) recordFailedStart(root, opts.id, task, e as Error);
       throw e;

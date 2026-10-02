@@ -23,6 +23,8 @@ import {
 } from "./workspace.js";
 import { prBody, prTitle } from "./report.js";
 import { usageFromLine } from "../ui/usage.js";
+import type { Decide, DeciderConfig } from "../decider/client.js";
+import { AUTO_QUICK, CONTENT_RISK } from "../decider/questions.js";
 
 export interface EngineDeps {
   runners: Record<AgentName, { read: Runner; write: Runner }>;
@@ -34,6 +36,9 @@ export interface EngineDeps {
   learning?: LearningConfig;
   /** called with no argument when learning after the run starts, and with its outcome when it ends */
   onLearning?: (learned?: "done" | "skipped" | "failed") => void;
+  /** the optional local decider (PRD 4.5b); absent or null answers = behave as without it */
+  decide?: Decide;
+  deciderConfig?: DeciderConfig;
 }
 
 interface Ctx {
@@ -61,7 +66,7 @@ export function assertCleanCheckout(root: string): void {
 export const ONTO_BRANCH = /^agentos\/run-[0-9A-Za-z-]{1,40}$/;
 
 /** Preflight, create the run record, and drive it until it ends or pauses. */
-export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId(), opts: { quick?: boolean; onto?: string } = {}): Promise<RunState> {
+export async function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id = newRunId(), opts: { quick?: boolean; onto?: string; plan?: boolean } = {}): Promise<RunState> {
   if (existsSync(path.join(runDir(root, id), "state.json"))) throw new Error(`run ${id} already exists — pick another id, or resume it`);
   if (opts.onto !== undefined && !ONTO_BRANCH.test(opts.onto)) {
     throw new Error(`--onto only takes a branch agentos opened a PR from (agentos/run-…), not "${opts.onto}"`);
@@ -71,15 +76,22 @@ export async function startRun(root: string, task: string, cfg: OrchestratorConf
   const baseBranch = opts.onto ?? defaultBranch(root);
   if (opts.onto && !tryGit(root, ["fetch", "-q", "origin", opts.onto]).ok) throw new Error(`could not fetch origin/${opts.onto}`);
   const base = git(root, ["rev-parse", opts.onto ? `origin/${opts.onto}` : baseBranch]);
+  // the decider may choose --quick; an explicit --quick/--plan, or a CI fix (--onto), is never second-guessed
+  const dc = deps.deciderConfig;
+  const askQuick = !!deps.decide && !!dc?.autoQuick && !opts.quick && !opts.plan && !opts.onto;
+  const answer = askQuick ? await deps.decide!(task, AUTO_QUICK) : null;
+  const quick = !!opts.quick || (!!answer && answer.small >= dc!.quickAbove);
   const now = new Date().toISOString();
   const s: RunState = {
     id, task, status: "queued", baseBranch, base,
     branch: `agentos/run-${id}`, runWorktree: path.join(runDir(root, id), "wt", "run"),
     createdAt: now, updatedAt: now, subtasks: [], fixRound: 0, findings: [],
-    ...(opts.quick ? { quick: true } : {}), ...(opts.onto ? { onto: opts.onto } : {}),
+    ...(quick ? { quick: true } : {}), ...(answer && quick && !opts.quick ? { autoQuick: { p: answer.small } } : {}),
+    ...(opts.onto ? { onto: opts.onto } : {}),
   };
   saveRun(root, s);
   logEvent(root, id, { type: "start", task });
+  if (askQuick) logEvent(root, id, answer ? { type: "decider", use: "auto-quick", p: answer.small, quick } : { type: "decider", use: "auto-quick", skipped: true });
   deps.onStatus?.(s);
   return executeRun(root, s, cfg, deps);
 }
@@ -602,6 +614,14 @@ async function gate(c: Ctx): Promise<void> {
       return move(c, "needs_human", blocked.map((f) => `risk rule "${f.rule}" blocks the PR: ${f.files.slice(0, 5).join(", ")}`).join("; "));
     }
     s.risk = flags;
+    if (c.deps.decide && c.deps.deciderConfig?.contentRisk) {
+      const added = git(s.runWorktree, ["diff", `${s.base}..HEAD`]).split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).join("\n").slice(0, 20_000);
+      const a = added ? await c.deps.decide(added, CONTENT_RISK) : null;
+      if (a) {
+        for (const [k, p] of Object.entries(a)) if (p >= c.deps.deciderConfig.riskAbove) s.risk.push({ rule: `jevos:${k}`, action: "flag", files: [], p });
+        logEvent(root, s.id, { type: "decider", use: "content-risk", answers: a });
+      } else if (added) logEvent(root, s.id, { type: "decider", use: "content-risk", skipped: true });
+    }
   } else {
     s.findings = [...s.findings, { severity: "low", file: "", line: 0, issue: "the risk check could not read the diff (git diff --numstat failed)" }];
   }
