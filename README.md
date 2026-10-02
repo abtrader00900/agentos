@@ -298,7 +298,7 @@ It only ever adds. It never blocks a run and never removes a check. When it is n
 agentos decider install     # asks first, then downloads about 650 MB (--yes skips the question, --force reinstalls)
 agentos decider start       # starts jev serve on the configured loopback host with a fresh API key (--force starts on little free memory)
 agentos decider status      # installed? running? free memory
-agentos decider stop        # stops it — only a jevos that answers /health on that URL is ever killed
+agentos decider stop        # stops it — it kills the recorded pid only when /health answers on that URL and that pid is the process holding its port
 ```
 
 The download takes the binary for your platform (windows-x64, linux-x64, macos-arm64) plus the model, and checks every file against the release's `SHA256SUMS.txt`; a mismatch leaves nothing installed. Everything lands in `~/.agentos/jevos`. jevos needs about 1–1.4 GB of memory, so `start` refuses below 1200 MB free unless you pass `--force`.
