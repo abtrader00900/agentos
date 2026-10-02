@@ -221,13 +221,14 @@ export async function runDaemon(home = agentosHome()) {
     }
 }
 /** Windows runs whatever is in this per-user folder at logon; no admin rights needed (Task Scheduler's logon trigger needs them) */
-export const startupDir = (env = process.env) => path.join(env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+export const startupDir = (env = process.env) => path.join(env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 const STARTUP_FILE = "agentos-daemon.cmd";
 /** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
 export const startupScript = (node, cli) => {
     // inside quotes cmd leaves & ^ | < > alone, but still expands %…%: a literal % is written %%
     const q = (p) => `"${p.replace(/%/g, "%%")}"`;
-    return ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min ${q(node)} ${q(cli)} daemon start`, ""].join("\r\n");
+    // with delayed expansion off, a ! in a path stays a !
+    return ["@echo off", "setlocal DisableDelayedExpansion", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min ${q(node)} ${q(cli)} daemon start`, ""].join("\r\n");
 };
 /** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
 export function installTask(cli = cliPath(), dir = startupDir(), platform = process.platform) {
@@ -237,7 +238,9 @@ export function installTask(cli = cliPath(), dir = startupDir(), platform = proc
         throw new Error(`agentos runs from the npx cache (${cli}), which moves; install it first: npm i -g @basit0090/agent-os`);
     mkdirSync(dir, { recursive: true });
     const file = path.join(dir, STARTUP_FILE);
-    writeFileSync(file, startupScript(process.execPath, cli));
+    // written aside, then renamed over: a failed write never leaves a broken logon script behind
+    writeFileSync(`${file}.tmp`, startupScript(process.execPath, cli));
+    renameSync(`${file}.tmp`, file);
     return file;
 }
 /** removes the logon script; false when there was none */

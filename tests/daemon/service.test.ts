@@ -113,6 +113,8 @@ describe("daemon service", () => {
   });
 
   it("finds the Startup folder under APPDATA", () => {
+    expect(startupDir({ APPDATA: "" })).toBe(path.join(os.homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup"));
+    expect(startupScript("n", "c")).toContain("setlocal DisableDelayedExpansion");
     expect(startupDir({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" })).toBe(path.join("C:\\Users\\u\\AppData\\Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup"));
   });
 
