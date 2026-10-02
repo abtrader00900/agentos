@@ -32,6 +32,16 @@ describe("lesson injection", { timeout: 60_000 }, () => {
     expect(lessonsFor(repo.root, "worker", "x", 0)).toEqual({ block: "", keys: [] });
   });
 
+  it("leaves out lessons that share no meaningful word with the task", () => {
+    saveLessons(repo.root, "r2", undefined, [
+      { text: "Run php artisan migrate --pretend before a database migration", roles: ["worker"], evidence: EV },
+      { text: "Keep CSS class names in kebab-case", roles: ["worker"], evidence: EV },
+    ]);
+    const r = lessonsFor(repo.root, "worker", "add a database migration for invoices", 5);
+    expect(r.block).toContain("migration");
+    expect(r.block).not.toContain("CSS");
+  });
+
   it("puts lessons in the planner, worker and reviewer prompts, never pending ones, and lists them in the PR body", async () => {
     saveLessons(repo.root, "r0", undefined, [
       { text: "Always create files with a trailing newline", roles: ["planner", "worker", "reviewer", "fixer"], evidence: EV },

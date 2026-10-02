@@ -6,6 +6,7 @@ import { makeRepo } from "../orchestrator/helpers.js";
 import { saveRun, type RunState } from "../../src/orchestrator/run.js";
 import { statusOf, ensureExcluded } from "../../src/orchestrator/workspace.js";
 import { skillDue, draftSkill, listDrafts, approveDraft, rejectDraft, draftsDir } from "../../src/learning/skilldraft.js";
+import { safetyCheck } from "../../src/learning/lessons.js";
 import type { RunnerResult } from "../../src/orchestrator/types.js";
 
 let repo: ReturnType<typeof makeRepo>;
@@ -58,10 +59,12 @@ describe("skill drafts", { timeout: 30_000 }, () => {
     expect(existsSync(path.join(draftsDir(repo.root), "erp-report"))).toBe(false);
   });
 
-  it("rejects a 100 KB hostile draft fast (the safety regexes never see more than 20 KB)", async () => {
-    const t = Date.now();
-    const r = await draftSkill(repo.root, "erp-report", [], async () => reply(GOOD + "|".repeat(100_000)), 1000);
-    expect(Date.now() - t).toBeLessThan(500);
+  it("rejects a 100 KB hostile draft unchecked (the safety regexes never see more than 20 KB)", async () => {
+    const hostile = GOOD + "|".repeat(100_000);
+    // "reject" can only come from the size cut here: nothing in the text is a secret or a risky pattern,
+    // so a run of the regexes would say "ok". Asserting that beats timing a call that spawns git.
+    expect(safetyCheck(hostile)).toBe("reject");
+    const r = await draftSkill(repo.root, "erp-report", [], async () => reply(hostile), 1000);
     expect(r.ok).toBe(false);
     expect(existsSync(path.join(draftsDir(repo.root), "erp-report", "SKILL.md"))).toBe(false);
   });
