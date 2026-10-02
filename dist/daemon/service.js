@@ -224,7 +224,11 @@ export async function runDaemon(home = agentosHome()) {
 export const startupDir = (env = process.env) => path.join(env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 const STARTUP_FILE = "agentos-daemon.cmd";
 /** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
-export const startupScript = (node, cli) => ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min "${node}" "${cli}" daemon start`, ""].join("\r\n");
+export const startupScript = (node, cli) => {
+    // inside quotes cmd leaves & ^ | < > alone, but still expands %…%: a literal % is written %%
+    const q = (p) => `"${p.replace(/%/g, "%%")}"`;
+    return ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min ${q(node)} ${q(cli)} daemon start`, ""].join("\r\n");
+};
 /** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
 export function installTask(cli = cliPath(), dir = startupDir(), platform = process.platform) {
     if (platform !== "win32")

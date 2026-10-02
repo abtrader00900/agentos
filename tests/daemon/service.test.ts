@@ -98,6 +98,7 @@ describe("daemon service", () => {
     expect(path.basename(file)).toBe("agentos-daemon.cmd");
     expect(readFileSync(file, "utf8")).toBe(startupScript(process.execPath, cli));
     expect(startupScript("C:\\node\\node.exe", cli)).toContain('start "agentos daemon" /min "C:\\node\\node.exe" "C:\\npm\\agent-os\\dist\\cli.js" daemon start');
+    expect(startupScript("C:\\node\\node.exe", "C:\\Users\\100%&co\\cli.js")).toContain('"C:\\Users\\100%%&co\\cli.js"'); // % doubled, & safe in quotes
     expect(isInstalled(dir)).toBe(true);
     expect(uninstallTask(dir)).toBe(true);
     expect(isInstalled(dir)).toBe(false);

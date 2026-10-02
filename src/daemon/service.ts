@@ -205,8 +205,11 @@ export const startupDir = (env = process.env) => path.join(env.APPDATA ?? path.j
 const STARTUP_FILE = "agentos-daemon.cmd";
 
 /** the logon script: start the daemon minimized; it spawns the hidden loop and exits */
-export const startupScript = (node: string, cli: string): string =>
-  ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min "${node}" "${cli}" daemon start`, ""].join("\r\n");
+export const startupScript = (node: string, cli: string): string => {
+  // inside quotes cmd leaves & ^ | < > alone, but still expands %…%: a literal % is written %%
+  const q = (p: string) => `"${p.replace(/%/g, "%%")}"`;
+  return ["@echo off", "rem agentos daemon: started at logon. Remove with: agentos daemon uninstall", `start "agentos daemon" /min ${q(node)} ${q(cli)} daemon start`, ""].join("\r\n");
+};
 
 /** a logon script in the user's Startup folder that starts the daemon: per user, never elevated */
 export function installTask(cli = cliPath(), dir = startupDir(), platform = process.platform): string {
