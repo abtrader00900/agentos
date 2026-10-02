@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 — 2026-10-02
+
+PRD 4.5 adds smart gates. Every PR now says where it needs a human and what the agents themselves left out. No paid API and no new dependency. Built by `agentos run`, with two tasks in parallel; see `bench/gates-e2e.md`.
+
+### Added
+- **Risk gate.** `orchestrator.risk` rules mark a PR by path or by deleted lines. A rule with `flag` adds **⚠️ Look here** at the top of the PR body and lists the run under "Needs you" in the dashboard. A rule with `block` stops the run at `needs_human` before anything is pushed. The built-in defaults are all `flag` and cover migrations, CI/deploy files, lockfiles, auth/permission code, env/config, and 200+ deleted lines.
+- **Test-tampering guard.** A new skip/only marker or a deleted test file is a high finding, and fewer assertions in a test file is a medium finding. Both go to the fixer in the same round. They drop to low only when the task itself asks to remove or rewrite a test. The reviewer is also told to look for tests made weaker.
+- **Honest agent reports.** Workers and fixers end with a CHANGED / NOT DONE / ASSUMED / NOT VERIFIED report. The PR body shows **What the agents report**, and the reviewer checks each claim against the diff.
+
+### Changed
+- **Lessons.** Only lessons that share a meaningful word with the task are injected into prompts.
+
 ## 0.6.1 — 2026-10-02
 
 ### Fixed
