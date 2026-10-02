@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { answering, claimLock, controlTick, daemonStatus, lockFile, installTask, isInstalled, startupDir, startupScript, uninstallTask, parseStandbyMinutes, startDaemon, stopDaemon } from "../../src/daemon/service.js";
 import { writeState } from "../../src/daemon/daemon.js";
