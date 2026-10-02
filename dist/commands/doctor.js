@@ -6,6 +6,7 @@ import { loadConfig } from "../core/loader.js";
 import { cronError } from "../daemon/schedule.js";
 import { parseStandbyMinutes } from "../daemon/service.js";
 import { detectDrift } from "../core/manifest.js";
+import { isInstalled } from "../decider/install.js";
 import { gitCapture, handoffStaleness, HANDOFF_FIX } from "../core/handoff.js";
 import { HARNESS_MARKER } from "../generators/index.js";
 import { testSkills, bundledSkillsRoot } from "../core/skills.js";
@@ -207,6 +208,10 @@ export function doctor(options = {}) {
             catch { /* powercfg unavailable: nothing to report */ }
         }
     }
+    // 10. decider (optional, PRD 4.5b) — doctor() is synchronous, so no /health call here
+    add(isInstalled()
+        ? { name: "decider", status: "pass", detail: "jevos installed — agentos decider status shows whether it runs" }
+        : { name: "decider", status: "pass", detail: "not installed (optional): agentos decider install" });
     return report(checks, options);
 }
 /** project paths with trust_level = "trusted" in Codex's config.toml ([projects.'<path>'] or [projects."<path>"] tables) */
