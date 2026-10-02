@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { startDecider, stopDecider, deciderStatus } from "../../src/decider/service.js";
+import { startDecider, stopDecider, deciderStatus, processPath } from "../../src/decider/service.js";
 import { deciderDir } from "../../src/decider/client.js";
 
 let home: string;
@@ -51,10 +51,29 @@ describe("decider service", () => {
     expect(await stopDecider({ home, health: async () => false, kill: (p) => killed.push(p) })).toBe("not-running");
     expect(killed).toEqual([]);
     expect(existsSync(path.join(deciderDir(home), "jev.pid"))).toBe(false);
+    const ourBinary = path.join(deciderDir(home), "jev", process.platform === "win32" ? "jev.exe" : "jev");
     writeFileSync(path.join(deciderDir(home), "jev.pid"), "4242");
-    expect(await stopDecider({ home, health: async () => true, kill: (p) => killed.push(p) })).toBe("stopped");
+    expect(await stopDecider({ home, health: async () => true, kill: (p) => killed.push(p), processPath: () => ourBinary })).toBe("stopped");
     expect(killed).toEqual([4242]);
     expect(existsSync(path.join(deciderDir(home), "key"))).toBe(false);
+  });
+
+  it("never kills a reused pid, even while some jevos answers /health", async () => {
+    install();
+    writeFileSync(path.join(deciderDir(home), "jev.pid"), "5151");
+    const killed: number[] = [];
+    // the pid now runs another program (or another jev install): not ours
+    for (const other of ["C:\\Windows\\notepad.exe", path.join(home, "elsewhere", "jev", "jev.exe"), undefined]) {
+      writeFileSync(path.join(deciderDir(home), "jev.pid"), "5151");
+      expect(await stopDecider({ home, health: async () => true, kill: (p) => killed.push(p), processPath: () => other })).toBe("not-running");
+    }
+    expect(killed).toEqual([]);
+  });
+
+  it("reads a real process's executable path on this system", () => {
+    const p = processPath(process.pid);
+    expect(p && path.basename(p).toLowerCase()).toMatch(/^node(\.exe)?$/);
+    expect(processPath(2 ** 31 - 2)).toBeUndefined();
   });
 
   it("reports status", async () => {

@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { agentosHome } from "../ui/projects.js";
@@ -11,8 +11,6 @@ const MIN_FREE_MB = 1200;
 const DEFAULT_URL = "http://127.0.0.1:8017";
 type Spawn = (bin: string, args: string[], env: Record<string, string | undefined>, cwd: string, log: string) => number;
 type Health = (url: string) => Promise<boolean>;
-/** false means nothing was killed; anything else counts as killed */
-type Kill = (pid: number, url: string) => unknown;
 
 const realHealth: Health = async (url) => {
   try {
@@ -35,66 +33,36 @@ const binName = process.platform === "win32" ? "jev.exe" : "jev";
 const binary = (home: string) => path.join(deciderDir(home), "jev", binName);
 const pidFile = (home: string) => path.join(deciderDir(home), "jev.pid");
 
-const portOf = (url: string) => new URL(url).port || "8017";
-
-/**
- * The local addresses, spelled as netstat, ss and `lsof -F` print them, whose listener answers this url:
- * the url's own host, or a wildcard of the same family. The port alone is not enough — a listener on
- * another interface (`192.168.1.5:8017`) shares the port yet never serves the configured loopback host.
- */
-const localAddrs = (url: string): Set<string> => {
-  const host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  const port = portOf(url);
-  const hosts = host === "localhost"
-    ? ["127.0.0.1", "0.0.0.0", "[::1]", "[::]"] // whichever family fetch() picked, so a listener of either answers for it
-    : host.includes(":") ? [`[${host}]`, "[::]"] : [host, "0.0.0.0"];
-  // lsof, and ss before iproute2 4.x, spell both wildcards "*", so it has to be taken for either family
-  return new Set([...hosts, "*"].map((h) => `${h}:${port}`));
-};
-
-/** the pids listening on the url's own address, or undefined when no tool on this box could say */
-const addrOwners = (url: string): Set<number> | undefined => {
-  const run = (bin: string, args: string[]) => execFileSync(bin, args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-  const want = localAddrs(url);
-  const pids = new Set<number>();
-  const add = (n: number) => { if (Number.isInteger(n) && n > 0) pids.add(n); };
-  const mine = (addr: string | undefined) => want.has((addr ?? "").trim().toLowerCase());
+/** the executable a pid runs, or undefined when it is gone or this system cannot say */
+export function processPath(pid: number): string | undefined {
+  const opts = { encoding: "utf8" as const, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] as ["ignore", "pipe", "ignore"] };
   try {
     if (process.platform === "win32") {
-      // "TCP  127.0.0.1:8017  0.0.0.0:0  LISTENING  1234": the state word is localized, "TCP" and the columns are not
-      for (const line of run("netstat", ["-ano", "-p", "tcp"]).split("\n")) {
-        const cols = line.trim().split(/\s+/);
-        if (cols[0] === "TCP" && cols.length >= 5 && mine(cols[1])) add(Number(cols[cols.length - 1]));
-      }
-    } else {
-      // -F prints one field per line, "p1234" then that process's "n127.0.0.1:8017", so the address is never a padded column
-      let pid = 0;
-      for (const line of run("lsof", ["-nP", `-iTCP:${portOf(url)}`, "-sTCP:LISTEN", "-Fpn"]).split("\n")) {
-        if (line[0] === "p") pid = Number(line.slice(1));
-        else if (line[0] === "n" && mine(line.slice(1))) add(pid);
-      }
+      return execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).Path`], opts).trim() || undefined;
     }
-    return pids;
+    if (process.platform === "linux") return readlinkSync(`/proc/${pid}/exe`);
+    return execFileSync("ps", ["-o", "comm=", "-p", String(pid)], opts).trim() || undefined;
   } catch {
-    // no netstat, or no lsof (it also exits non-zero when nobody listens): on Linux ss is the other answer
+    return undefined;
   }
-  try {
-    // "LISTEN 0 4096 127.0.0.1:8017 0.0.0.0:* users:((\"jev\",pid=1234,fd=7))"
-    for (const line of run("ss", ["-ltnpH"]).split("\n")) {
-      if (mine(line.trim().split(/\s+/)[3])) for (const m of line.matchAll(/pid=(\d+)/g)) add(Number(m[1]));
-    }
-    return pids;
-  } catch {
-    return undefined; // nothing here can name the owner of the address, so nothing may be killed
-  }
+}
+
+const canonical = (p: string) => {
+  let out = p;
+  try { out = realpathSync.native(p); } catch { /* keep as given */ }
+  return process.platform === "win32" ? out.toLowerCase() : out;
 };
 
 /**
- * The real kill: only the process listening on the address of the url whose /health just answered.
- * A stale pid, a reused pid, and a jevos on another interface or port, all own no listener there, so none of them is killed.
+ * Ours means the pid runs exactly the jev binary agentos installed. A stale pid that Windows handed to another
+ * program runs something else, so it is never killed. (A second copy of our own binary is ours to stop.)
  */
-const killOwner: Kill = (pid, url) => {
-  if (pid <= 0 || !addrOwners(url)?.has(pid)) return false;
+const owned = (home: string, pid: number, which: (pid: number) => string | undefined): boolean => {
+  const p = which(pid);
+  return !!p && canonical(p) === canonical(binary(home));
+};
+
+const realKill = (pid: number): boolean => {
   try {
     process.kill(pid);
     return true;
@@ -102,6 +70,7 @@ const killOwner: Kill = (pid, url) => {
     return false;
   }
 };
+
 const readPid = (home: string) => {
   try { const p = Number(readFileSync(pidFile(home), "utf8").trim()); return Number.isInteger(p) && p > 0 ? p : undefined; } catch { return undefined; }
 };
@@ -130,22 +99,28 @@ export async function startDecider(o: {
   for (const until = Date.now() + (o.waitMs ?? 60_000); Date.now() < until; await new Promise((r) => setTimeout(r, o.pollMs ?? 500))) {
     if (await health(url)) return pid;
   }
-  killOwner(pid, url); // a jev that took the port but never got ready is not left behind: stop cannot end it while /health stays silent
+  if (pid > 0 && owned(home, pid, processPath)) realKill(pid); // a jev that never got ready is not left behind
   rmSync(pidFile(home), { force: true });
   rmSync(keyPath, { force: true });
   throw new Error(`jevos (pid ${pid}) is not ready after ${Math.round((o.waitMs ?? 60_000) / 1000)} s — see ${path.join(deciderDir(home), "jev.log")}`);
 }
 
-/** stops jevos only when its /health answers and the recorded pid is the process listening on that url's address: a stale or reused pid is never killed, only its files are removed */
-export async function stopDecider(o: { home?: string; url?: string; health?: Health; kill?: Kill }): Promise<"stopped" | "not-running"> {
+/**
+ * Stops jevos only when its /health answers and the recorded pid runs the jev binary agentos installed.
+ * A stale or reused pid is never killed; its files are removed either way.
+ */
+export async function stopDecider(o: {
+  home?: string; url?: string; health?: Health; kill?: (pid: number) => unknown; processPath?: (pid: number) => string | undefined;
+}): Promise<"stopped" | "not-running"> {
   const home = o.home ?? agentosHome();
   const url = o.url ?? DEFAULT_URL;
   const pid = readPid(home);
   const alive = await (o.health ?? realHealth)(url);
-  const stopped = alive && pid !== undefined && (o.kill ?? killOwner)(pid, url) !== false;
+  const ours = alive && pid !== undefined && owned(home, pid, o.processPath ?? processPath);
+  if (ours) (o.kill ?? realKill)(pid!);
   rmSync(pidFile(home), { force: true });
   rmSync(path.join(deciderDir(home), "key"), { force: true });
-  return stopped ? "stopped" : "not-running";
+  return ours ? "stopped" : "not-running";
 }
 
 export async function deciderStatus(o: { home?: string; url?: string; health?: Health }): Promise<{ installed: boolean; running: boolean; pid?: number }> {
