@@ -29,6 +29,8 @@ agentos install     # configs + MCP servers for all 5 harnesses
 agentos doctor      # health check
 ```
 
+Building a SaaS? `agentos init --saas` writes a stricter template instead of the plain one. It detects the stack from the current folder — `composer.json` → Laravel, a `package.json` that depends on `next` → Next.js, otherwise Node — and fills in that stack's `verify` commands (`php artisan test` / `npm test` + `npx tsc --noEmit`) and skills (`saas-builder`, `ponytail`, plus `tdd-laravel` or `tdd-react`). On top of the usual template it adds nine guardrail rules (plan before data-model/auth/money/infra changes, prove with test output, never weaken a test, honest closing report, secrets only in `.env.example`, ask before adding a dependency, validation + authorization + tests on every endpoint, DB changes only via migrations, record hard-to-reverse decisions) and an `orchestrator` block with the six built-in risk rules written out, so `agentos run` is ready to use. It also creates `docs/decisions/README.md` (never overwriting an existing one) describing the decision-record format. The detected stack is printed; plain `agentos init` is unchanged.
+
 From source: `npm install && npm test`, dev CLI: `npx tsx src/cli.ts <cmd>`.
 
 ### Upgrading
@@ -83,6 +85,7 @@ Leave the version out of `agent.config.yaml`: `sync` pins the servers to the CLI
 | Command | Karta kya hai |
 |---|---|
 | `agentos init` | `agent.config.yaml` template banata hai |
+| `agentos init --saas` | SaaS template — stack detect (Laravel / Next.js / Node), guardrail rules, `orchestrator` + `docs/decisions/` |
 | `agentos install` | Configs + `.agentos/` + skills + `.gitignore` setup |
 | `agentos sync` | Sab harness configs regenerate (drift par ruk jata hai) |
 | `agentos sync --force` | Drifted / pehle se maujood files overwrite (purani copy `<file>.bak`) |

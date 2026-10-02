@@ -34,8 +34,9 @@ program
   .command("init")
   .description("Create agent.config.yaml in the current project")
   .option("--force", "overwrite existing config")
+  .option("--saas", "SaaS template: detected stack, guardrail rules, orchestrator + docs/decisions/")
   .action((opts) => {
-    try { init({ force: opts.force }); } catch (e) { fail(e); }
+    try { init({ force: opts.force, saas: opts.saas }); } catch (e) { fail(e); }
   });
 
 program
