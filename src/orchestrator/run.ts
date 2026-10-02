@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, appendFileSync, exi
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { retrying } from "../core/jsonstore.js";
+import type { AgentReport, RiskFlag } from "./gates.js";
 import type { AgentName, Finding, Plan } from "./types.js";
 
 export const RUN_STATUSES = ["queued", "planning", "working", "verifying", "fixing", "paused", "pr_open", "needs_human", "failed", "cancelled"] as const;
@@ -16,6 +17,8 @@ export interface SubtaskState {
   branch: string;
   worktree: string;
   summary?: string;
+  /** the worker's closing report (PRD 4.5); null when it gave none */
+  report?: AgentReport | null;
 }
 
 export interface RunState {
@@ -53,6 +56,10 @@ export interface RunState {
   learned?: "done" | "skipped" | "failed";
   /** a skill draft this run created */
   draft?: string;
+  /** the last fix round's closing report */
+  fixReport?: AgentReport | null;
+  /** risk rules this run's change tripped (flag only; a block stops the run) */
+  risk?: RiskFlag[];
 }
 
 export const runsDir = (root: string) => path.join(root, ".agentos", "runs");
