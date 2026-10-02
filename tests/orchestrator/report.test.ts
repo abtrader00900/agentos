@@ -33,4 +33,10 @@ describe("prBody", () => {
     expect(body).toContain("Not done: y");
     expect(body).toContain("Not verified: z");
   });
+
+  it("says when the decider skipped the planner and shows decider flag percentages", () => {
+    const body = prBody({ ...base, quick: true, autoQuick: { p: 0.91 }, risk: [{ rule: "jevos:money", action: "flag", files: [], p: 0.82 }] });
+    expect(body).toContain("**Planner:** skipped by the decider (jevos 0.91)");
+    expect(body).toContain("- jevos:money (82%)");
+  });
 });

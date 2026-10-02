@@ -1,6 +1,7 @@
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import type { AgentName, Runner } from "./types.js";
 import { type RunState } from "./run.js";
+import type { Decide, DeciderConfig } from "../decider/client.js";
 export interface EngineDeps {
     runners: Record<AgentName, {
         read: Runner;
@@ -14,6 +15,9 @@ export interface EngineDeps {
     learning?: LearningConfig;
     /** called with no argument when learning after the run starts, and with its outcome when it ends */
     onLearning?: (learned?: "done" | "skipped" | "failed") => void;
+    /** the optional local decider (PRD 4.5b); absent or null answers = behave as without it */
+    decide?: Decide;
+    deciderConfig?: DeciderConfig;
 }
 /** A run starts from a clean base. Its own files (run state, the memory fact it stores) are ignored locally. */
 export declare function assertCleanCheckout(root: string): void;
@@ -23,6 +27,7 @@ export declare const ONTO_BRANCH: RegExp;
 export declare function startRun(root: string, task: string, cfg: OrchestratorConfig, deps: EngineDeps, id?: string, opts?: {
     quick?: boolean;
     onto?: string;
+    plan?: boolean;
 }): Promise<RunState>;
 /** Continue a paused run, or one whose engine died mid-step. */
 export declare function resumeRun(root: string, id: string, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState>;

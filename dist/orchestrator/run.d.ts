@@ -35,6 +35,10 @@ export interface RunState {
     verifyOutput?: string;
     /** --quick: no planner, the whole task is one subtask */
     quick?: boolean;
+    /** the decider chose --quick (PRD 4.5b), with its P(yes) */
+    autoQuick?: {
+        p: number;
+    };
     /** --onto: a CI fix that lands on this agentos/run-* branch (its open PR) instead of opening a new PR */
     onto?: string;
     /** the last review that ran: the commit and the agents' reports it saw, and what it found; the next one checks only the fix since */
