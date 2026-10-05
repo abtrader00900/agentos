@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 — 2026-10-06
+
+PRD 4.5b and 4.5c add an optional local decider and `agentos init --saas`. No paid API and no new npm dependency. The eval is in `bench/decider-e2e.md`.
+
+### Added
+- **Local decider (optional, jevos).**
+  - `agentos decider install` asks before it downloads (about 650 MB from github.com/feder-cr/jev, MIT) and checks every file against the release's SHA256SUMS. `agentos decider start|stop|status` runs it. `start` refuses with less than 1200 MB free, because jevos needs about 1–1.4 GB.
+  - While it runs, `agentos run` asks it two kinds of question:
+    - **Auto-quick:** it skips the planner when the task is one small change (P ≥ 0.8). An explicit `--quick` or the new `--plan` always wins.
+    - **Content risk:** it adds ⚠️ flags (`jevos:money`, `jevos:data-loss`, `jevos:access`) from the diff's added lines (P ≥ 0.6).
+  - The decider only advises. It never blocks, and when it is off or slow a run behaves exactly as before.
+  - The decider URL must be a loopback address.
+- **`agentos init --saas`.** It writes a SaaS-ready `agent.config.yaml` for a detected Laravel, Next.js or Node stack. It includes nine guardrail rules, the `saas-builder` and `ponytail` skills, an orchestrator block with risk rules, and `docs/decisions/README.md`.
+- **`agentos run --plan`.** It always runs the planner.
+
+### Fixed
+- **Decider stop.** `decider stop` kills only a process that runs the installed jev binary, checked by its executable path. A reused PID is never killed. `start` only trusts a `/health` answer from the jev it started.
+
 ## 0.7.0 — 2026-10-02
 
 PRD 4.5 adds smart gates. Every PR now says where it needs a human and what the agents themselves left out. No paid API and no new dependency. Built by `agentos run`, with two tasks in parallel; see `bench/gates-e2e.md`.
