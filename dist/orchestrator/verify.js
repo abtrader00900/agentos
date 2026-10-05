@@ -67,12 +67,15 @@ export function parseFindings(text) {
 }
 export const blocking = (findings) => findings.filter((f) => f.severity !== "low");
 const FORMAT = 'Reply with ONLY a JSON array, for example [{"severity":"high","file":"src/a.ts","line":12,"issue":"what breaks and when"}]. Use [] when you find nothing. severity is high, medium or low.';
+// Spec Kit's "converge" step, folded into the review instead of a separate agent call
+const CONVERGE = 'Split the task into its separate requirements and check each one against the change. Report every requirement it does not meet as a finding with severity medium and an issue that starts with "Not done: " followed by the requirement.';
 const capped = (diff) => (diff.length > 150_000 ? `${diff.slice(0, 150_000)}\n…(diff truncated)` : diff);
 export function reviewPrompt(task, diff, notes = "") {
     return [
         "You are reviewing a change another AI agent made. Do not edit any files.",
         `The task was: ${task}`,
         "Report real problems only: wrong behaviour, crashes, security holes, data loss, or parts of the task left undone. Ignore style.",
+        CONVERGE,
         FORMAT,
         notes,
         "The diff:",
@@ -92,6 +95,7 @@ export function reReviewPrompt(task, earlier, fixDiff, base, changedFiles, notes
         `The task was: ${task}`,
         `Your earlier findings:\n${listed || "(none: only the tests failed)"}`,
         `Check that each earlier finding is really fixed, and that the fix broke nothing and left no part of the task undone. The diff below is only the fixer's change. The whole change touches: ${changedFiles.join(", ") || "(no files)"}; read those files (or run \`git diff ${base}..HEAD\` if you can) for context. Report real problems that remain or that the fix caused; ignore style.`,
+        CONVERGE,
         FORMAT,
         notes,
         "The fixer's diff:",

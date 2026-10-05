@@ -62,6 +62,13 @@ describe("reviewPrompt", () => {
     expect(p).toContain("+x");
     expect(reviewPrompt("t", "y".repeat(200_000))).toContain("(diff truncated)");
   });
+
+  it("asks for every requirement of the task to be checked, and an unmet one reported as Not done", () => {
+    for (const p of [reviewPrompt("add x", "+x"), reReviewPrompt("add x", [], "+x", "b", ["x"])]) {
+      expect(p).toContain("separate requirements");
+      expect(p).toContain('"Not done: ');
+    }
+  });
 });
 
 describe("reReviewPrompt", () => {
