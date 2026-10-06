@@ -34,7 +34,8 @@ describe("orchestrator config", () => {
     for (const bad of ["gpt 5", "x&calc", "a\"b", "", "m".repeat(65)]) {
       expect(orchestratorSchema.safeParse({ models: { codex: bad } }).success).toBe(false);
     }
-    expect(orchestratorSchema.safeParse({ models: { gemini: "x" } }).success).toBe(false);
+    expect(orchestratorSchema.parse({ models: { gemini: "gemini-3.1-pro-high" } }).models.gemini).toBe("gemini-3.1-pro-high");
+    expect(orchestratorSchema.safeParse({ models: { copilot: "x" } }).success).toBe(false);
   });
 
   it("accepts one model or a read/write pair per agent", () => {
@@ -55,6 +56,7 @@ describe("orchestrator config", () => {
   });
 
   it("rejects an agent it cannot drive", () => {
-    expect(orchestratorSchema.safeParse({ workers: ["gemini"] }).success).toBe(false);
+    expect(orchestratorSchema.safeParse({ workers: ["copilot"] }).success).toBe(false);
+    expect(orchestratorSchema.parse({ workers: ["gemini"] }).agents).toEqual(["claude", "gemini", "codex"]);
   });
 });

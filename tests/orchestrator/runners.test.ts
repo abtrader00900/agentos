@@ -75,6 +75,23 @@ describe("spawnRunner", () => {
     }
   });
 
+  it("wraps the prompt in agy's one NDJSON stdin line", async () => {
+    // reads exactly one line, answers the way agy does: proof the prompt arrived wrapped, on stdin
+    const agy = script("agy.mjs", `let s="";process.stdin.on("data",d=>{s+=d});process.stdin.on("end",()=>{` +
+      `const p=JSON.parse(s.split("\\n")[0]);` +
+      `console.log(JSON.stringify({event:"result",result:{status:"SUCCESS",response:p.message.content}}))});`);
+    const r = await spawnRunner(process.execPath, [agy], { agy: true })({ prompt: "write the thing", cwd: tmp, timeoutMs: 10_000 });
+    expect(r.ok).toBe(true);
+    expect(finalText(r.output)).toBe("write the thing");
+  });
+
+  it("fails an agy call whose result line says ERROR, even on exit 0", async () => {
+    const bad = script("agy-error.mjs", `process.stdin.resume();process.stdin.on("end",()=>{` +
+      `console.log(JSON.stringify({event:"result",result:{status:"ERROR",response:"",error:"Individual quota reached"}}))});`);
+    const r = await spawnRunner(process.execPath, [bad], { agy: true })({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
+    expect(r).toMatchObject({ ok: false, rateLimited: true });
+  });
+
   it("reports a missing command as a failed result", async () => {
     const r = await spawnRunner("agentos-no-such-cli", [])({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
     expect(r.ok).toBe(false);
@@ -110,10 +127,36 @@ describe("cliArgs", () => {
     expect(all.join(" ")).not.toMatch(/dangerously|--yolo/);
   });
 
+  it("never passes a bypass flag or the prompt in argv, for any agent and mode", () => {
+    for (const a of ["claude", "codex", "gemini"] as const)
+      for (const m of ["read", "write"] as const) {
+        const [, args] = cliArgs(a, m, "x");
+        expect(args.join(" ")).not.toMatch(/dangerously|--yolo|--auto\b|bypass/);
+        // the only argv value equal to the prompt-shaped "x" is the model's: user text goes on stdin
+        expect(args.filter((v) => v === "x")).toHaveLength(1);
+        expect(args[args.indexOf("x") - 1]).toMatch(/^(--model|-m)$/);
+      }
+    expect(cliArgs("gemini", "read")[1].join(" ")).toContain("--input-format stream-json");
+  });
+
+  it("gives agy its mode, its sandbox and a configured model", () => {
+    expect(cliArgs("gemini", "write", "gemini-3.1-pro-high")[1]).toEqual(
+      ["--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-3.1-pro-high", "--mode", "accept-edits", "--sandbox"]);
+    expect(cliArgs("gemini", "read")[1]).toEqual(expect.arrayContaining(["--mode", "plan", "--sandbox"]));
+    expect(cliArgs("gemini", "read")[1]).not.toContain("--model");
+    expect(cliArgs("gemini", "read")[1]).not.toContain("-p");
+    expect(modelFor({ read: "gemini-3.8-flash-high" }, "read")).toBe("gemini-3.8-flash-high");
+  });
+
   it("builds read and write runners for both CLIs", () => {
     const r = cliRunners({ codex: "gpt-5.6-sol" });
     expect(typeof r.claude.read).toBe("function");
     expect(typeof r.codex.write).toBe("function");
+  });
+
+  it("builds read and write runners for gemini", () => {
+    expect(typeof cliRunners({}).gemini.read).toBe("function");
+    expect(typeof cliRunners({ gemini: "gemini-3.1-pro-high" }).gemini.write).toBe("function");
   });
 
   it("builds each mode's runner with that mode's model", () => {
@@ -124,10 +167,17 @@ describe("cliArgs", () => {
   });
 });
 
+/** one agy turn, copied from the probe of agy 1.2.17 */
+const AGY_SAMPLE_OUTPUT = '{"event":"step_update","step_update":{"text_delta":"work"}}\n{"event":"result","result":{"status":"SUCCESS","response":"done","usage":{"input_tokens":12,"output_tokens":3}}}\n';
+
 describe("finalText", () => {
   it("reads the last message of Claude stream-json and Codex --json output", () => {
     expect(finalText(`{"type":"system"}\n{"type":"result","result":"claude done"}\n`)).toBe("claude done");
     expect(finalText(`{"type":"item.completed","item":{"type":"agent_message","text":"codex done"}}\n{"type":"turn.completed"}\n`)).toBe("codex done");
     expect(finalText("plain output")).toBe("plain output");
+  });
+
+  it("reads agy's final message", () => {
+    expect(finalText(AGY_SAMPLE_OUTPUT)).toBe("done");
   });
 });

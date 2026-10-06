@@ -13,6 +13,7 @@ describe("learning config", () => {
   it("bounds its numbers", () => {
     expect(learningSchema.safeParse({ maxLessonsInPrompt: 21 }).success).toBe(false);
     expect(learningSchema.safeParse({ skillAfterRuns: 1 }).success).toBe(false);
-    expect(learningSchema.safeParse({ retroAgent: "gemini" }).success).toBe(false);
+    expect(learningSchema.safeParse({ retroAgent: "copilot" }).success).toBe(false);
+    expect(learningSchema.parse({ retroAgent: "gemini" }).retroAgent).toBe("gemini");
   });
 });
