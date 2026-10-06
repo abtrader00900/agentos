@@ -70,6 +70,17 @@ describe("frontend", () => {
     expect(app).not.toMatch(/innerHTML/);
   });
 
+  it("sums up the router events on one line each", () => {
+    const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
+    vm.runInNewContext(read("labels.js"), ctx);
+    const app = read("app.js");
+    expect(app).toMatch(/case "fallback": return name \+ ": " \+ e\.from \+ " → " \+ e\.to \+ " \(" \+ \(e\.why \|\| ""\) \+ "\)";/);
+    expect(app).toContain('case "read-guard":');
+    expect(app).toContain('L("events.changed")');
+    for (const k of ["ev.fallback", "ev.read-guard", "events.changed"]) expect(ctx.window.LABELS![k], k).toBeTruthy();
+    expect(app).not.toMatch(/innerHTML/);
+  });
+
   it("serves the app files with the right types", async () => {
     t = await startTestServer();
     for (const [f, type] of [["/", /text\/html/], ["/app.js", /javascript/], ["/labels.js", /javascript/], ["/style.css", /text\/css/]] as const) {
