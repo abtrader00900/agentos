@@ -331,9 +331,12 @@ async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: Runn
     const res = await run({ ...req, cwd: dir });
     const st = tryGit(dir, ["status", "--porcelain"]);
     // an unreadable status counts as changed: the guard may not assume what it cannot check
-    const files = (st.ok ? st.out.split("\n").map((l) => l.slice(3).trim()).filter(Boolean) : ["(status unreadable)"]).slice(0, 20);
+    const dirty = !st.ok || st.out !== "";
+    // tryGit trims, so the first porcelain line can lose the leading space of a " M a" code: strip the
+    // code itself rather than a fixed three characters, and never let the names decide whether it is dirty
+    const files = (st.ok ? st.out.split("\n").map((l) => l.trim().replace(/^\S{1,2}\s+/, "")).filter(Boolean) : ["(status unreadable)"]).slice(0, 20);
     const moved = tryGit(dir, ["rev-parse", "HEAD"]).out !== before;
-    if (!files.length && !moved) return res;
+    if (!dirty && !moved) return res;
     const what = files.length ? files : ["(a commit)"];
     logEvent(c.root, c.s.id, { type: "read-guard", agent: a, files: what });
     // rateLimited stays as it was, so this reads as an ordinary error to the fallback loop

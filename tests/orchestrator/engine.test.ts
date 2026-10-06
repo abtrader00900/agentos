@@ -181,6 +181,24 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
     expect(sh(repo.remote, ["log", "--all", "--name-only", "--format="])).not.toContain("sneaky.txt");
   });
 
+  it("sees a read-mode call that only modifies a tracked file with a one-character name", async () => {
+    // porcelain writes " M a"; the guard must not read the dirty flag or the name off a fixed offset
+    writeFileSync(path.join(repo.root, "a"), "1");
+    sh(repo.root, ["add", "-A"]);
+    sh(repo.root, ["commit", "-qm", "short name"]);
+    sh(repo.root, ["push", "-q", "origin", "main"]);
+    const d = deps({
+      plan: planOf(sub("b")),
+      work: creates,
+      review: (_p, cwd) => { writeFileSync(path.join(cwd, "a"), "2"); return "[]"; },
+    });
+    await startRun(repo.root, "short name", cfg(), d, "g2");
+    const events = readFileSync(path.join(runDir(repo.root, "g2"), "events.jsonl"), "utf8");
+    expect(events).toContain('"type":"read-guard"');
+    expect(events).toMatch(/"files":\[[^\]]*"a"[,\]]/); // the name survives, not just the first character
+
+  });
+
   it("pauses on a worker rate limit and resumes without redoing finished subtasks", async () => {
     let aCalls = 0;
     let bCalls = 0;
