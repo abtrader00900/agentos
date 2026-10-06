@@ -455,7 +455,10 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write", rejectOk?
       // as a self-review. Compared with the worktree as it was before this attempt, so a merge in progress or
       // an earlier agent's leftovers never make it one.
       // (read calls edit only their disposable worktree, which guardRead throws away.)
-      if (mode === "write" && worktreeFingerprint(req.cwd) !== before) addEditor(c.s, a);
+      if (mode === "write" && worktreeFingerprint(req.cwd) !== before) {
+        addEditor(c.s, a);
+        saveRun(c.root, c.s); // before the next attempt starts: an engine that dies during it must not forget this author
+      }
       let until: Date | undefined;
       if (res.rateLimited) {
         until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
