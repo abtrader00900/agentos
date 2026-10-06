@@ -7,7 +7,8 @@ import { startRun, resumeRun, type EngineDeps } from "../../src/orchestrator/eng
 import { requestCancel, runDir, loadRun } from "../../src/orchestrator/run.js";
 import { statusOf } from "../../src/orchestrator/workspace.js";
 import { orchestratorSchema } from "../../src/core/schema.js";
-import type { Runner, RunnerResult } from "../../src/orchestrator/types.js";
+import { memoryQuota } from "../../src/orchestrator/quota.js";
+import type { AgentName, Runner, RunnerResult } from "../../src/orchestrator/types.js";
 
 let repo: ReturnType<typeof makeRepo>;
 beforeEach(() => { repo = makeRepo(); });
@@ -21,7 +22,13 @@ const sub = (id: string, over: Record<string, unknown> = {}) =>
 const planOf = (...subtasks: object[]) => ({ summary: "test plan", subtasks });
 
 type Work = (cwd: string, prompt: string) => void | RunnerResult | Promise<void | RunnerResult>;
-function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: (prompt: string, cwd: string) => string | RunnerResult | Promise<string | RunnerResult> }) {
+function deps(f: {
+  plan: object | (() => RunnerResult);
+  work?: Work;
+  review?: (prompt: string, cwd: string) => string | RunnerResult | Promise<string | RunnerResult>;
+  /** per-agent fakes, overriding the shared ones */
+  runners?: Partial<Record<AgentName, { read?: Runner; write?: Runner }>>;
+}) {
   const reviewed = (r: string | RunnerResult) => (typeof r === "string" ? reply(r) : r);
   const read: Runner = async (req) =>
     req.prompt.includes("You are the planner")
@@ -29,7 +36,16 @@ function deps(f: { plan: object | (() => RunnerResult); work?: Work; review?: (p
       : reviewed(f.review ? await f.review(req.prompt, req.cwd) : "[]");
   const write: Runner = async (req) => (await f.work?.(req.cwd, req.prompt)) ?? reply();
   const gh = vi.fn((_cwd: string, args: string[]) => (args[0] === "pr" ? "https://github.com/o/r/pull/7\n" : ""));
-  const d: EngineDeps = { runners: { claude: { read, write }, codex: { read, write } }, gh, freeMemMb: () => 1e6 };
+  // an object literal, not an `: EngineDeps` annotation: runners is Partial there, and these tests reassign claude/codex
+  const d = {
+    runners: {
+      claude: { read: f.runners?.claude?.read ?? read, write: f.runners?.claude?.write ?? write },
+      codex: { read: f.runners?.codex?.read ?? read, write: f.runners?.codex?.write ?? write },
+    },
+    quota: memoryQuota(),
+    gh,
+    freeMemMb: () => 1e6,
+  } satisfies EngineDeps;
   return Object.assign(d, { gh });
 }
 /** a worker that creates the file its subtask prompt names */
@@ -161,10 +177,12 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
         creates(cwd, p);
       },
     });
-    const c = cfg({ maxWorkers: 1 });
+    // one agent, so a limit has nowhere to fall back to
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude", maxWorkers: 1 });
     const paused = await startRun(repo.root, "limited", c, d, "t9");
     expect(paused.status).toBe("paused");
     expect(paused.resumeFrom).toBe("working");
+    d.quota!.clear(); // the limit marked claude for an hour; the owner resumes sooner
     const s = await resumeRun(repo.root, "t9", c, d);
     expect(s.status).toBe("pr_open");
     expect(aCalls).toBe(1);
@@ -174,8 +192,10 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
   it("pauses when the planner hits a limit", async () => {
     const replies = [LIMIT, reply(JSON.stringify(planOf(sub("a"))))];
     const d = deps({ plan: () => replies.shift()!, work: creates });
-    expect((await startRun(repo.root, "later", cfg(), d, "t10")).status).toBe("paused");
-    expect((await resumeRun(repo.root, "t10", cfg(), d)).status).toBe("pr_open");
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude" }); // one agent, so a limit has nowhere to fall back to
+    expect((await startRun(repo.root, "later", c, d, "t10")).status).toBe("paused");
+    d.quota!.clear();
+    expect((await resumeRun(repo.root, "t10", c, d)).status).toBe("pr_open");
   });
 
   it("records a cancel request as cancelled", async () => {
@@ -287,7 +307,7 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
         creates(cwd, p);
       },
     });
-    const c = cfg({ maxWorkers: 1 });
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude", maxWorkers: 1 }); // one agent, so a limit pauses the run
     const paused = await startRun(repo.root, "crash mid-merge", c, d, "sm1");
     expect(paused.status).toBe("paused");
     // what a crash inside resolveConflicts leaves behind: a merge stopped on conflicts
@@ -297,6 +317,7 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
     sh(stray, ["add", "-A"]);
     sh(stray, ["commit", "-qm", "stray"]);
     expect(() => sh(paused.runWorktree, ["merge", "stray"])).toThrow();
+    d.quota!.clear();
     const s = await resumeRun(repo.root, "sm1", c, d);
     expect(s.status).toBe("pr_open");
     expect(sh(repo.root, ["show", `${s.branch}:b.txt`])).toBe("b.txt");
@@ -337,14 +358,17 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
   it("refuses a second engine on a run whose engine is alive, and takes over a dead engine's lock", async () => {
     const replies = [LIMIT, reply(JSON.stringify(planOf(sub("a"))))];
     const d = deps({ plan: () => replies.shift()!, work: creates });
-    expect((await startRun(repo.root, "locked", cfg(), d, "lk1")).status).toBe("paused");
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude" }); // one agent, so the planner's limit pauses the run
+    expect((await startRun(repo.root, "locked", c, d, "lk1")).status).toBe("paused");
     const lock = path.join(runDir(repo.root, "lk1"), "lock");
     expect(existsSync(lock)).toBe(false); // released when the engine stopped
     writeFileSync(lock, String(process.pid)); // this process is alive
-    await expect(resumeRun(repo.root, "lk1", cfg(), d)).rejects.toThrow(/already being driven by agentos process/);
+    d.quota!.clear();
+    await expect(resumeRun(repo.root, "lk1", c, d)).rejects.toThrow(/already being driven by agentos process/);
     expect(loadRun(repo.root, "lk1").status).toBe("paused");
     writeFileSync(lock, String(spawnSync(process.execPath, ["-e", ""]).pid)); // a process that has exited
-    expect((await resumeRun(repo.root, "lk1", cfg(), d)).status).toBe("pr_open");
+    d.quota!.clear();
+    expect((await resumeRun(repo.root, "lk1", c, d)).status).toBe("pr_open");
     expect(readFileSync(path.join(runDir(repo.root, "lk1"), "events.jsonl"), "utf8")).toContain('"stale-lock"');
     expect(existsSync(lock)).toBe(false);
   });
@@ -375,10 +399,12 @@ describe("orchestrator engine: review fixes", { timeout: 60_000 }, () => {
         writeFileSync(path.join(cwd, "shared.txt"), `${p.includes("create a.txt") ? "a" : "b"}\n`);
       },
     });
-    const c = cfg(); // two parallel workers start from the same base, so the second merge conflicts
+    // two parallel workers start from the same base, so the second merge conflicts; one agent, so the fixer's limit pauses
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude" });
     const paused = await startRun(repo.root, "limited fixer", c, d, "cf1");
     expect(paused.status).toBe("paused");
     expect(paused.resumeFrom).toBe("working");
+    d.quota!.clear();
     const s = await resumeRun(repo.root, "cf1", c, d);
     expect(s.status).toBe("pr_open");
     expect(sh(repo.remote, ["show", `${s.branch}:shared.txt`])).toBe("a and b");
@@ -557,9 +583,11 @@ describe("orchestrator engine: --onto", { timeout: 60_000 }, () => {
     const pr = prBranch("agentos/run-pr2");
     let calls = 0;
     const d = deps({ plan: planOf(sub("a")), work: (cwd, p) => (++calls === 1 ? LIMIT : creates(cwd, p)) });
-    const paused = await startRun(repo.root, "create main.txt", cfg(), d, "o4", { onto: pr.name, quick: true });
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude" }); // one agent, so the limit pauses the run
+    const paused = await startRun(repo.root, "create main.txt", c, d, "o4", { onto: pr.name, quick: true });
     expect(paused.status).toBe("paused");
-    const s = await resumeRun(repo.root, "o4", cfg(), d);
+    d.quota!.clear();
+    const s = await resumeRun(repo.root, "o4", c, d);
     expect(s.status).toBe("pr_open");
     expect(sh(repo.remote, ["merge-base", "--is-ancestor", pr.tip, pr.name])).toBe("");
   });
@@ -688,5 +716,74 @@ describe("orchestrator engine: decider", { timeout: 60_000 }, () => {
     const events = readFileSync(path.join(runDir(repo.root, s.id), "events.jsonl"), "utf8");
     expect(events).toContain('"use":"auto-quick","skipped":true');
     expect(events).toContain('"use":"content-risk","skipped":true');
+  });
+});
+
+describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
+  it("finishes on the next allowed agent when the first hits its quota, without pausing", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    d.runners.claude.write = async () => LIMIT;
+    const s = await startRun(repo.root, "quota", cfg(), d, "q1");
+    expect(s.status).toBe("pr_open");
+    // claude is limited, so codex reviewed its own code: allowed, but flagged for the owner
+    expect(s.selfReview).toBe(true);
+    const body = prCalls(d)[0][1] as string[];
+    expect(body[body.indexOf("--body") + 1]).toContain("reviewed by the same model that wrote it");
+    expect(d.quota!.until("claude", new Date())).toBeDefined();
+    const events = readFileSync(path.join(runDir(repo.root, "q1"), "events.jsonl"), "utf8");
+    expect(events).toContain('"type":"fallback"');
+    expect(events).toContain('"why":"quota"');
+  });
+
+  it("pauses with resumeAt only when every allowed agent is limited", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    d.runners.claude.write = async () => LIMIT;
+    d.runners.codex.write = async () => LIMIT;
+    const s = await startRun(repo.root, "all limited", cfg(), d, "q2");
+    expect(s.status).toBe("paused");
+    expect(Date.parse(s.resumeAt!)).toBeGreaterThan(Date.now());
+  });
+
+  it("skips an agent the store already marks limited", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    let claudeCalls = 0;
+    const base = d.runners.claude.write;
+    d.runners.claude.write = async (r) => { claudeCalls++; return base(r); };
+    d.quota!.mark("claude", new Date(Date.now() + 60_000));
+    expect((await startRun(repo.root, "pre-limited", cfg(), d, "q3")).status).toBe("pr_open");
+    expect(claudeCalls).toBe(0);
+  });
+
+  it("an early resume while every agent is still limited pauses again without calling any agent", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    let calls = 0;
+    for (const a of ["claude", "codex"] as const) {
+      const w = d.runners[a].write; d.runners[a].write = async (r) => { calls++; return w(r); };
+      const rd = d.runners[a].read; d.runners[a].read = async (r) => { calls++; return rd(r); };
+      d.quota!.mark(a, new Date(Date.now() + 3_600_000));
+    }
+    const s = await startRun(repo.root, "all pre-limited", cfg(), d, "q5");
+    expect(s.status).toBe("paused");
+    expect(calls).toBe(0);
+    expect((await resumeRun(repo.root, "q5", cfg(), d)).status).toBe("paused");
+    expect(calls).toBe(0);
+  });
+
+  it("never leaves the agents allowlist", () => {
+    expect(() => cfg({ agents: ["claude"], workers: ["claude", "codex"] })).toThrow();
+    expect(cfg({}).agents).toEqual(["claude", "codex"]);
+  });
+
+  it("picks a reviewer that did not write the code, even after a fallback", async () => {
+    let reviewers: string[] = [];
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    // an error (not a quota limit, which would also bar claude from reviewing) hands the claude subtask to codex
+    d.runners.claude.write = async () => ({ ok: false, output: "crashed\n", rateLimited: false, timedOut: false });
+    const codexRead = d.runners.codex.read;
+    d.runners.codex.read = async (r) => { if (!r.prompt.includes("You are the planner")) reviewers.push("codex"); return codexRead(r); };
+    const claudeRead = d.runners.claude.read;
+    d.runners.claude.read = async (r) => { if (!r.prompt.includes("You are the planner")) reviewers.push("claude"); return claudeRead(r); };
+    await startRun(repo.root, "who reviews", cfg(), d, "q4");
+    expect(reviewers[0]).toBe("claude");
   });
 });
