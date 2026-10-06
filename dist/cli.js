@@ -9,6 +9,8 @@ import { handoff, handoffShow } from "./commands/handoff.js";
 import { doctor } from "./commands/doctor.js";
 import { learn } from "./commands/learn.js";
 import { run, runs } from "./commands/run.js";
+import { quotaReport, clearQuotaCmd } from "./commands/quota.js";
+import { agentosHome } from "./ui/projects.js";
 import { ui } from "./commands/ui.js";
 import { lessonsCommand, learnRuns, skillDraftsCommand, skillApproveCommand, skillRejectCommand } from "./commands/lessons.js";
 import { daemonCommand, queueCommand } from "./commands/daemon.js";
@@ -243,6 +245,23 @@ program
 catch (e) {
     fail(e);
 } });
+program
+    .command("quota [action] [agent]")
+    .description("Which agents are rate-limited right now, or: clear [agent] (no agent clears every one)")
+    .action((action, agent) => {
+    try {
+        if (!action) {
+            console.log(quotaReport(agentosHome(), new Date()));
+            return;
+        }
+        if (action !== "clear")
+            throw new Error(`Unknown action "${action}" — use: agentos quota | agentos quota clear [agent]`);
+        clearQuotaCmd(agentosHome(), agent);
+    }
+    catch (e) {
+        fail(e);
+    }
+});
 program
     .command("ui")
     .description("Open the local agentos dashboard")
