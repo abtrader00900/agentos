@@ -358,15 +358,20 @@ async function guardRead(c, a, req, run) {
  * or a new file an earlier attempt left — still shows.
  */
 function worktreeFingerprint(cwd) {
-    const h = createHash("sha256").update(tryGit(cwd, ["diff", "HEAD", "--binary"]).out);
-    // -z: raw paths, NUL-separated (without it git C-quotes non-ASCII names and readFileSync misses them);
-    // read untrimmed, since tryGit trims and a name may start with a space
-    let untracked = "";
-    try {
-        untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    }
-    catch { /* not readable: tracked changes and the status still count */ }
-    for (const f of untracked.split("\0").filter(Boolean)) {
+    // raw git output throughout: tryGit trims, which would hide a whitespace-only edit at the very end.
+    // ponytail: file modes of untracked files are not part of it (an exec bit flip on a new file goes
+    // unseen); add `git ls-files -s`-style modes if that ever matters
+    const raw = (args) => {
+        try {
+            return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, maxBuffer: 256 * 1024 * 1024 });
+        }
+        catch {
+            return "";
+        }
+    };
+    const h = createHash("sha256").update(raw(["diff", "HEAD", "--binary"]));
+    // -z: raw paths, NUL-separated (without it git C-quotes non-ASCII names and readFileSync misses them)
+    for (const f of raw(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean)) {
         h.update(`\0${f}\0`);
         try {
             h.update(readFileSync(path.join(cwd, f)));
