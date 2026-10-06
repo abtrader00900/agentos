@@ -3,6 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { loadConfig } from "../core/loader.js";
+import { fileQuota } from "../orchestrator/quota.js";
+import { agentosHome } from "../ui/projects.js";
 import { cronError } from "../daemon/schedule.js";
 import { parseStandbyMinutes } from "../daemon/service.js";
 import { detectDrift } from "../core/manifest.js";
@@ -212,6 +214,24 @@ export function doctor(options = {}) {
     add(isInstalled()
         ? { name: "decider", status: "pass", detail: "jevos installed — agentos decider status shows whether it runs" }
         : { name: "decider", status: "pass", detail: "not installed (optional): agentos decider install" });
+    // 11. the agent CLIs a run spawns. A missing one only warns: an owner who works with a single
+    // agent must still come out ok. Never spawn them to ask a version (see resolveOnPath) — the
+    // resolved path is the whole proof, and the quota mark says when the agent is usable again.
+    const quota = fileQuota(agentosHome());
+    const agentClis = [
+        { agent: "claude", bin: "claude", fix: "Install Claude Code: npm i -g @anthropic-ai/claude-code, then run claude once to log in" },
+        { agent: "codex", bin: "codex", fix: "Install Codex: npm i -g @openai/codex, then run codex once to log in" },
+        { agent: "gemini", bin: "agy", fix: "Install Google's agy CLI, then run agy once to log in with the Google AI Pro account" },
+    ];
+    for (const { agent, bin, fix } of agentClis) {
+        // the quota file keys marks by agent name; "gemini" only joins AgentName in a later task
+        const until = quota.until(agent, new Date());
+        const limited = until ? ` — limited until ${until.toISOString()}` : "";
+        const found = resolveOnPath(bin);
+        add(found
+            ? { name: `agent:${agent}`, status: "pass", detail: `${bin} at ${found}${limited}` }
+            : { name: `agent:${agent}`, status: "warn", detail: `${bin} not found on PATH${limited}`, fix });
+    }
     return report(checks, options);
 }
 /** project paths with trust_level = "trusted" in Codex's config.toml ([projects.'<path>'] or [projects."<path>"] tables) */

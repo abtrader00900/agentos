@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { doctor } from "../src/commands/doctor.js";
 import { install } from "../src/commands/install.js";
+import { fileQuota } from "../src/orchestrator/quota.js";
 
 let dir: string;
 
@@ -48,6 +49,32 @@ describe("doctor (FR-2.4)", () => {
     const drift = second.checks.find((c) => c.name === "drift")!;
     expect(drift.status).toBe("warn");
     expect(drift.fix).toContain("agentos sync --force");
+  });
+
+  it("reports every agent CLI, with an install hint and the quota mark", () => {
+    writeFileSync(path.join(dir, "agent.config.yaml"), configYaml);
+    writeFileSync(path.join(dir, "server.ts"), "// the MCP server script the config points at\n");
+    const home = mkdtempSync(path.join(tmpdir(), "agentos-doc-home-"));
+    const prev = process.env.AGENTOS_HOME;
+    try {
+      process.env.AGENTOS_HOME = home;
+      fileQuota(home).mark("claude", new Date(Date.now() + 3_600_000));
+      const { checks } = doctor({ cwd: dir, quiet: true });
+      for (const agent of ["claude", "codex", "gemini"]) {
+        const c = checks.find((x) => x.name === `agent:${agent}`)!;
+        expect(c, agent).toBeDefined();
+        // CI has none of these CLIs, a dev machine may have all three — either way, never a fail
+        expect(["pass", "warn"]).toContain(c.status);
+        if (c.status === "warn") expect(c.fix?.length).toBeGreaterThan(0);
+      }
+      expect(checks.find((c) => c.name === "agent:claude")!.detail).toMatch(/limited until/);
+      for (const agent of ["codex", "gemini"])
+        expect(checks.find((c) => c.name === `agent:${agent}`)!.detail, agent).not.toMatch(/limited until/);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTOS_HOME;
+      else process.env.AGENTOS_HOME = prev;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("flags unknown MCP command as fail", () => {

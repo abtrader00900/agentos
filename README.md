@@ -250,6 +250,8 @@ agentos run --quick "fix the typo in the footer"    # small task: no planner, on
 agentos runs                                        # list runs
 agentos run --resume <id>                           # continue after a rate limit or a crash
 agentos run --cancel <id>
+agentos quota                                       # which agents are rate-limited, and until when
+agentos quota clear [agent]                         # drop a mark its CLI has already forgotten (no agent: all)
 ```
 
 The `build` commands run in the run worktree right before the PR and their output is committed as `agentos: build`, so generated files you keep in git go out with the change; a failing build command stops the run with that command's output instead of opening a PR.
