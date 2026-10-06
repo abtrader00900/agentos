@@ -26,6 +26,8 @@ export interface RunState {
     resumeAt?: string;
     /** the review ran on an agent that wrote part of this change: no other allowed agent could */
     selfReview?: boolean;
+    /** agents that edited the run branch after the subtasks: fixers and conflict resolvers */
+    editors?: AgentName[];
     baseBranch: string;
     /** commit the run branch started from (moves when a newer base is merged in) */
     base: string;

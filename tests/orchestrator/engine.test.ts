@@ -833,4 +833,43 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     await startRun(repo.root, "who reviews", cfg(), d, "q4");
     expect(reviewers[0]).toBe("claude");
   });
+
+  it("counts a fallback fixer as an author: its own re-review is flagged as a self-review", async () => {
+    const findings = [JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue: "a.txt must say hello" }]), "[]"];
+    // the subtask creates a.txt; the fixer (any prompt without "create") must change a file, or the re-review is skipped as unchanged
+    const work: Work = (cwd, p) => (/create \S+\.txt/.test(p) ? creates(cwd, p) : writeFileSync(path.join(cwd, "a.txt"), "hello"));
+    const d = deps({ plan: planOf(sub("a")), work, review: () => findings.shift() ?? "[]" });
+    let claudeWrites = 0;
+    const claudeWrite = d.runners.claude.write;
+    // claude writes the subtask, then crashes as the fixer: codex fixes, and only claude or codex can review
+    d.runners.claude.write = async (r) => (++claudeWrites === 1 ? claudeWrite(r) : { ok: false, output: "crashed\n", rateLimited: false, timedOut: false });
+    const s = await startRun(repo.root, "fix by fallback", cfg(), d, "q7");
+    expect(s.status).toBe("pr_open");
+    expect(loadRun(repo.root, "q7").editors).toEqual(["codex"]);
+    expect(s.selfReview).toBe(true);
+  });
+
+  it("fails instead of pausing when no allowed agent has a runner at all", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    delete (d.runners as Record<string, unknown>).claude;
+    delete (d.runners as Record<string, unknown>).codex;
+    const s = await startRun(repo.root, "no runners", cfg(), d, "q8");
+    expect(s.status).not.toBe("paused");
+    expect(s.resumeAt).toBeUndefined();
+  });
+
+  it("clears resumeAt when a paused run resumes", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const w = d.runners.claude.write;
+    let first = true;
+    d.runners.claude.write = async (r) => { if (first) { first = false; return LIMIT; } return w(r); };
+    const c = cfg({ planner: "claude", workers: ["claude"], reviewer: "claude", agents: ["claude"] });
+    const paused = await startRun(repo.root, "resume clears", c, d, "q9");
+    expect(paused.status).toBe("paused");
+    expect(paused.resumeAt).toBeDefined();
+    d.quota!.clear();
+    const s = await resumeRun(repo.root, "q9", c, d);
+    expect(s.status).toBe("pr_open");
+    expect(loadRun(repo.root, "q9").resumeAt).toBeUndefined();
+  });
 });

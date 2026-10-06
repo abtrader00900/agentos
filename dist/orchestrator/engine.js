@@ -72,6 +72,7 @@ export async function resumeRun(root, id, cfg, deps) {
         if (s.status === "paused") {
             s.status = s.resumeFrom ?? "planning";
             s.resumeFrom = undefined;
+            s.resumeAt = undefined;
             saveRun(root, s);
             logEvent(root, id, { type: "resume", status: s.status });
         }
@@ -324,7 +325,10 @@ function agentRunner(c, agent, mode) {
         const first = nextFree();
         if (!first) {
             const until = earliestUntil(c);
-            return { ok: false, rateLimited: true, timedOut: false, output: `every allowed agent is limited${until ? ` until ${until.toISOString()}` : ""}` };
+            // no mark at all means no allowed agent has a runner: waiting would never help, so it fails instead
+            if (!until)
+                return { ok: false, rateLimited: false, timedOut: false, output: "no allowed agent has a runner" };
+            return { ok: false, rateLimited: true, timedOut: false, output: `every allowed agent is limited until ${until.toISOString()}` };
         }
         let a = first;
         let errorFallbackUsed = false;
@@ -526,6 +530,7 @@ async function resolveConflicts(c, files, agent) {
         abortMerge(cwd);
         return "failed";
     }
+    addEditor(c.s, res.agent);
     git(cwd, ["add", "-A"]);
     if (!tryGit(cwd, ["commit", "-q", "--no-edit"]).ok || mergeInProgress(cwd)) {
         abortMerge(cwd);
@@ -539,8 +544,14 @@ async function resolveConflicts(c, files, agent) {
  * allowed agent that wrote none, else the first that is not the main author, else the reviewer itself
  * (a single-agent project). The quota chain then applies to that choice like to any other call.
  */
+/** every agent that wrote part of the change: subtask workers, then fixers and conflict resolvers */
+const authorsOf = (s) => [...s.subtasks.map((t) => t.doneBy ?? t.agent), ...(s.editors ?? [])];
+function addEditor(s, a) {
+    if (a && !(s.editors ?? []).includes(a))
+        s.editors = [...(s.editors ?? []), a];
+}
 function pickReviewer(s, cfg) {
-    const wrote = s.subtasks.map((t) => t.doneBy ?? t.agent);
+    const wrote = authorsOf(s);
     const authors = new Set(wrote);
     if (!authors.has(cfg.reviewer))
         return cfg.reviewer;
@@ -554,7 +565,7 @@ function pickReviewer(s, cfg) {
 /** The cross-model review. After a fix round it sees only the fix, checked against its earlier findings. */
 async function review(c) {
     const { s, cfg } = c;
-    const authors = new Set(s.subtasks.map((t) => t.doneBy ?? t.agent));
+    const authors = new Set(authorsOf(s));
     const reviewer = pickReviewer(s, cfg);
     const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
     const last = s.reviewed;
@@ -637,6 +648,7 @@ async function fix(c) {
         s.fixRound--;
         return pause(c, "fixing");
     }
+    addEditor(s, res.agent);
     s.fixReport = parseReport(redact(finalText(res.output)));
     const committed = commitAll(s.runWorktree, `agentos: fix round ${s.fixRound}`);
     const diff = committed ? tryGit(s.runWorktree, ["diff", "--name-only", "HEAD~1", "HEAD"]) : undefined; // logging must never fail the run
