@@ -68,7 +68,8 @@ describe("doctor (FR-2.4)", () => {
         if (c.status === "warn") expect(c.fix?.length).toBeGreaterThan(0);
       }
       expect(checks.find((c) => c.name === "agent:claude")!.detail).toMatch(/limited until/);
-      expect(checks.find((c) => c.name === "agent:codex")!.detail).not.toMatch(/limited until/);
+      for (const agent of ["codex", "gemini"])
+        expect(checks.find((c) => c.name === `agent:${agent}`)!.detail, agent).not.toMatch(/limited until/);
     } finally {
       if (prev === undefined) delete process.env.AGENTOS_HOME;
       else process.env.AGENTOS_HOME = prev;

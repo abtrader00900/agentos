@@ -74,7 +74,7 @@ describe("frontend", () => {
     const ctx: { window: { LABELS?: Record<string, string> } } = { window: {} };
     vm.runInNewContext(read("labels.js"), ctx);
     const app = read("app.js");
-    expect(app).toMatch(/case "fallback": return name \+ ": " \+ e\.from \+ " → " \+ e\.to \+ " \(" \+ \(e\.why \|\| ""\) \+ "\)";/);
+    expect(app).toMatch(/case "fallback": return e\.from \+ " → " \+ e\.to \+ " \(" \+ \(e\.why \|\| ""\) \+ "\)";/);
     expect(app).toContain('case "read-guard":');
     expect(app).toContain('L("events.changed")');
     for (const k of ["ev.fallback", "ev.read-guard", "events.changed"]) expect(ctx.window.LABELS![k], k).toBeTruthy();
