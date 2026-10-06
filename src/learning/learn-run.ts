@@ -18,7 +18,7 @@ export async function learnFromRun(
   root: string,
   runId: string,
   learning: LearningConfig,
-  runners: Record<AgentName, { read: Runner; write: Runner }>,
+  runners: Partial<Record<AgentName, { read: Runner; write: Runner }>>,
   budgetMs: number,
   now: () => number = Date.now,
 ): Promise<"done" | "skipped" | "failed"> {
@@ -37,6 +37,8 @@ export async function learnFromRun(
     const s = loadRun(root, runId);
     if (!LEARNABLE.includes(s.status)) return record("skipped", { reason: `status ${s.status}` });
     if (!learning.retro) return record("skipped", { reason: "learning.retro is false" });
+    const retro = runners[learning.retroAgent]; // an agent with no runner is unavailable, not an error
+    if (!retro) return record("skipped", { reason: `no ${learning.retroAgent} runner` });
     const evidence = collectEvidence(root, runId);
     const existing = listLessons(root, { status: ["auto", "approved"] }) // pending text never reaches a prompt
       .map((l) => ({ l, score: jaccard(l.text, s.task) }))
@@ -45,7 +47,7 @@ export async function learnFromRun(
       .map((x) => x.l);
     // reusing a kind keeps skillDue counting; listRuns is most recent first
     const kinds = [...new Set(listRuns(root).map((r) => r.kind).filter((k): k is string => !!k))].slice(0, 30);
-    const r = await retrospective(runners[learning.retroAgent].read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing, kinds }, root, end - now(), now);
+    const r = await retrospective(retro.read, { task: s.task, planSummary: s.plan?.summary ?? "", status: s.status, evidence, existing, kinds }, root, end - now(), now);
     if (!r.result) return record("failed", { reason: r.rateLimited ? "rate limit" : r.error });
     const kind = r.result.kind;
     const cur = loadRun(root, runId);
@@ -62,7 +64,7 @@ export async function learnFromRun(
           // not a rejection: no tombstone, so a later run drafts it
           logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: "no time left for the draft" });
         } else if (runs) {
-          const d = await draftSkill(root, kind, runs, runners[learning.retroAgent].read, left);
+          const d = await draftSkill(root, kind, runs, retro.read, left);
           if (d.ok) draft = kind;
           else logEvent(root, runId, { type: "skill-draft-rejected", kind, reason: d.reason });
         }

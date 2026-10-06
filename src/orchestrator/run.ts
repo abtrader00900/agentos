@@ -13,6 +13,8 @@ export const TERMINAL: readonly RunStatus[] = ["pr_open", "needs_human", "failed
 export interface SubtaskState {
   id: string;
   agent: AgentName;
+  /** who really produced the work, when a fallback moved it off `agent` */
+  doneBy?: AgentName;
   status: "pending" | "running" | "done" | "failed";
   branch: string;
   worktree: string;
@@ -28,6 +30,10 @@ export interface RunState {
   reason?: string;
   /** where a paused run continues */
   resumeFrom?: RunStatus;
+  /** when the earliest allowed agent has quota again: a quota pause waits for this */
+  resumeAt?: string;
+  /** the review ran on an agent that wrote part of this change: no other allowed agent was free */
+  selfReview?: boolean;
   baseBranch: string;
   /** commit the run branch started from (moves when a newer base is merged in) */
   base: string;
