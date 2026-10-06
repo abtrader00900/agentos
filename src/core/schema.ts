@@ -32,7 +32,10 @@ export const mcpServerRefSchema = z.object({
 export const agentNameSchema = z.enum(["claude", "codex"]);
 export type AgentName = z.infer<typeof agentNameSchema>;
 
-const modelNameSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/, "model names are letters, digits and . _ : - (at most 64)");
+const modelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/, "model names start with a letter or digit, then letters, digits and . _ : - (at most 64); a leading - would read as a CLI flag");
+
+/** one model for every role, or one per mode: read = planner and reviewer, write = workers, fixers and conflict resolution */
+const agentModelSchema = z.union([modelNameSchema, z.object({ read: modelNameSchema.optional(), write: modelNameSchema.optional() }).strict()]);
 
 /** a path or size rule that marks a PR for the owner's attention (flag) or stops it before it opens (block) */
 export const riskRuleSchema = z
@@ -78,9 +81,9 @@ export const orchestratorSchema = z.object({
   minFreeMemoryMb: z.number().nonnegative().default(1500),
   /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
   link: z.array(z.string().min(1)).default(["node_modules"]),
-  /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+  /** per-CLI model, overriding the CLI's own default (which may be unsupported); every name lands on a Windows command line, so plain names only */
   models: z
-    .object({ claude: modelNameSchema.optional(), codex: modelNameSchema.optional() })
+    .object({ claude: agentModelSchema.optional(), codex: agentModelSchema.optional() })
     .strict()
     .default({}),
   /** replaces the built-in risk rules (all "flag") when given */

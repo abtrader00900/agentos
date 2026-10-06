@@ -37,6 +37,17 @@ describe("orchestrator config", () => {
     expect(orchestratorSchema.safeParse({ models: { gemini: "x" } }).success).toBe(false);
   });
 
+  it("accepts one model or a read/write pair per agent", () => {
+    const m = orchestratorSchema.parse({ models: { claude: { read: "opus", write: "sonnet" }, codex: "gpt-6.1-sol" } }).models;
+    expect(m.claude).toEqual({ read: "opus", write: "sonnet" });
+    expect(() => orchestratorSchema.parse({ models: { claude: { read: "bad name;rm" } } })).toThrow();
+    // a leading - would reach the CLI's argv as a flag
+    for (const flag of ["--dangerously-skip-permissions", "--yolo", "-x"]) {
+      expect(() => orchestratorSchema.parse({ models: { claude: flag } })).toThrow();
+      expect(() => orchestratorSchema.parse({ models: { codex: { write: flag } } })).toThrow();
+    }
+  });
+
   it("rejects merge and deploy autonomy in this release", () => {
     const r = orchestratorSchema.safeParse({ autonomy: "merge" });
     expect(r.success).toBe(false);

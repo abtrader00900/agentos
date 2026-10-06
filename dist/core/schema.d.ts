@@ -105,16 +105,46 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
     /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
     link: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-    /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+    /** per-CLI model, overriding the CLI's own default (which may be unsupported); every name lands on a Windows command line, so plain names only */
     models: z.ZodDefault<z.ZodObject<{
-        claude: z.ZodOptional<z.ZodString>;
-        codex: z.ZodOptional<z.ZodString>;
+        claude: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+            read: z.ZodOptional<z.ZodString>;
+            write: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }>]>>;
+        codex: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+            read: z.ZodOptional<z.ZodString>;
+            write: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }>]>>;
     }, "strict", z.ZodTypeAny, {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     }, {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     }>>;
     /** replaces the built-in risk rules (all "flag") when given */
     risk: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodObject<{
@@ -158,8 +188,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb: number;
     link: string[];
     models: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     };
     agents?: ("codex" | "claude")[] | undefined;
     risk?: {
@@ -184,8 +220,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb?: number | undefined;
     link?: string[] | undefined;
     models?: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     } | undefined;
     risk?: {
         name: string;
@@ -209,8 +251,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb: number;
     link: string[];
     models: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     };
     risk?: {
         name: string;
@@ -234,8 +282,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb?: number | undefined;
     link?: string[] | undefined;
     models?: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     } | undefined;
     risk?: {
         name: string;
@@ -259,8 +313,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb: number;
     link: string[];
     models: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     };
     risk?: {
         name: string;
@@ -284,8 +344,14 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     minFreeMemoryMb?: number | undefined;
     link?: string[] | undefined;
     models?: {
-        codex?: string | undefined;
-        claude?: string | undefined;
+        codex?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     } | undefined;
     risk?: {
         name: string;
@@ -497,16 +563,46 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: z.ZodDefault<z.ZodNumber>;
         /** folders linked from the checkout into each worktree (installed deps the verify commands need) */
         link: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        /** per-CLI model, overriding the CLI's own default (which may be unsupported); lands on a Windows command line, so plain names only */
+        /** per-CLI model, overriding the CLI's own default (which may be unsupported); every name lands on a Windows command line, so plain names only */
         models: z.ZodDefault<z.ZodObject<{
-            claude: z.ZodOptional<z.ZodString>;
-            codex: z.ZodOptional<z.ZodString>;
+            claude: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+                read: z.ZodOptional<z.ZodString>;
+                write: z.ZodOptional<z.ZodString>;
+            }, "strict", z.ZodTypeAny, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }>]>>;
+            codex: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+                read: z.ZodOptional<z.ZodString>;
+                write: z.ZodOptional<z.ZodString>;
+            }, "strict", z.ZodTypeAny, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }>]>>;
         }, "strict", z.ZodTypeAny, {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         }, {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         }>>;
         /** replaces the built-in risk rules (all "flag") when given */
         risk: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodObject<{
@@ -550,8 +646,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: number;
         link: string[];
         models: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
         agents?: ("codex" | "claude")[] | undefined;
         risk?: {
@@ -576,8 +678,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         } | undefined;
         risk?: {
             name: string;
@@ -601,8 +709,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: number;
         link: string[];
         models: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
         risk?: {
             name: string;
@@ -626,8 +740,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         } | undefined;
         risk?: {
             name: string;
@@ -651,8 +771,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: number;
         link: string[];
         models: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
         risk?: {
             name: string;
@@ -676,8 +802,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         } | undefined;
         risk?: {
             name: string;
@@ -806,8 +938,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb: number;
         link: string[];
         models: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
         risk?: {
             name: string;
@@ -882,8 +1020,14 @@ export declare const agentConfigSchema: z.ZodObject<{
         minFreeMemoryMb?: number | undefined;
         link?: string[] | undefined;
         models?: {
-            codex?: string | undefined;
-            claude?: string | undefined;
+            codex?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         } | undefined;
         risk?: {
             name: string;

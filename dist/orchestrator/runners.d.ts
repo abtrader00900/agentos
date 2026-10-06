@@ -20,7 +20,14 @@ export declare function finalText(output: string): string;
  * model (schema-checked to a plain name) overrides the CLI's own default.
  */
 export declare function cliArgs(agent: AgentName, mode: "read" | "write", model?: string): [string, string[]];
-export declare function cliRunners(models?: Partial<Record<AgentName, string>>): Record<AgentName, {
+/** `orchestrator.models.<agent>`: one model for every role, or one per mode */
+export type AgentModel = string | {
+    read?: string;
+    write?: string;
+};
+/** read = planner and reviewer, write = workers, fixers and conflict resolution */
+export declare function modelFor(m: AgentModel | undefined, mode: "read" | "write"): string | undefined;
+export declare function cliRunners(models?: Partial<Record<AgentName, AgentModel>>): Record<AgentName, {
     write: Runner;
     read: Runner;
 }>;

@@ -105,8 +105,12 @@ export function cliArgs(agent, mode, model) {
     const sandbox = mode === "write" ? "workspace-write" : "read-only";
     return ["codex", [...CODEX, ...(model ? ["-m", model] : []), "-s", sandbox, "-"]];
 }
+/** read = planner and reviewer, write = workers, fixers and conflict resolution */
+export function modelFor(m, mode) {
+    return typeof m === "string" ? m : m?.[mode];
+}
 export function cliRunners(models = {}) {
-    const runner = (a, m) => spawnRunner(...cliArgs(a, m, models[a]));
+    const runner = (a, m) => spawnRunner(...cliArgs(a, m, modelFor(models[a], m)));
     return {
         claude: { write: runner("claude", "write"), read: runner("claude", "read") },
         codex: { write: runner("codex", "write"), read: runner("codex", "read") },
