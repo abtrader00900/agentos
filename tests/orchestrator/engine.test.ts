@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync, mkdtempSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { makeRepo, sh } from "./helpers.js";
 import { startRun, resumeRun, type EngineDeps } from "../../src/orchestrator/engine.js";
@@ -164,6 +165,20 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
     const s = await startRun(repo.root, "escape", cfg(), d);
     expect(s.status).toBe("failed");
     expect(s.reason).toContain("outside its worktree");
+  });
+
+  it("undoes and fails a read-mode call that edits the worktree", async () => {
+    const d = deps({
+      plan: planOf(sub("a")),
+      work: creates,
+      review: (_p, cwd) => { writeFileSync(path.join(cwd, "sneaky.txt"), "x"); return "[]"; },
+    });
+    await startRun(repo.root, "guard", cfg(), d, "g1");
+    const events = readFileSync(path.join(runDir(repo.root, "g1"), "events.jsonl"), "utf8");
+    expect(events).toContain('"type":"read-guard"');
+    // the reviewer's edit never reaches any commit, local or pushed
+    expect(sh(repo.root, ["log", "--all", "--name-only", "--format="])).not.toContain("sneaky.txt");
+    expect(sh(repo.remote, ["log", "--all", "--name-only", "--format="])).not.toContain("sneaky.txt");
   });
 
   it("pauses on a worker rate limit and resumes without redoing finished subtasks", async () => {
@@ -415,13 +430,16 @@ describe("orchestrator engine: speed", { timeout: 60_000 }, () => {
   const high = (issue: string) => JSON.stringify([{ severity: "high", file: "a.txt", line: 1, issue }]);
 
   it("reviews while the tests run, not after them", async () => {
-    // the test command holds a flag file for 4 s; a review that starts after the tests never sees it
-    const verify = [`node -e "const f=require('fs');f.writeFileSync('testing.flag','');setTimeout(()=>f.unlinkSync('testing.flag'),4000)"`];
+    // the test command holds a flag file for 4 s; a review that starts after the tests never sees it.
+    // The flag lives outside the repo: the review runs in a disposable worktree (the read guard), which
+    // cannot see a file the tests write into the run worktree.
+    const flag = path.join(mkdtempSync(path.join(tmpdir(), "flag-")), "testing.flag").replace(/\\/g, "/");
+    const verify = [`node -e "const f=require('fs');f.writeFileSync('${flag}','');setTimeout(()=>f.unlinkSync('${flag}'),4000)"`];
     let sawTests = false;
     const d = deps({
       plan: planOf(sub("a")), work: creates,
-      review: async (_p, cwd) => {
-        for (let i = 0; i < 160 && !sawTests; i++) { sawTests = existsSync(path.join(cwd, "testing.flag")); await new Promise((r) => setTimeout(r, 25)); }
+      review: async () => {
+        for (let i = 0; i < 160 && !sawTests; i++) { sawTests = existsSync(flag); await new Promise((r) => setTimeout(r, 25)); }
         return "[]";
       },
     });

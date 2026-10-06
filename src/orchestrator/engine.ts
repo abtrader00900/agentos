@@ -305,6 +305,45 @@ function pause(c: Ctx, from: RunStatus): void {
   move(c, "paused", `rate limit or quota reached — continue later with: agentos run --resume ${c.s.id}`);
 }
 
+/** disposable read worktrees are numbered, so two calls never pick the same directory */
+let readGuards = 0;
+
+/**
+ * The read-mode guard (spec §3). A planner or reviewer call runs in a throwaway detached worktree at
+ * HEAD instead of the run worktree, where the verify commands run at the same time — so a before/after
+ * diff could not tell a reviewer's edit from a test artifact, and an edit would reach the run branch.
+ * Anything the call wrote dies with the worktree, and the call is turned into a failure so the loop's
+ * ordinary error fallback hands it to another agent.
+ */
+async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: RunnerRequest) => Promise<RunnerResult>): Promise<RunnerResult> {
+  const dir = path.join(runDir(c.root, c.s.id), `read-${++readGuards}`);
+  if (existsSync(dir)) {
+    // a crashed run left this one behind (the counter restarts with the process): unregister it, then
+    // free the path, or `worktree add` would fail here and leave the resumed review with no reviewer
+    removeWorktree(req.cwd, dir, []);
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* `worktree add` reports it below */ }
+  }
+  const added = tryGit(req.cwd, ["worktree", "add", "--detach", dir, "HEAD"]);
+  // no fallback to req.cwd: running unguarded would void the guarantee this guard exists for
+  if (!added.ok) return { ok: false, rateLimited: false, timedOut: false, agent: a, output: `read-guard: could not create a disposable worktree: ${added.out}` };
+  const before = tryGit(dir, ["rev-parse", "HEAD"]).out;
+  try {
+    const res = await run({ ...req, cwd: dir });
+    const st = tryGit(dir, ["status", "--porcelain"]);
+    // an unreadable status counts as changed: the guard may not assume what it cannot check
+    const files = (st.ok ? st.out.split("\n").map((l) => l.slice(3).trim()).filter(Boolean) : ["(status unreadable)"]).slice(0, 20);
+    const moved = tryGit(dir, ["rev-parse", "HEAD"]).out !== before;
+    if (!files.length && !moved) return res;
+    const what = files.length ? files : ["(a commit)"];
+    logEvent(c.root, c.s.id, { type: "read-guard", agent: a, files: what });
+    // rateLimited stays as it was, so this reads as an ordinary error to the fallback loop
+    return { ...res, ok: false, output: `${res.output}\nread-guard: the call changed files: ${what.join(", ")}` };
+  } finally {
+    // the worktree holds no junctions, so --force deletes only its own files; cleanup never fails a run
+    try { removeWorktree(req.cwd, dir, []); } catch { /* a leftover directory is harmless: the next call numbers a new one */ }
+  }
+}
+
 /**
  * Runs one agent call: its PID is tracked for cancel, output lines are logged, and a failure
  * walks the allowlist — every quota limit moves on, an error or timeout costs one extra attempt.
@@ -313,7 +352,7 @@ function pause(c: Ctx, from: RunStatus): void {
  * waiting for a cooldown would help nothing, so the call fails instead.
  */
 function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
-  const call = async (a: AgentName, req: RunnerRequest) => {
+  const runAgent = async (a: AgentName, req: RunnerRequest) => {
     let pid = 0;
     try {
       const res = await c.deps.runners[a]![mode]({
@@ -330,6 +369,8 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
       c.live.delete(pid);
     }
   };
+  const call = async (a: AgentName, req: RunnerRequest): Promise<RunnerResult> =>
+    mode === "read" ? guardRead(c, a, req, (r) => runAgent(a, r)) : runAgent(a, req);
   return async (req) => {
     // the asked-for agent first (when the allowlist has it), then the rest of the allowlist in order
     const order = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)];
