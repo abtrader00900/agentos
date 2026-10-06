@@ -358,8 +358,9 @@ async function guardRead(c, a, req, run) {
  */
 function worktreeFingerprint(cwd) {
     const h = createHash("sha256").update(tryGit(cwd, ["diff", "HEAD", "--binary"]).out);
-    const untracked = tryGit(cwd, ["ls-files", "--others", "--exclude-standard"]);
-    for (const f of untracked.ok ? untracked.out.split("\n").filter(Boolean) : []) {
+    // -z: raw paths, NUL-separated (without it git C-quotes non-ASCII names and readFileSync misses them)
+    const untracked = tryGit(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
+    for (const f of untracked.ok ? untracked.out.split("\0").filter(Boolean) : []) {
         h.update(`\0${f}\0`);
         try {
             h.update(readFileSync(path.join(cwd, f)));
