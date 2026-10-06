@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.9.0 — 2026-10-06
+
+PRD 5 adds the model router. A run no longer stops when one subscription hits its quota, each role can use its own model, and Google's agy CLI joins as a third agent. Most of it was built by `agentos run`; see `bench/router-e2e.md`.
+
+### Added
+- **Quota fallback.** When an agent hits a rate limit or quota, it is marked in `~/.agentos/quota.json` until the wait its CLI states (else `quotaCooldownMinutes`, default 60), and the next allowed agent takes the same call. A run pauses only when every allowed agent is limited, with `resumeAt`, and the daemon waits for it.
+- **`orchestrator.agents`.** A hard allowlist per project. It defaults to planner + workers + reviewer, so existing configs are unchanged. Fallback never leaves it, and `agentos run` checks every allowed agent's CLI before it starts.
+- **Per-role models.** `models.<agent>` takes one name or `{ read, write }`. For example, `claude: { read: opus, write: sonnet }`.
+- **The `gemini` agent,** driven by Google's `agy` CLI:
+  - the prompt goes only on stdin, as one NDJSON line
+  - `--mode plan` for read calls, `--mode accept-edits` for write calls, `--sandbox` in both
+  - only a `SUCCESS` result counts
+  - on Windows, agy is also found in `%LOCALAPPDATA%\agy\bin`
+- **Read-mode guard.** Planner and reviewer calls run in a disposable detached worktree. If a read call changes files, or changes tracked files in the run worktree, the change is undone and the call fails over to the next agent.
+- **No-change fallback.** A worker call that claims success but commits nothing is handed to the next allowed agent once.
+- **Self-review flag.** If the agent that reviews also wrote part of the change, the PR body says so in "⚠️ Look here". Partial edits left by a failed attempt count toward authorship.
+- **Review converge check** (from Spec Kit). The reviewer splits the task into its requirements and reports each unmet one as "Not done: …".
+- **`agentos quota` and `agentos quota clear [agent]`.** Doctor shows one `agent:<name>` line per CLI, and the dashboard shows fallback and read-guard events.
+
+### Fixed
+- **Model names cannot start with `-`.** Such a name could reach a CLI's argv as a flag.
+- **The prompts for workers, fixers and conflict resolvers** now say that shell commands may be refused, and that the agent should work with its file tools instead.
+- **A flaky Windows daemon test** now polls instead of waiting a fixed time.
+
+### Known limits
+- Gemini as a worker needs allow-rules in agy's permission grants for the commands it wants (for example its test command). agy's headless mode ends a turn at the first command it cannot ask about.
+- Codex cannot write on Windows machines hit by Codex's sandbox bug (openai/codex#37940). It can still plan and review.
+
 ## 0.8.0 — 2026-10-06
 
 PRD 4.5b and 4.5c add an optional local decider and `agentos init --saas`. No paid API and no new npm dependency. The eval is in `bench/decider-e2e.md`.
