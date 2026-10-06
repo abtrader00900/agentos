@@ -939,3 +939,51 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(loadRun(repo.root, "q9").resumeAt).toBeUndefined();
   });
 });
+
+describe("orchestrator engine: no-change fallback", { timeout: 60_000 }, () => {
+  it("hands a subtask its agent left unchanged to the next allowed agent", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    // ok, but the worktree is untouched: the fallback must treat that like an error
+    d.runners.claude.write = async () => reply("nothing left to do");
+    const s = await startRun(repo.root, "claude writes nothing", cfg(), d, "n1");
+    expect(s.status).toBe("pr_open");
+    expect(s.subtasks[0].doneBy).toBe("codex");
+    expect(sh(repo.remote, ["ls-tree", "--name-only", s.branch])).toContain("a.txt");
+    const events = readFileSync(path.join(runDir(repo.root, "n1"), "events.jsonl"), "utf8");
+    expect(events).toContain('"why":"no-change"');
+    expect(events).toContain('"error":"nothing left to do"');
+  });
+
+  it("fails the subtask when the second agent changes nothing either", async () => {
+    const d = deps({ plan: planOf(sub("a")) }); // no work fake: both writers report ok and touch nothing
+    const s = await startRun(repo.root, "nobody writes", cfg(), d, "n2");
+    expect(s.subtasks[0].status).toBe("failed");
+    expect(s.status).toBe("needs_human");
+    expect(s.reason).toContain("subtask(s) failed: a");
+    expect(prCalls(d)).toHaveLength(0);
+  });
+
+  it("fails a no-change subtask without a second agent when the project allows only one", async () => {
+    let claudeWrites = 0;
+    let codexWrites = 0;
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    d.runners.claude.write = async () => { claudeWrites++; return reply("nothing left to do"); };
+    const codexWrite = d.runners.codex.write;
+    d.runners.codex.write = async (r) => { codexWrites++; return codexWrite(r); };
+    const s = await startRun(repo.root, "one agent only", cfg({ planner: "claude", workers: ["claude"], reviewer: "claude", agents: ["claude"] }), d, "n3");
+    expect(s.status).toBe("needs_human");
+    expect(claudeWrites).toBe(1);
+    expect(codexWrites).toBe(0);
+  });
+
+  it("spends the one fallback attempt on the no-change retry, so an erroring second agent ends it", async () => {
+    let claudeWrites = 0;
+    const d = deps({ plan: planOf(sub("a")) });
+    d.runners.claude.write = async () => { claudeWrites++; return reply("nothing left to do"); };
+    d.runners.codex.write = async () => ({ ok: false, output: "boom\n", rateLimited: false, timedOut: false });
+    const s = await startRun(repo.root, "no-change then error", cfg(), d, "n4");
+    expect(s.subtasks[0].status).toBe("failed");
+    expect(s.status).toBe("needs_human");
+    expect(claudeWrites).toBe(1); // the chain is exhausted: no third call back to claude
+  });
+});
