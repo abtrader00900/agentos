@@ -237,8 +237,12 @@ orchestrator:
   reviewer: codex                        # reviews the diff (swapped if it wrote everything)
   maxWorkers: 2                          # parallel agents, each in its own git worktree
   link: [node_modules]                   # installed deps shared from your checkout into worktrees
-  models: { codex: gpt-5.6-sol }         # optional: override a CLI's default model
+  models:                                # optional: override a CLI's default model
+    codex: gpt-5.6-sol                   #   one model for every role
+    claude: { read: opus, write: sonnet }  #   or one per mode
 ```
+
+`models.<agent>` takes either a model name for every role, or `{ read, write }`: `read` is the planner and the reviewer, `write` is the workers, the fixers and conflict resolution. Suggested pairs (suggestions, not defaults): `claude: { read: opus, write: sonnet }` — Opus plans and reviews, Sonnet writes; `codex: <current Sol model>` for both.
 
 ```bash
 agentos run "add a discount field to customers"   # plan → parallel agents → tests + review → PR

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnRunner, finalText, cliArgs, cliRunners, RATE_LIMIT_RE } from "../../src/orchestrator/runners.js";
+import { spawnRunner, finalText, cliArgs, cliRunners, modelFor, RATE_LIMIT_RE } from "../../src/orchestrator/runners.js";
 
 let tmp: string;
 const script = (name: string, body: string) => {
@@ -114,6 +114,13 @@ describe("cliArgs", () => {
     const r = cliRunners({ codex: "gpt-5.6-sol" });
     expect(typeof r.claude.read).toBe("function");
     expect(typeof r.codex.write).toBe("function");
+  });
+
+  it("builds each mode's runner with that mode's model", () => {
+    expect(modelFor({ read: "opus", write: "sonnet" }, "read")).toBe("opus");
+    expect(modelFor({ read: "opus", write: "sonnet" }, "write")).toBe("sonnet");
+    expect(modelFor("gpt-6.1-sol", "read")).toBe("gpt-6.1-sol");
+    expect(modelFor(undefined, "write")).toBeUndefined();
   });
 });
 

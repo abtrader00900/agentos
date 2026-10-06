@@ -104,8 +104,16 @@ export function cliArgs(agent: AgentName, mode: "read" | "write", model?: string
   return ["codex", [...CODEX, ...(model ? ["-m", model] : []), "-s", sandbox, "-"]];
 }
 
-export function cliRunners(models: Partial<Record<AgentName, string>> = {}): Record<AgentName, { write: Runner; read: Runner }> {
-  const runner = (a: AgentName, m: "read" | "write") => spawnRunner(...cliArgs(a, m, models[a]));
+/** `orchestrator.models.<agent>`: one model for every role, or one per mode */
+export type AgentModel = string | { read?: string; write?: string };
+
+/** read = planner and reviewer, write = workers, fixers and conflict resolution */
+export function modelFor(m: AgentModel | undefined, mode: "read" | "write"): string | undefined {
+  return typeof m === "string" ? m : m?.[mode];
+}
+
+export function cliRunners(models: Partial<Record<AgentName, AgentModel>> = {}): Record<AgentName, { write: Runner; read: Runner }> {
+  const runner = (a: AgentName, m: "read" | "write") => spawnRunner(...cliArgs(a, m, modelFor(models[a], m)));
   return {
     claude: { write: runner("claude", "write"), read: runner("claude", "read") },
     codex: { write: runner("codex", "write"), read: runner("codex", "read") },
