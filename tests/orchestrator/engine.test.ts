@@ -1037,4 +1037,13 @@ describe("orchestrator engine: write prompts", { timeout: 60_000 }, () => {
     await startRun(repo.root, "two failures", cfg(), d, "pe2");
     expect(loadRun(repo.root, "pe2").editors).toEqual(["claude"]);
   });
+
+  it("sees a second edit to a file that was already changed, though git status looks the same", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const fail: RunnerResult = { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    d.runners.claude.write = async (r) => { writeFileSync(path.join(r.cwd, "README.md"), "claude was here\n"); return fail; };
+    d.runners.codex.write = async (r) => { writeFileSync(path.join(r.cwd, "README.md"), "codex too\n"); return fail; };
+    await startRun(repo.root, "same file twice", cfg(), d, "pe3");
+    expect(loadRun(repo.root, "pe3").editors).toEqual(["claude", "codex"]);
+  });
 });

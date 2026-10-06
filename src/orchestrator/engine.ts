@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdirSync } from "node:fs";
 import { MemoryStore } from "../mcp/memory/store.js";
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
@@ -365,6 +366,17 @@ async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: Runn
   }
 }
 
+/**
+ * What a worktree holds right now: HEAD, the status, and a hash of every tracked change, so a second
+ * edit to an already-dirty file (a conflicted one, say) still shows. ponytail: the contents of untracked
+ * files are not hashed, only their names; hash them too if an agent ever rewrites its own new file.
+ */
+function worktreeFingerprint(cwd: string): string {
+  const diff = tryGit(cwd, ["diff", "HEAD", "--binary"]);
+  return [tryGit(cwd, ["rev-parse", "HEAD"]).out, statusOf(cwd), createHash("sha256").update(diff.out).digest("hex")].join("
+");
+}
+
 /** the last non-empty line of an agent's output: what a fallback event reports as the reason */
 const lastLine = (text: string): string => text.trim().split("\n").filter(Boolean).pop()?.trim().slice(0, 200) ?? "";
 
@@ -422,7 +434,7 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write", rejectOk?
     let a: AgentName = first;
     let errorFallbackUsed = false;
     // the worktree as it was before the current attempt: only a change from this is that attempt's own edit
-    const snap = () => (mode === "write" ? statusOf(req.cwd) : "");
+    const snap = () => (mode === "write" ? worktreeFingerprint(req.cwd) : "");
     let before = snap();
     let res: RunnerResult = await call(a, req);
     for (;;) {
@@ -430,11 +442,10 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write", rejectOk?
       if ((res.ok && !vetoed) || cancelRequested(c.root, c.s.id)) return res;
       // this result is thrown away, but whatever it already wrote stays in the worktree and is committed
       // with the next agent's work: that makes this agent an author too, so a later review by it counts
-      // as a self-review. Compared with the status before this attempt, so a merge in progress or an
-      // earlier agent's leftovers never make it one. ponytail: a status string, so an edit to a file
-      // that was already dirty is not seen; a content hash per file if that ever matters.
+      // as a self-review. Compared with the worktree as it was before this attempt, so a merge in progress or
+      // an earlier agent's leftovers never make it one.
       // (read calls edit only their disposable worktree, which guardRead throws away.)
-      if (mode === "write" && statusOf(req.cwd) !== before) addEditor(c.s, a);
+      if (mode === "write" && worktreeFingerprint(req.cwd) !== before) addEditor(c.s, a);
       let until: Date | undefined;
       if (res.rateLimited) {
         until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
