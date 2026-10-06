@@ -543,6 +543,8 @@
       case "usage": return name + ": " + e.agent + " " + ((e.inputTokens || 0) + (e.outputTokens || 0)) + " " + L("events.tokens") +
         (e.costUsd === undefined || e.costUsd === null ? "" : " " + money(e.costUsd));
       case "fallback": return name + ": " + e.from + " → " + e.to + " (" + (e.why || "") + ")";
+      case "read-guard": return name + ": " + (e.agent || "") + " " + L("events.changed") + " " +
+        (Array.isArray(e.files) ? e.files.join(", ") : "");
       case "conflict-resolved": return name + ": " + count(e.files) + " " + L("events.files");
       case "verify": return name + ": " + (e.ok ? L("events.ok") : L("events.failed")) + ", " + count(e.findings) + " " + L("events.findings") +
         (e.command ? " — " + e.command : "");
