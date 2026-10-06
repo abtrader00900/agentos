@@ -858,6 +858,15 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(s.resumeAt).toBeUndefined();
   });
 
+  it("fails instead of pausing when the only quota marks belong to agents with no runner", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    delete (d.runners as Record<string, unknown>).claude;
+    delete (d.runners as Record<string, unknown>).codex;
+    d.quota!.mark("claude", new Date(Date.now() + 3_600_000));
+    const s = await startRun(repo.root, "stale mark", cfg(), d, "q10");
+    expect(s.status).not.toBe("paused");
+  });
+
   it("clears resumeAt when a paused run resumes", async () => {
     const d = deps({ plan: planOf(sub("a")), work: creates });
     const w = d.runners.claude.write;

@@ -16,7 +16,7 @@ function agentReports(s) {
 }
 /** the risk flags plus, when the reviewer wrote part of the change itself, a line naming the authors */
 function lookHere(s) {
-    const authors = [...new Set(s.subtasks.map((t) => t.doneBy ?? t.agent))].join(", ");
+    const authors = [...new Set([...s.subtasks.map((t) => t.doneBy ?? t.agent), ...(s.editors ?? [])])].join(", ");
     const bullets = [
         ...(s.risk ?? []).map((f) => `- ${f.rule}${f.p !== undefined ? ` (${Math.round(f.p * 100)}%)` : ""}${f.files.length ? `: ${f.files.slice(0, 5).join(", ")}${f.files.length > 5 ? ` (+${f.files.length - 5} more)` : ""}` : ""}`),
         ...(s.selfReview ? [`- reviewed by the same model that wrote it${authors ? ` (${authors})` : ""}, because no other allowed agent could review it (a quota limit, a single-agent project, or every other agent wrote part of this change)`] : []),

@@ -39,6 +39,9 @@ describe("prBody", () => {
       subtasks: [{ id: "a", agent: "claude", doneBy: "codex", status: "done", branch: "b", worktree: "w" }] });
     expect(body.indexOf("⚠️ Look here")).toBeLessThan(body.indexOf("| Subtask |"));
     expect(body).toContain("reviewed by the same model that wrote it (codex)");
+    const fixedToo = prBody({ ...base, selfReview: true, editors: ["codex"],
+      subtasks: [{ id: "a", agent: "claude", status: "done", branch: "b", worktree: "w" }] });
+    expect(fixedToo).toContain("(claude, codex)"); // a fixer is an author too
     const plain = prBody(base);
     expect(plain).not.toContain("⚠️ Look here");
     expect(plain).not.toContain("reviewed by the same model that wrote it");

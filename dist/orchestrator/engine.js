@@ -260,7 +260,9 @@ const available = (c, a) => !!c.deps.runners[a] && !c.quota.until(a, new Date())
 /** when the first allowed agent has quota again; nothing while one of them is free */
 function earliestUntil(c) {
     const now = new Date();
+    // only agents that have a runner: a mark on one without a runner promises nothing
     return c.cfg.agents
+        .filter((a) => !!c.deps.runners[a])
         .map((a) => c.quota.until(a, now))
         .filter((d) => !!d)
         .sort((x, y) => x.getTime() - y.getTime())[0];
