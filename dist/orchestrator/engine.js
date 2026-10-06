@@ -315,8 +315,10 @@ async function guardRead(c, a, req, run) {
         return { ok: false, rateLimited: false, timedOut: false, agent: a, output: `read-guard: could not create a disposable worktree: ${added.out}` };
     const before = tryGit(dir, ["rev-parse", "HEAD"]).out;
     // a reader could also reach the real worktree by its absolute path: tracked files changed there during
-    // the call are put back too. ponytail: untracked new files there are not checked, because the verify
-    // commands create test artifacts in that worktree at the same time; the CLIs' own read-only modes cover it
+    // the call are put back too. The verify commands run there at the same time, but they must not change
+    // tracked files (commands that do belong in orchestrator.build), so a change here is never legitimate
+    // output: whoever made it, it is undone and surfaced. ponytail: untracked new files there are not
+    // checked, because verify creates test artifacts in that worktree; the CLIs' own read-only modes cover it
     const homeBefore = new Set(changedTracked(req.cwd));
     try {
         const res = await run({ ...req, cwd: dir });
@@ -324,7 +326,7 @@ async function guardRead(c, a, req, run) {
         if (homeEdits.length) {
             tryGit(req.cwd, ["checkout", "HEAD", "--", ...homeEdits]);
             logEvent(c.root, c.s.id, { type: "read-guard", agent: a, files: homeEdits.slice(0, 20) });
-            return { ...res, ok: false, output: `${res.output}\nread-guard: the call changed files in the run worktree: ${homeEdits.slice(0, 20).join(", ")}` };
+            return { ...res, ok: false, output: `${res.output}\nread-guard: tracked files in the run worktree changed during this read call (by the reader, or by a verify command that should be an orchestrator.build step): ${homeEdits.slice(0, 20).join(", ")}` };
         }
         const st = tryGit(dir, ["status", "--porcelain"]);
         // an unreadable status counts as changed: the guard may not assume what it cannot check
