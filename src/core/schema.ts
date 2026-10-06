@@ -29,7 +29,7 @@ export const mcpServerRefSchema = z.object({
   env: z.record(z.string()).optional(),
 });
 
-export const agentNameSchema = z.enum(["claude", "codex"]);
+export const agentNameSchema = z.enum(["claude", "codex", "gemini"]);
 export type AgentName = z.infer<typeof agentNameSchema>;
 
 const modelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/, "model names start with a letter or digit, then letters, digits and . _ : - (at most 64); a leading - would read as a CLI flag");
@@ -83,7 +83,7 @@ export const orchestratorSchema = z.object({
   link: z.array(z.string().min(1)).default(["node_modules"]),
   /** per-CLI model, overriding the CLI's own default (which may be unsupported); every name lands on a Windows command line, so plain names only */
   models: z
-    .object({ claude: agentModelSchema.optional(), codex: agentModelSchema.optional() })
+    .object({ claude: agentModelSchema.optional(), codex: agentModelSchema.optional(), gemini: agentModelSchema.optional() })
     .strict()
     .default({}),
   /** replaces the built-in risk rules (all "flag") when given */
