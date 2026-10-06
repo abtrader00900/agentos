@@ -11,11 +11,15 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 const run = (id: string): RunState => ({ id, task: "t", status: "pr_open", baseBranch: "main", base: "x", branch: `agentos/run-${id}`, runWorktree: "", createdAt: new Date().toISOString(), updatedAt: "", subtasks: [], fixRound: 0, findings: [] });
 
 describe("usage", () => {
-  it("reads Claude result and Codex turn.completed lines", () => {
+  it("reads Claude result, Codex turn.completed and agy result lines", () => {
     expect(usageFromLine(JSON.stringify({ type: "result", result: "x".repeat(9000), total_cost_usd: 0.25, usage: { input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 100, output_tokens: 7 } })))
       .toEqual({ costUsd: 0.25, inputTokens: 115, outputTokens: 7 });
     expect(usageFromLine(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 40, cached_input_tokens: 10, output_tokens: 3 } })))
       .toEqual({ inputTokens: 40, outputTokens: 3 });
+    expect(usageFromLine('{"event":"result","result":{"status":"SUCCESS","response":"done","usage":{"input_tokens":12,"output_tokens":3}}}'))
+      .toEqual({ inputTokens: 12, outputTokens: 3 });
+    expect(usageFromLine('{"event":"result","result":{"status":"SUCCESS","response":"done","usage":{"output_tokens":"3"}}}')).toBeNull();
+    expect(usageFromLine('{"event":"result","result":{"status":"SUCCESS","response":"done"}}')).toBeNull();
     expect(usageFromLine('{"type":"system"}')).toBeNull();
     expect(usageFromLine("not json")).toBeNull();
   });

@@ -229,16 +229,15 @@ export function doctor(options: { cwd?: string; quiet?: boolean } = {}): { check
   // agent must still come out ok. Never spawn them to ask a version (see resolveOnPath) — the
   // resolved path is the whole proof, and the quota mark says when the agent is usable again.
   const quota = fileQuota(agentosHome());
-  const agentClis = [
+  const agentClis: { agent: AgentName; bin: string; fix: string }[] = [
     { agent: "claude", bin: "claude", fix: "Install Claude Code: npm i -g @anthropic-ai/claude-code, then run claude once to log in" },
     { agent: "codex", bin: "codex", fix: "Install Codex: npm i -g @openai/codex, then run codex once to log in" },
     { agent: "gemini", bin: "agy", fix: "Install Google's agy CLI, then run agy once to log in with the Google AI Pro account" },
   ];
   for (const { agent, bin, fix } of agentClis) {
-    // the quota file keys marks by agent name; "gemini" only joins AgentName in a later task
-    const until = quota.until(agent as AgentName, new Date());
+    const until = quota.until(agent, new Date());
     const limited = until ? ` — limited until ${until.toISOString()}` : "";
-    const found = resolveOnPath(bin);
+    const found = resolveAgentCli(bin);
     add(found
       ? { name: `agent:${agent}`, status: "pass", detail: `${bin} at ${found}${limited}` }
       : { name: `agent:${agent}`, status: "warn", detail: `${bin} not found on PATH${limited}`, fix });
@@ -300,6 +299,22 @@ export function resolveOnPath(cmd: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * The executable for an agent CLI: PATH first, then agy's own install folder.
+ * Antigravity installs agy.exe into %LOCALAPPDATA%\agy\bin and puts that folder on PATH,
+ * which a process started earlier (a shell, the daemon, an editor) never sees — so a
+ * working agy would look missing to both doctor and the runners. Nothing changes off Windows.
+ */
+export function resolveAgentCli(bin: string): string | undefined {
+  const onPath = resolveOnPath(bin);
+  if (onPath || bin !== "agy" || process.platform !== "win32") return onPath;
+  // only an absolute LOCALAPPDATA: an unset one would make this a relative path inside the repo being worked on
+  const base = process.env.LOCALAPPDATA;
+  if (!base || !path.isAbsolute(base)) return undefined;
+  const installed = path.join(base, "agy", "bin", "agy.exe");
+  return existsSync(installed) ? installed : undefined;
 }
 
 function report(checks: Check[], options: { quiet?: boolean }): { checks: Check[]; ok: boolean } {

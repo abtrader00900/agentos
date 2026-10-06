@@ -826,6 +826,18 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(calls).toBe(0);
   });
 
+  it("never calls an agent outside the allowlist, even when every allowed agent is limited", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    let geminiCalls = 0;
+    const g: Runner = async () => { geminiCalls++; return reply(); };
+    Object.assign(d.runners, { gemini: { read: g, write: g } });
+    d.runners.claude.write = async () => LIMIT;
+    d.runners.codex.write = async () => LIMIT;
+    const s = await startRun(repo.root, "allowlist", cfg({ agents: ["claude", "codex"] }), d, "q6");
+    expect(s.status).toBe("paused");
+    expect(geminiCalls).toBe(0);
+  });
+
   it("never leaves the agents allowlist", () => {
     expect(() => cfg({ agents: ["claude"], workers: ["claude", "codex"] })).toThrow();
     expect(cfg({}).agents).toEqual(["claude", "codex"]);

@@ -9,8 +9,11 @@ const finite = (value: unknown): value is number => typeof value === "number" &&
 export function usageFromLine(line: string): Usage | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
-    if (!event || typeof event !== "object" || !event.usage || typeof event.usage !== "object") return null;
-    const usage = event.usage as Record<string, unknown>;
+    if (!event || typeof event !== "object") return null;
+    // agy nests usage under result and discriminates on `event`, not `type`
+    const agyResult = event.event === "result" && typeof event.result === "object" ? event.result as Record<string, unknown> | null : null;
+    const usage = (event.usage ?? agyResult?.usage) as Record<string, unknown> | undefined;
+    if (!usage || typeof usage !== "object") return null;
     if (!finite(usage.input_tokens) || !finite(usage.output_tokens)) return null;
 
     if (event.type === "result") {
@@ -25,7 +28,7 @@ export function usageFromLine(line: string): Usage | null {
       };
     }
 
-    if (event.type === "turn.completed") {
+    if (event.type === "turn.completed" || agyResult) {
       return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
     }
     return null;

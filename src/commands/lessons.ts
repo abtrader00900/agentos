@@ -37,7 +37,8 @@ export function lessonsCommand(action: string | undefined, key: string | undefin
 /** agentos learn --run <id> | --pending-runs */
 export async function learnRuns(
   opts: { run?: string; pendingRuns?: boolean; cwd?: string },
-  runners?: Record<AgentName, { read: Runner; write: Runner }>,
+  // Partial: a caller (or a test) may hand over the agents it has, like EngineDeps.runners
+  runners?: Partial<Record<AgentName, { read: Runner; write: Runner }>>,
 ): Promise<void> {
   const root = repoRoot(opts.cwd);
   const { config } = loadConfig(root);

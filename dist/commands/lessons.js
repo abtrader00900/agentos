@@ -48,7 +48,9 @@ export function lessonsCommand(action, key, opts) {
     }
 }
 /** agentos learn --run <id> | --pending-runs */
-export async function learnRuns(opts, runners) {
+export async function learnRuns(opts, 
+// Partial: a caller (or a test) may hand over the agents it has, like EngineDeps.runners
+runners) {
     const root = repoRoot(opts.cwd);
     const { config } = loadConfig(root);
     const learning = config.learning ?? learningSchema.parse({});

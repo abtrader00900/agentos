@@ -8,9 +8,14 @@ export declare function killTree(pid: number): void;
  * so the Windows shell (needed to start npm's .cmd shims) never sees user text.
  * On Windows the command is resolved to an absolute path first: cmd.exe looks in the
  * current directory before PATH, so a claude.cmd an agent wrote into a worktree would run.
+ *
+ * `agy: true` is for Google's agy CLI, which accepts a prompt only as one NDJSON line
+ * on stdin and reports a failed turn in its result line while still exiting 0.
  */
-export declare function spawnRunner(command: string, args: string[]): Runner;
-/** The agent's final message from Claude stream-json or Codex --json output, else the output's tail. */
+export declare function spawnRunner(command: string, args: string[], opts?: {
+    agy?: boolean;
+}): Runner;
+/** The agent's final message from Claude stream-json, Codex --json or agy stream-json output, else the output's tail. */
 export declare function finalText(output: string): string;
 /**
  * The command and fixed argv for one agent CLI.
