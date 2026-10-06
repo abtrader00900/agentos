@@ -50,7 +50,7 @@ export declare const mcpServerRefSchema: z.ZodObject<{
     args?: string[] | undefined;
     env?: Record<string, string> | undefined;
 }>;
-export declare const agentNameSchema: z.ZodEnum<["claude", "codex"]>;
+export declare const agentNameSchema: z.ZodEnum<["claude", "codex", "gemini"]>;
 export type AgentName = z.infer<typeof agentNameSchema>;
 /** a path or size rule that marks a PR for the owner's attention (flag) or stops it before it opens (block) */
 export declare const riskRuleSchema: z.ZodEffects<z.ZodObject<{
@@ -89,12 +89,12 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     maxMinutes: z.ZodDefault<z.ZodNumber>;
     /** one agent call */
     subtaskMinutes: z.ZodDefault<z.ZodNumber>;
-    planner: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
-    workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+    planner: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
+    workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex", "gemini"]>, "many">>;
     /** reviews the diff; swapped for an agent that wrote none of it when it wrote every subtask */
-    reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+    reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
     /** the hard boundary of this project: no fallback ever calls an agent outside it */
-    agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+    agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex", "gemini"]>, "many">>;
     /** how long an agent counts as limited when its CLI names no wait */
     quotaCooldownMinutes: z.ZodDefault<z.ZodNumber>;
     /** shell commands that must pass before a PR opens, run in the run worktree */
@@ -127,6 +127,16 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             read?: string | undefined;
             write?: string | undefined;
         }>]>>;
+        gemini: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+            read: z.ZodOptional<z.ZodString>;
+            write: z.ZodOptional<z.ZodString>;
+        }, "strict", z.ZodTypeAny, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }, {
+            read?: string | undefined;
+            write?: string | undefined;
+        }>]>>;
     }, "strict", z.ZodTypeAny, {
         codex?: string | {
             read?: string | undefined;
@@ -136,12 +146,20 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
+        gemini?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     }, {
         codex?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -179,9 +197,9 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     maxFixRounds: number;
     maxMinutes: number;
     subtaskMinutes: number;
-    planner: "codex" | "claude";
-    workers: ("codex" | "claude")[];
-    reviewer: "codex" | "claude";
+    planner: "codex" | "claude" | "gemini";
+    workers: ("codex" | "claude" | "gemini")[];
+    reviewer: "codex" | "claude" | "gemini";
     quotaCooldownMinutes: number;
     verify: string[];
     build: string[];
@@ -196,8 +214,12 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
+        gemini?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
     };
-    agents?: ("codex" | "claude")[] | undefined;
+    agents?: ("codex" | "claude" | "gemini")[] | undefined;
     risk?: {
         name: string;
         action: "flag" | "block";
@@ -210,10 +232,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     maxFixRounds?: number | undefined;
     maxMinutes?: number | undefined;
     subtaskMinutes?: number | undefined;
-    planner?: "codex" | "claude" | undefined;
-    workers?: ("codex" | "claude")[] | undefined;
-    reviewer?: "codex" | "claude" | undefined;
-    agents?: ("codex" | "claude")[] | undefined;
+    planner?: "codex" | "claude" | "gemini" | undefined;
+    workers?: ("codex" | "claude" | "gemini")[] | undefined;
+    reviewer?: "codex" | "claude" | "gemini" | undefined;
+    agents?: ("codex" | "claude" | "gemini")[] | undefined;
     quotaCooldownMinutes?: number | undefined;
     verify?: string[] | undefined;
     build?: string[] | undefined;
@@ -225,6 +247,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -236,15 +262,15 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
         deletedLines?: number | undefined;
     }[] | undefined;
 }>, {
-    agents: ("codex" | "claude")[];
+    agents: ("codex" | "claude" | "gemini")[];
     autonomy: "pr";
     maxWorkers: number;
     maxFixRounds: number;
     maxMinutes: number;
     subtaskMinutes: number;
-    planner: "codex" | "claude";
-    workers: ("codex" | "claude")[];
-    reviewer: "codex" | "claude";
+    planner: "codex" | "claude" | "gemini";
+    workers: ("codex" | "claude" | "gemini")[];
+    reviewer: "codex" | "claude" | "gemini";
     quotaCooldownMinutes: number;
     verify: string[];
     build: string[];
@@ -256,6 +282,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -272,10 +302,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     maxFixRounds?: number | undefined;
     maxMinutes?: number | undefined;
     subtaskMinutes?: number | undefined;
-    planner?: "codex" | "claude" | undefined;
-    workers?: ("codex" | "claude")[] | undefined;
-    reviewer?: "codex" | "claude" | undefined;
-    agents?: ("codex" | "claude")[] | undefined;
+    planner?: "codex" | "claude" | "gemini" | undefined;
+    workers?: ("codex" | "claude" | "gemini")[] | undefined;
+    reviewer?: "codex" | "claude" | "gemini" | undefined;
+    agents?: ("codex" | "claude" | "gemini")[] | undefined;
     quotaCooldownMinutes?: number | undefined;
     verify?: string[] | undefined;
     build?: string[] | undefined;
@@ -287,6 +317,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -298,15 +332,15 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
         deletedLines?: number | undefined;
     }[] | undefined;
 }>, {
-    agents: ("codex" | "claude")[];
+    agents: ("codex" | "claude" | "gemini")[];
     autonomy: "pr";
     maxWorkers: number;
     maxFixRounds: number;
     maxMinutes: number;
     subtaskMinutes: number;
-    planner: "codex" | "claude";
-    workers: ("codex" | "claude")[];
-    reviewer: "codex" | "claude";
+    planner: "codex" | "claude" | "gemini";
+    workers: ("codex" | "claude" | "gemini")[];
+    reviewer: "codex" | "claude" | "gemini";
     quotaCooldownMinutes: number;
     verify: string[];
     build: string[];
@@ -318,6 +352,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -334,10 +372,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     maxFixRounds?: number | undefined;
     maxMinutes?: number | undefined;
     subtaskMinutes?: number | undefined;
-    planner?: "codex" | "claude" | undefined;
-    workers?: ("codex" | "claude")[] | undefined;
-    reviewer?: "codex" | "claude" | undefined;
-    agents?: ("codex" | "claude")[] | undefined;
+    planner?: "codex" | "claude" | "gemini" | undefined;
+    workers?: ("codex" | "claude" | "gemini")[] | undefined;
+    reviewer?: "codex" | "claude" | "gemini" | undefined;
+    agents?: ("codex" | "claude" | "gemini")[] | undefined;
     quotaCooldownMinutes?: number | undefined;
     verify?: string[] | undefined;
     build?: string[] | undefined;
@@ -349,6 +387,10 @@ export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
             write?: string | undefined;
         } | undefined;
         claude?: string | {
+            read?: string | undefined;
+            write?: string | undefined;
+        } | undefined;
+        gemini?: string | {
             read?: string | undefined;
             write?: string | undefined;
         } | undefined;
@@ -365,19 +407,19 @@ export type OrchestratorConfig = z.infer<typeof orchestratorSchema>;
 export declare const learningSchema: z.ZodObject<{
     /** a read-only agent writes lessons after each run; false = no lessons */
     retro: z.ZodDefault<z.ZodBoolean>;
-    retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+    retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
     /** lessons added to each planner/worker/reviewer/fixer prompt */
     maxLessonsInPrompt: z.ZodDefault<z.ZodNumber>;
     /** successful runs of one task kind before a skill is drafted */
     skillAfterRuns: z.ZodDefault<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     retro: boolean;
-    retroAgent: "codex" | "claude";
+    retroAgent: "codex" | "claude" | "gemini";
     maxLessonsInPrompt: number;
     skillAfterRuns: number;
 }, {
     retro?: boolean | undefined;
-    retroAgent?: "codex" | "claude" | undefined;
+    retroAgent?: "codex" | "claude" | "gemini" | undefined;
     maxLessonsInPrompt?: number | undefined;
     skillAfterRuns?: number | undefined;
 }>;
@@ -547,12 +589,12 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxMinutes: z.ZodDefault<z.ZodNumber>;
         /** one agent call */
         subtaskMinutes: z.ZodDefault<z.ZodNumber>;
-        planner: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
-        workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+        planner: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
+        workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex", "gemini"]>, "many">>;
         /** reviews the diff; swapped for an agent that wrote none of it when it wrote every subtask */
-        reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+        reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
         /** the hard boundary of this project: no fallback ever calls an agent outside it */
-        agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+        agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex", "gemini"]>, "many">>;
         /** how long an agent counts as limited when its CLI names no wait */
         quotaCooldownMinutes: z.ZodDefault<z.ZodNumber>;
         /** shell commands that must pass before a PR opens, run in the run worktree */
@@ -585,6 +627,16 @@ export declare const agentConfigSchema: z.ZodObject<{
                 read?: string | undefined;
                 write?: string | undefined;
             }>]>>;
+            gemini: z.ZodOptional<z.ZodUnion<[z.ZodString, z.ZodObject<{
+                read: z.ZodOptional<z.ZodString>;
+                write: z.ZodOptional<z.ZodString>;
+            }, "strict", z.ZodTypeAny, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }, {
+                read?: string | undefined;
+                write?: string | undefined;
+            }>]>>;
         }, "strict", z.ZodTypeAny, {
             codex?: string | {
                 read?: string | undefined;
@@ -594,12 +646,20 @@ export declare const agentConfigSchema: z.ZodObject<{
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
+            gemini?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         }, {
             codex?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -637,9 +697,9 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxFixRounds: number;
         maxMinutes: number;
         subtaskMinutes: number;
-        planner: "codex" | "claude";
-        workers: ("codex" | "claude")[];
-        reviewer: "codex" | "claude";
+        planner: "codex" | "claude" | "gemini";
+        workers: ("codex" | "claude" | "gemini")[];
+        reviewer: "codex" | "claude" | "gemini";
         quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
@@ -654,8 +714,12 @@ export declare const agentConfigSchema: z.ZodObject<{
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
+            gemini?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
-        agents?: ("codex" | "claude")[] | undefined;
+        agents?: ("codex" | "claude" | "gemini")[] | undefined;
         risk?: {
             name: string;
             action: "flag" | "block";
@@ -668,10 +732,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxFixRounds?: number | undefined;
         maxMinutes?: number | undefined;
         subtaskMinutes?: number | undefined;
-        planner?: "codex" | "claude" | undefined;
-        workers?: ("codex" | "claude")[] | undefined;
-        reviewer?: "codex" | "claude" | undefined;
-        agents?: ("codex" | "claude")[] | undefined;
+        planner?: "codex" | "claude" | "gemini" | undefined;
+        workers?: ("codex" | "claude" | "gemini")[] | undefined;
+        reviewer?: "codex" | "claude" | "gemini" | undefined;
+        agents?: ("codex" | "claude" | "gemini")[] | undefined;
         quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
@@ -683,6 +747,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -694,15 +762,15 @@ export declare const agentConfigSchema: z.ZodObject<{
             deletedLines?: number | undefined;
         }[] | undefined;
     }>, {
-        agents: ("codex" | "claude")[];
+        agents: ("codex" | "claude" | "gemini")[];
         autonomy: "pr";
         maxWorkers: number;
         maxFixRounds: number;
         maxMinutes: number;
         subtaskMinutes: number;
-        planner: "codex" | "claude";
-        workers: ("codex" | "claude")[];
-        reviewer: "codex" | "claude";
+        planner: "codex" | "claude" | "gemini";
+        workers: ("codex" | "claude" | "gemini")[];
+        reviewer: "codex" | "claude" | "gemini";
         quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
@@ -714,6 +782,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -730,10 +802,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxFixRounds?: number | undefined;
         maxMinutes?: number | undefined;
         subtaskMinutes?: number | undefined;
-        planner?: "codex" | "claude" | undefined;
-        workers?: ("codex" | "claude")[] | undefined;
-        reviewer?: "codex" | "claude" | undefined;
-        agents?: ("codex" | "claude")[] | undefined;
+        planner?: "codex" | "claude" | "gemini" | undefined;
+        workers?: ("codex" | "claude" | "gemini")[] | undefined;
+        reviewer?: "codex" | "claude" | "gemini" | undefined;
+        agents?: ("codex" | "claude" | "gemini")[] | undefined;
         quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
@@ -745,6 +817,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -756,15 +832,15 @@ export declare const agentConfigSchema: z.ZodObject<{
             deletedLines?: number | undefined;
         }[] | undefined;
     }>, {
-        agents: ("codex" | "claude")[];
+        agents: ("codex" | "claude" | "gemini")[];
         autonomy: "pr";
         maxWorkers: number;
         maxFixRounds: number;
         maxMinutes: number;
         subtaskMinutes: number;
-        planner: "codex" | "claude";
-        workers: ("codex" | "claude")[];
-        reviewer: "codex" | "claude";
+        planner: "codex" | "claude" | "gemini";
+        workers: ("codex" | "claude" | "gemini")[];
+        reviewer: "codex" | "claude" | "gemini";
         quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
@@ -776,6 +852,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -792,10 +872,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxFixRounds?: number | undefined;
         maxMinutes?: number | undefined;
         subtaskMinutes?: number | undefined;
-        planner?: "codex" | "claude" | undefined;
-        workers?: ("codex" | "claude")[] | undefined;
-        reviewer?: "codex" | "claude" | undefined;
-        agents?: ("codex" | "claude")[] | undefined;
+        planner?: "codex" | "claude" | "gemini" | undefined;
+        workers?: ("codex" | "claude" | "gemini")[] | undefined;
+        reviewer?: "codex" | "claude" | "gemini" | undefined;
+        agents?: ("codex" | "claude" | "gemini")[] | undefined;
         quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
@@ -807,6 +887,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 write?: string | undefined;
             } | undefined;
             claude?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
+            gemini?: string | {
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
@@ -822,19 +906,19 @@ export declare const agentConfigSchema: z.ZodObject<{
     learning: z.ZodOptional<z.ZodObject<{
         /** a read-only agent writes lessons after each run; false = no lessons */
         retro: z.ZodDefault<z.ZodBoolean>;
-        retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+        retroAgent: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
         /** lessons added to each planner/worker/reviewer/fixer prompt */
         maxLessonsInPrompt: z.ZodDefault<z.ZodNumber>;
         /** successful runs of one task kind before a skill is drafted */
         skillAfterRuns: z.ZodDefault<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
         retro: boolean;
-        retroAgent: "codex" | "claude";
+        retroAgent: "codex" | "claude" | "gemini";
         maxLessonsInPrompt: number;
         skillAfterRuns: number;
     }, {
         retro?: boolean | undefined;
-        retroAgent?: "codex" | "claude" | undefined;
+        retroAgent?: "codex" | "claude" | "gemini" | undefined;
         maxLessonsInPrompt?: number | undefined;
         skillAfterRuns?: number | undefined;
     }>>;
@@ -923,15 +1007,15 @@ export declare const agentConfigSchema: z.ZodObject<{
     };
     skillRegistry?: string | undefined;
     orchestrator?: {
-        agents: ("codex" | "claude")[];
+        agents: ("codex" | "claude" | "gemini")[];
         autonomy: "pr";
         maxWorkers: number;
         maxFixRounds: number;
         maxMinutes: number;
         subtaskMinutes: number;
-        planner: "codex" | "claude";
-        workers: ("codex" | "claude")[];
-        reviewer: "codex" | "claude";
+        planner: "codex" | "claude" | "gemini";
+        workers: ("codex" | "claude" | "gemini")[];
+        reviewer: "codex" | "claude" | "gemini";
         quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
@@ -946,6 +1030,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
+            gemini?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         };
         risk?: {
             name: string;
@@ -956,7 +1044,7 @@ export declare const agentConfigSchema: z.ZodObject<{
     } | undefined;
     learning?: {
         retro: boolean;
-        retroAgent: "codex" | "claude";
+        retroAgent: "codex" | "claude" | "gemini";
         maxLessonsInPrompt: number;
         skillAfterRuns: number;
     } | undefined;
@@ -1010,10 +1098,10 @@ export declare const agentConfigSchema: z.ZodObject<{
         maxFixRounds?: number | undefined;
         maxMinutes?: number | undefined;
         subtaskMinutes?: number | undefined;
-        planner?: "codex" | "claude" | undefined;
-        workers?: ("codex" | "claude")[] | undefined;
-        reviewer?: "codex" | "claude" | undefined;
-        agents?: ("codex" | "claude")[] | undefined;
+        planner?: "codex" | "claude" | "gemini" | undefined;
+        workers?: ("codex" | "claude" | "gemini")[] | undefined;
+        reviewer?: "codex" | "claude" | "gemini" | undefined;
+        agents?: ("codex" | "claude" | "gemini")[] | undefined;
         quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
@@ -1028,6 +1116,10 @@ export declare const agentConfigSchema: z.ZodObject<{
                 read?: string | undefined;
                 write?: string | undefined;
             } | undefined;
+            gemini?: string | {
+                read?: string | undefined;
+                write?: string | undefined;
+            } | undefined;
         } | undefined;
         risk?: {
             name: string;
@@ -1038,7 +1130,7 @@ export declare const agentConfigSchema: z.ZodObject<{
     } | undefined;
     learning?: {
         retro?: boolean | undefined;
-        retroAgent?: "codex" | "claude" | undefined;
+        retroAgent?: "codex" | "claude" | "gemini" | undefined;
         maxLessonsInPrompt?: number | undefined;
         skillAfterRuns?: number | undefined;
     } | undefined;

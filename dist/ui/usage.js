@@ -5,9 +5,13 @@ const finite = (value) => typeof value === "number" && Number.isFinite(value);
 export function usageFromLine(line) {
     try {
         const event = JSON.parse(line);
-        if (!event || typeof event !== "object" || !event.usage || typeof event.usage !== "object")
+        if (!event || typeof event !== "object")
             return null;
-        const usage = event.usage;
+        // agy nests usage under result and discriminates on `event`, not `type`
+        const agyResult = event.event === "result" && typeof event.result === "object" ? event.result : null;
+        const usage = (event.usage ?? agyResult?.usage);
+        if (!usage || typeof usage !== "object")
+            return null;
         if (!finite(usage.input_tokens) || !finite(usage.output_tokens))
             return null;
         if (event.type === "result") {
@@ -23,7 +27,7 @@ export function usageFromLine(line) {
                 outputTokens: usage.output_tokens,
             };
         }
-        if (event.type === "turn.completed") {
+        if (event.type === "turn.completed" || agyResult) {
             return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
         }
         return null;

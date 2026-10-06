@@ -11,10 +11,10 @@ export declare function learnRuns(opts: {
     run?: string;
     pendingRuns?: boolean;
     cwd?: string;
-}, runners?: Record<AgentName, {
+}, runners?: Partial<Record<AgentName, {
     read: Runner;
     write: Runner;
-}>): Promise<void>;
+}>>): Promise<void>;
 export declare function skillDraftsCommand(cwd?: string): void;
 export declare function skillApproveCommand(kind: string, cwd?: string): void;
 export declare function skillRejectCommand(kind: string, cwd?: string): void;
