@@ -413,6 +413,11 @@ function agentRunner(c, agent, mode, rejectOk) {
             const vetoed = res.ok ? rejectOk?.(res) : undefined;
             if ((res.ok && !vetoed) || cancelRequested(c.root, c.s.id))
                 return res;
+            // this result is thrown away, but whatever it already wrote stays in the worktree and is committed
+            // with the next agent's work: that makes this agent an author too, so a later review by it counts
+            // as a self-review. (read calls edit only their disposable worktree, which guardRead throws away.)
+            if (mode === "write" && statusOf(req.cwd))
+                addEditor(c.s, a);
             let until;
             if (res.rateLimited) {
                 until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
@@ -505,6 +510,11 @@ function planned(c, p) {
     logEvent(root, s.id, { type: "plan", plan: p });
     return move(c, "working");
 }
+/**
+ * Every write call gets this: a real worker tried a shell command first, this environment denied it,
+ * and the worker quit without editing a single file.
+ */
+const SHELL_RULE = "Shell commands may be refused in this environment. When one is denied, read, search and edit files with your own file tools instead; a denied command is never a reason to stop or give up, and agentos runs the tests itself.";
 function workerPrompt(s, sub, note = "") {
     return [
         `You are one worker in a team. Overall goal: ${s.task}`,
@@ -512,6 +522,7 @@ function workerPrompt(s, sub, note = "") {
         `Your subtask (${sub.id}): ${sub.title}\n${sub.prompt}`,
         sub.files.length ? `Files you are expected to change: ${sub.files.join(", ")}` : "",
         "Rules: work only inside the current directory. Do not commit, push, deploy, run migrations against real databases, or delete anything outside this directory. agentos commits your changes and runs the tests.",
+        SHELL_RULE,
         note,
         REPORT_INSTRUCTIONS,
     ]
@@ -590,6 +601,7 @@ function conflictPrompt(s, files) {
         `Goal: ${s.task}`,
         `A git merge in this directory stopped with conflicts in: ${files.join(", ")}.`,
         "Resolve every conflict so both sides' intent is kept, and remove all conflict markers. Edit files only; do not commit or abort the merge.",
+        SHELL_RULE,
     ].join("\n\n");
 }
 async function resolveConflicts(c, files, agent) {
@@ -718,6 +730,7 @@ function fixPrompt(s, note = "") {
         "The change in this directory does not pass yet. Fix it. Edit files only; do not commit.",
         s.verifyOk === false ? `Failing checks:\n${s.verifyOutput}` : "",
         found.length ? `Review findings to fix:\n${found.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n")}` : "",
+        SHELL_RULE,
         note,
         REPORT_INSTRUCTIONS,
     ]
