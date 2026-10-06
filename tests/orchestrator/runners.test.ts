@@ -92,6 +92,12 @@ describe("spawnRunner", () => {
     expect(r).toMatchObject({ ok: false, rateLimited: true });
   });
 
+  it("fails an agy call that exits 0 without any result line (agy does that when its quota is gone)", async () => {
+    const silent = script("agy-silent.mjs", `process.stdin.resume();process.stdin.on("end",()=>{});`);
+    const r = await spawnRunner(process.execPath, [silent], { agy: true })({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
+    expect(r.ok).toBe(false);
+  });
+
   it("reports a missing command as a failed result", async () => {
     const r = await spawnRunner("agentos-no-such-cli", [])({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
     expect(r.ok).toBe(false);

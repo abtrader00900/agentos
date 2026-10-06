@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { makeRepo } from "../orchestrator/helpers.js";
 import { preflight } from "../../src/commands/run.js";
+import { resolveAgentCli } from "../../src/commands/doctor.js";
 
 const WIN = process.platform === "win32";
 const CONFIG = "project: { name: p }\norchestrator:\n  planner: gemini\n  workers: [gemini]\n  reviewer: gemini\n  link: []\n";
@@ -34,6 +35,21 @@ describe("run preflight: the gemini agent runs Google's agy CLI", () => {
       process.env.PATH = [fakeBin("agy"), pathWithoutAgy()].join(path.delimiter);
       expect(preflight(repo.root, () => "").workers).toEqual(["gemini"]);
     } finally {
+      repo.cleanup();
+    }
+  });
+
+  it.runIf(WIN)("never takes an agy.exe from a relative path when LOCALAPPDATA is unset", () => {
+    const repo = makeRepo({ "agent.config.yaml": CONFIG, "agy/bin/agy.exe": "" });
+    const cwd = process.cwd();
+    try {
+      process.chdir(repo.root); // a repo that ships its own agy\bin\agy.exe
+      process.env.PATH = pathWithoutAgy();
+      delete process.env.LOCALAPPDATA;
+      expect(resolveAgentCli("agy")).toBeUndefined();
+      expect(() => preflight(repo.root, () => "")).toThrow(/gemini \(agy\)/);
+    } finally {
+      process.chdir(cwd);
       repo.cleanup();
     }
   });

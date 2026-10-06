@@ -72,7 +72,10 @@ export function spawnRunner(command, args, opts = {}) {
         });
     });
 }
-/** agy says a turn failed in its result line (`status: "ERROR"`) and still exits 0. */
+/**
+ * agy says a turn failed in its result line (`status: "ERROR"`) and still exits 0; with its quota gone it
+ * can also exit 0 having printed nothing. So only a result line saying SUCCESS counts as success.
+ */
 function agyError(output) {
     const lines = output.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -82,13 +85,13 @@ function agyError(output) {
         try {
             const ev = JSON.parse(line);
             if (ev.event === "result")
-                return ev.result?.status === "ERROR";
+                return ev.result?.status !== "SUCCESS";
         }
         catch {
             /* not JSON */
         }
     }
-    return false;
+    return true; // no result line at all: nothing proves the turn ran
 }
 /** The agent's final message from Claude stream-json, Codex --json or agy stream-json output, else the output's tail. */
 export function finalText(output) {

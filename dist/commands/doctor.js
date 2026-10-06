@@ -300,7 +300,11 @@ export function resolveAgentCli(bin) {
     const onPath = resolveOnPath(bin);
     if (onPath || bin !== "agy" || process.platform !== "win32")
         return onPath;
-    const installed = path.join(process.env.LOCALAPPDATA ?? "", "agy", "bin", "agy.exe");
+    // only an absolute LOCALAPPDATA: an unset one would make this a relative path inside the repo being worked on
+    const base = process.env.LOCALAPPDATA;
+    if (!base || !path.isAbsolute(base))
+        return undefined;
+    const installed = path.join(base, "agy", "bin", "agy.exe");
     return existsSync(installed) ? installed : undefined;
 }
 function report(checks, options) {
