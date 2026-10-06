@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnRunner, finalText, cliArgs, cliRunners } from "../../src/orchestrator/runners.js";
+import { spawnRunner, finalText, cliArgs, cliRunners, RATE_LIMIT_RE } from "../../src/orchestrator/runners.js";
 
 let tmp: string;
 const script = (name: string, body: string) => {
@@ -78,6 +78,15 @@ describe("spawnRunner", () => {
   it("reports a missing command as a failed result", async () => {
     const r = await spawnRunner("agentos-no-such-cli", [])({ prompt: "x", cwd: tmp, timeoutMs: 10_000 });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("RATE_LIMIT_RE", () => {
+  it("matches every agent CLI's wording for a quota limit, and no ordinary crash", () => {
+    for (const out of ["individual quota reached", "You have reached your weekly usage limit", "rate limit exceeded", "Error 429"]) {
+      expect(RATE_LIMIT_RE.test(out)).toBe(true);
+    }
+    expect(RATE_LIMIT_RE.test("TypeError: cannot read properties of undefined")).toBe(false);
   });
 });
 
