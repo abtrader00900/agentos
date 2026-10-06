@@ -63,12 +63,16 @@ describe("daemon service", () => {
   it("stops the daemon through a stop file holding its token, never by PID", async () => {
     lockAs("t2");
     const d = fakeDaemon("t2");
-    const stopping = stopDaemon(home, 2000, 3000);
-    await new Promise((r) => setTimeout(r, 600));
-    expect(d.seen).toContain("stop");
-    rmSync(lockFile(home)); // the daemon releases its lock as it exits
-    expect(await stopping).toBe("stopped");
-    d.stop();
+    try {
+      const stopping = stopDaemon(home, 2000, 3000);
+      // poll, not a fixed wait: on a busy CI runner the fake's 50 ms ticks can fall far behind
+      for (let i = 0; i < 100 && !d.seen.includes("stop"); i++) await new Promise((r) => setTimeout(r, 50));
+      expect(d.seen).toContain("stop");
+      rmSync(lockFile(home)); // the daemon releases its lock as it exits
+      expect(await stopping).toBe("stopped");
+    } finally {
+      d.stop(); // a failed assertion must not leave the ticker running into the next test's cleanup
+    }
   });
 
   it("says when the daemon has not let go yet, or was replaced", async () => {
