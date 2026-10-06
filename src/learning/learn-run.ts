@@ -11,6 +11,17 @@ import { redact } from "../orchestrator/safety.js";
 const LEARNABLE: RunState["status"][] = ["pr_open", "needs_human", "failed"];
 
 /**
+ * The project's agent allowlist is a hard boundary (PRD 5 §2): learning must not send a run's evidence
+ * to an agent the project does not allow. `agents` undefined = no orchestrator block, so nothing to enforce.
+ */
+export function allowedRunners<T>(runners: Partial<Record<AgentName, T>>, agents?: AgentName[]): Partial<Record<AgentName, T>> {
+  if (!agents) return runners;
+  const out: Partial<Record<AgentName, T>> = {};
+  for (const a of agents) if (runners[a]) out[a] = runners[a];
+  return out;
+}
+
+/**
  * Learn from one finished run. It never throws: the outcome lands in state.learned and the event log.
  * budgetMs is one deadline for every agent call it makes (the retrospective, its retry, the skill draft).
  */
@@ -37,8 +48,8 @@ export async function learnFromRun(
     const s = loadRun(root, runId);
     if (!LEARNABLE.includes(s.status)) return record("skipped", { reason: `status ${s.status}` });
     if (!learning.retro) return record("skipped", { reason: "learning.retro is false" });
-    const retro = runners[learning.retroAgent]; // an agent with no runner is unavailable, not an error
-    if (!retro) return record("skipped", { reason: `no ${learning.retroAgent} runner` });
+    const retro = runners[learning.retroAgent]; // an agent with no runner, or outside the allowlist, is unavailable, not an error
+    if (!retro) return record("skipped", { reason: `no ${learning.retroAgent} runner this project allows` });
     const evidence = collectEvidence(root, runId);
     const existing = listLessons(root, { status: ["auto", "approved"] }) // pending text never reaches a prompt
       .map((l) => ({ l, score: jaccard(l.text, s.task) }))

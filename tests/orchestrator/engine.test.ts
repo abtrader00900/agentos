@@ -810,6 +810,17 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(claudeCalls).toBe(1);
   });
 
+  it("retries instead of pausing when a cooldown ended while the rest of the step ran", async () => {
+    // the reviewer exhausts both agents, then both cooldowns end while the verify command is still running
+    const reviews: (string | RunnerResult)[] = [LIMIT, LIMIT];
+    const d = deps({ plan: planOf(sub("a")), work: creates, review: () => reviews.shift() ?? "[]" });
+    const c = cfg({ quotaCooldownMinutes: 0.03, verify: [`node -e "setTimeout(function () {}, 4000)"`] });
+    const s = await startRun(repo.root, "free again before the pause", c, d, "q10");
+    expect(s.status).toBe("pr_open"); // pausing would make the daemon wait for limits that are already gone
+    expect(s.resumeAt).toBeUndefined();
+    expect(readFileSync(path.join(runDir(repo.root, "q10"), "events.jsonl"), "utf8")).toContain('"type":"quota-freed"');
+  });
+
   it("picks a reviewer that did not write the code, even after a fallback", async () => {
     let reviewers: string[] = [];
     const d = deps({ plan: planOf(sub("a")), work: creates });

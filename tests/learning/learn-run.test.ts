@@ -123,6 +123,22 @@ describe("learning after a run", { timeout: 90_000 }, () => {
     expect(learning).toEqual([undefined, "done"]);
   });
 
+  it("skips the retrospective when the project's agents allowlist bars the retroAgent", async () => {
+    let claudeCalls = 0;
+    const d = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })));
+    const claude = d.runners.claude!;
+    d.runners.claude = {
+      read: async (r) => { claudeCalls++; return claude.read(r); },
+      write: async (r) => { claudeCalls++; return claude.write(r); },
+    };
+    // retroAgent defaults to claude; this project allows only codex, so the run's evidence never reaches claude
+    const c = orchestratorSchema.parse({ link: [], planner: "codex", workers: ["codex"], reviewer: "codex", agents: ["codex"] });
+    const s = await startRun(repo.root, "create a", c, d, "la1");
+    expect(s.status).toBe("pr_open");
+    expect(claudeCalls).toBe(0);
+    expect(loadRun(repo.root, "la1").learned).toBe("skipped");
+  });
+
   it("a needs_human run still learns, but never drafts a skill", async () => {
     const d = deps(() => reply(JSON.stringify({ kind: "file-add", lessons: [] })), { learning: learningSchema.parse({ skillAfterRuns: 2 }) });
     await startRun(repo.root, "create a", orchestratorSchema.parse({ link: [] }), d, "lr8");

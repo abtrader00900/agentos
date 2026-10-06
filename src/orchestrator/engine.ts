@@ -4,7 +4,7 @@ import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdir
 import { MemoryStore } from "../mcp/memory/store.js";
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import { lessonsFor } from "../learning/inject.js";
-import { learnFromRun } from "../learning/learn-run.js";
+import { allowedRunners, learnFromRun } from "../learning/learn-run.js";
 import type { Role } from "../learning/lessons.js";
 import type { AgentName, Finding, Plan, Runner, RunnerRequest, RunnerResult, Subtask } from "./types.js";
 import { fileQuota, resetFrom, type QuotaStore } from "./quota.js";
@@ -236,8 +236,9 @@ async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: E
   if (s.status === "pr_open") cleanup(c);
   if (deps.learning && ["pr_open", "needs_human", "failed"].includes(s.status)) {
     // best effort: learning reads the run's record and never changes its status. One subtaskMinutes for all of it.
+    // Only agents cfg.agents allows see the run's evidence, like every other call in the run.
     deps.onLearning?.();
-    const learned = await learnFromRun(root, s.id, deps.learning, deps.runners, minutes(cfg.subtaskMinutes));
+    const learned = await learnFromRun(root, s.id, deps.learning, allowedRunners(deps.runners, cfg.agents), minutes(cfg.subtaskMinutes));
     try {
       const saved = loadRun(root, s.id);
       Object.assign(s, { learned: saved.learned, kind: saved.kind, draft: saved.draft });
@@ -271,6 +272,9 @@ function move(c: Ctx, status: RunStatus, reason?: string): void {
   c.deps.onStatus?.(c.s);
 }
 
+/** usable right now: it has a runner (an agent without one counts as limited) and no live quota mark */
+const available = (c: Ctx, a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, new Date());
+
 /** when the first allowed agent has quota again; nothing while one of them is free */
 function earliestUntil(c: Ctx): Date | undefined {
   const now = new Date();
@@ -280,7 +284,18 @@ function earliestUntil(c: Ctx): Date | undefined {
     .sort((x, y) => x.getTime() - y.getTime())[0];
 }
 
+/**
+ * Pauses the run — but only while every allowed agent is limited right now (spec §2). A mark can expire
+ * between the call that hit the limit and here: the reviewer may exhaust both agents while the verify
+ * commands keep running for minutes, and a parallel worker's limit waits for every other worker. So
+ * availability is re-read at this boundary; with an agent free again the status stays as it is and the
+ * drive loop runs that step once more, retrying the pending subtask, review, fix or merge.
+ */
 function pause(c: Ctx, from: RunStatus): void {
+  if (c.cfg.agents.some((a) => available(c, a))) {
+    logEvent(c.root, c.s.id, { type: "quota-freed", from });
+    return;
+  }
   c.s.resumeFrom = from;
   // the daemon waits for this before resuming; unset while any allowed agent still has quota
   c.s.resumeAt = earliestUntil(c)?.toISOString();
@@ -313,7 +328,6 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
     }
   };
   return async (req) => {
-    const available = (a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, new Date());
     // the asked-for agent first (when the allowlist has it), then the rest of the allowlist in order
     const order = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)];
     /** the agents this chain already called; a limit it skipped instead may be gone by the next failure */
@@ -321,7 +335,7 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
     /** Takes the next untried agent that has quota, re-read from the shared store: a parallel worker
      *  or another run may have limited it — or let it free again — while the last call was running. */
     const nextFree = (): AgentName | undefined => {
-      const a = order.find((x) => !tried.has(x) && available(x));
+      const a = order.find((x) => !tried.has(x) && available(c, x));
       if (a) tried.add(a);
       return a;
     };
@@ -348,7 +362,7 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
       // Nothing left to try. Only "every allowed agent is at a limit right now" may pause the run
       // (spec §2), and that is re-read here: an agent that only errored, or one whose limit expired
       // while this chain ran, means a cooldown wait would help nothing, so the failure stands.
-      if (!next) return { ...res, rateLimited: res.rateLimited && c.cfg.agents.every((x) => !available(x)) };
+      if (!next) return { ...res, rateLimited: res.rateLimited && c.cfg.agents.every((x) => !available(c, x)) };
       logEvent(c.root, c.s.id, {
         type: "fallback", from: a, to: next,
         ...(until ? { why: "quota", until: until.toISOString() } : { why: res.timedOut ? "timeout" : "error", error: redact(res.output.trim().split("\n").filter(Boolean).pop() ?? "").slice(0, 200) }),
@@ -483,7 +497,12 @@ async function work(c: Ctx): Promise<void> {
     saveRun(root, s);
     return ok;
   }, { maxWorkers: cfg.maxWorkers, canStart: () => freeMb() >= cfg.minFreeMemoryMb });
-  if (paused) return pause(c, "working");
+  if (paused) {
+    // a quota limit wins over the failed list: those subtasks are pending again, not failed. pause()
+    // may decide not to pause (an agent has quota again), and then the drive loop retries them here.
+    pause(c, "working");
+    return;
+  }
   if (failed.length) return move(c, "needs_human", `subtask(s) failed: ${failed.join(", ")}; worktrees kept in ${path.join(runDir(root, s.id), "wt")}`);
   return move(c, "verifying");
 }
