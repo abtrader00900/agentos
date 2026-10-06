@@ -41,6 +41,11 @@ describe("orchestrator config", () => {
     const m = orchestratorSchema.parse({ models: { claude: { read: "opus", write: "sonnet" }, codex: "gpt-6.1-sol" } }).models;
     expect(m.claude).toEqual({ read: "opus", write: "sonnet" });
     expect(() => orchestratorSchema.parse({ models: { claude: { read: "bad name;rm" } } })).toThrow();
+    // a leading - would reach the CLI's argv as a flag
+    for (const flag of ["--dangerously-skip-permissions", "--yolo", "-x"]) {
+      expect(() => orchestratorSchema.parse({ models: { claude: flag } })).toThrow();
+      expect(() => orchestratorSchema.parse({ models: { codex: { write: flag } } })).toThrow();
+    }
   });
 
   it("rejects merge and deploy autonomy in this release", () => {

@@ -199,6 +199,27 @@ describe("orchestrator engine", { timeout: 60_000 }, () => {
 
   });
 
+  it("puts back a tracked file a reader changed in the run worktree by its absolute path", async () => {
+    let runWt = "";
+    const d = deps({
+      plan: planOf(sub("a")),
+      work: (cwd, p) => { runWt ||= cwd; creates(cwd, p); },
+      // the reviewer writes past its disposable worktree, into the real run worktree's README
+      review: (prompt, cwd) => {
+        if (!prompt.includes("You are the planner")) {
+          const s = loadRun(repo.root, "g3");
+          writeFileSync(path.join(s.runWorktree, "README.md"), "tampered");
+        }
+        return "[]";
+      },
+    });
+    await startRun(repo.root, "absolute path", cfg(), d, "g3");
+    const events = readFileSync(path.join(runDir(repo.root, "g3"), "events.jsonl"), "utf8");
+    expect(events).toContain('"type":"read-guard"');
+    expect(sh(repo.root, ["log", "--all", "-p", "--format="])).not.toContain("tampered");
+    expect(sh(repo.remote, ["log", "--all", "-p", "--format="])).not.toContain("tampered");
+  });
+
   it("pauses on a worker rate limit and resumes without redoing finished subtasks", async () => {
     let aCalls = 0;
     let bCalls = 0;

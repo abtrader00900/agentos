@@ -32,7 +32,7 @@ export const mcpServerRefSchema = z.object({
 export const agentNameSchema = z.enum(["claude", "codex"]);
 export type AgentName = z.infer<typeof agentNameSchema>;
 
-const modelNameSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/, "model names are letters, digits and . _ : - (at most 64)");
+const modelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/, "model names start with a letter or digit, then letters, digits and . _ : - (at most 64); a leading - would read as a CLI flag");
 
 /** one model for every role, or one per mode: read = planner and reviewer, write = workers, fixers and conflict resolution */
 const agentModelSchema = z.union([modelNameSchema, z.object({ read: modelNameSchema.optional(), write: modelNameSchema.optional() }).strict()]);

@@ -284,6 +284,11 @@ function pause(c, from) {
     c.s.resumeAt = earliestUntil(c)?.toISOString();
     move(c, "paused", `rate limit or quota reached — continue later with: agentos run --resume ${c.s.id}`);
 }
+/** tracked files with uncommitted changes in a worktree (empty when git cannot tell) */
+const changedTracked = (cwd) => {
+    const r = tryGit(cwd, ["diff", "--name-only", "HEAD"]);
+    return r.ok ? r.out.split("\n").filter(Boolean) : [];
+};
 /** disposable read worktrees are numbered, so two calls never pick the same directory */
 let readGuards = 0;
 /**
@@ -309,8 +314,18 @@ async function guardRead(c, a, req, run) {
     if (!added.ok)
         return { ok: false, rateLimited: false, timedOut: false, agent: a, output: `read-guard: could not create a disposable worktree: ${added.out}` };
     const before = tryGit(dir, ["rev-parse", "HEAD"]).out;
+    // a reader could also reach the real worktree by its absolute path: tracked files changed there during
+    // the call are put back too. ponytail: untracked new files there are not checked, because the verify
+    // commands create test artifacts in that worktree at the same time; the CLIs' own read-only modes cover it
+    const homeBefore = new Set(changedTracked(req.cwd));
     try {
         const res = await run({ ...req, cwd: dir });
+        const homeEdits = changedTracked(req.cwd).filter((f) => !homeBefore.has(f));
+        if (homeEdits.length) {
+            tryGit(req.cwd, ["checkout", "HEAD", "--", ...homeEdits]);
+            logEvent(c.root, c.s.id, { type: "read-guard", agent: a, files: homeEdits.slice(0, 20) });
+            return { ...res, ok: false, output: `${res.output}\nread-guard: the call changed files in the run worktree: ${homeEdits.slice(0, 20).join(", ")}` };
+        }
         const st = tryGit(dir, ["status", "--porcelain"]);
         // an unreadable status counts as changed: the guard may not assume what it cannot check
         const dirty = !st.ok || st.out !== "";

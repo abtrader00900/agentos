@@ -25,7 +25,7 @@ export const mcpServerRefSchema = z.object({
     env: z.record(z.string()).optional(),
 });
 export const agentNameSchema = z.enum(["claude", "codex"]);
-const modelNameSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/, "model names are letters, digits and . _ : - (at most 64)");
+const modelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/, "model names start with a letter or digit, then letters, digits and . _ : - (at most 64); a leading - would read as a CLI flag");
 /** one model for every role, or one per mode: read = planner and reviewer, write = workers, fixers and conflict resolution */
 const agentModelSchema = z.union([modelNameSchema, z.object({ read: modelNameSchema.optional(), write: modelNameSchema.optional() }).strict()]);
 /** a path or size rule that marks a PR for the owner's attention (flag) or stops it before it opens (block) */
