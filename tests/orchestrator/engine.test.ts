@@ -1025,4 +1025,16 @@ describe("orchestrator engine: write prompts", { timeout: 60_000 }, () => {
     expect(sh(repo.remote, ["ls-tree", "--name-only", s.branch])).toContain("partial.txt");
     expect(loadRun(repo.root, "pe1").editors).toContain("claude");
   });
+
+  it("never blames an agent for leftovers it found: only its own change makes it an author", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    d.runners.claude.write = async (r) => {
+      writeFileSync(path.join(r.cwd, "partial.txt"), "x");
+      return { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    };
+    // codex finds claude's leftovers, changes nothing and errors too
+    d.runners.codex.write = async () => ({ ok: false, output: "crashed\n", rateLimited: false, timedOut: false });
+    await startRun(repo.root, "two failures", cfg(), d, "pe2");
+    expect(loadRun(repo.root, "pe2").editors).toEqual(["claude"]);
+  });
 });

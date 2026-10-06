@@ -408,6 +408,9 @@ function agentRunner(c, agent, mode, rejectOk) {
         }
         let a = first;
         let errorFallbackUsed = false;
+        // the worktree as it was before the current attempt: only a change from this is that attempt's own edit
+        const snap = () => (mode === "write" ? statusOf(req.cwd) : "");
+        let before = snap();
         let res = await call(a, req);
         for (;;) {
             const vetoed = res.ok ? rejectOk?.(res) : undefined;
@@ -415,8 +418,11 @@ function agentRunner(c, agent, mode, rejectOk) {
                 return res;
             // this result is thrown away, but whatever it already wrote stays in the worktree and is committed
             // with the next agent's work: that makes this agent an author too, so a later review by it counts
-            // as a self-review. (read calls edit only their disposable worktree, which guardRead throws away.)
-            if (mode === "write" && statusOf(req.cwd))
+            // as a self-review. Compared with the status before this attempt, so a merge in progress or an
+            // earlier agent's leftovers never make it one. ponytail: a status string, so an edit to a file
+            // that was already dirty is not seen; a content hash per file if that ever matters.
+            // (read calls edit only their disposable worktree, which guardRead throws away.)
+            if (mode === "write" && statusOf(req.cwd) !== before)
                 addEditor(c.s, a);
             let until;
             if (res.rateLimited) {
@@ -440,6 +446,7 @@ function agentRunner(c, agent, mode, rejectOk) {
                 ...(until ? { why: "quota", until: until.toISOString() } : (vetoed ?? { why: res.timedOut ? "timeout" : "error", error: lastLine(redact(res.output)) })),
             });
             a = next;
+            before = snap();
             res = await call(a, req);
         }
     };
