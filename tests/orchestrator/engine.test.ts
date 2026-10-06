@@ -999,3 +999,30 @@ describe("orchestrator engine: no-change fallback", { timeout: 60_000 }, () => {
     expect(claudeWrites).toBe(1); // the chain is exhausted: no third call back to claude
   });
 });
+
+describe("orchestrator engine: write prompts", { timeout: 60_000 }, () => {
+  it("tells the worker that a refused shell command is no reason to stop", async () => {
+    let workPrompt = "";
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const claudeWrite = d.runners.claude.write;
+    d.runners.claude.write = async (r) => { workPrompt = r.prompt; return claudeWrite(r); };
+    const s = await startRun(repo.root, "add a", cfg(), d, "sh1");
+    expect(s.status).toBe("pr_open");
+    expect(workPrompt).toContain("Shell commands may be refused in this environment");
+    expect(workPrompt).toContain("your own file tools");
+  });
+
+  it("counts an agent whose failed call left edits behind as an author", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    // claude writes part of the subtask and then crashes: codex finishes it, and both files are committed
+    d.runners.claude.write = async (r) => {
+      writeFileSync(path.join(r.cwd, "partial.txt"), "x");
+      return { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    };
+    const s = await startRun(repo.root, "partial then fallback", cfg(), d, "pe1");
+    expect(s.status).toBe("pr_open");
+    expect(s.subtasks[0].doneBy).toBe("codex");
+    expect(sh(repo.remote, ["ls-tree", "--name-only", s.branch])).toContain("partial.txt");
+    expect(loadRun(repo.root, "pe1").editors).toContain("claude");
+  });
+});
