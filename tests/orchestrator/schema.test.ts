@@ -13,7 +13,19 @@ describe("orchestrator config", () => {
       autonomy: "pr", maxWorkers: 2, maxFixRounds: 3, maxMinutes: 90, subtaskMinutes: 20,
       planner: "claude", workers: ["claude", "codex"], reviewer: "codex", verify: [], build: [],
       minFreeMemoryMb: 1500, link: ["node_modules"], models: {},
+      agents: ["claude", "codex"], quotaCooldownMinutes: 60,
     });
+  });
+
+  it("defaults the agents allowlist to planner, workers and reviewer, and keeps every role inside it", () => {
+    expect(orchestratorSchema.parse({ planner: "claude", workers: ["claude"], reviewer: "claude" }).agents).toEqual(["claude"]);
+    expect(orchestratorSchema.parse({ workers: ["codex"] }).agents).toEqual(["claude", "codex"]);
+    const r = orchestratorSchema.safeParse({ agents: ["claude"], workers: ["claude", "codex"] });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("missing: codex");
+    expect(orchestratorSchema.parse({ agents: ["claude", "codex"] }).agents).toEqual(["claude", "codex"]);
+    expect(orchestratorSchema.safeParse({ quotaCooldownMinutes: 0 }).success).toBe(false);
+    expect(orchestratorSchema.safeParse({ quotaCooldownMinutes: -1 }).success).toBe(false);
   });
 
   it("takes an optional model per agent CLI, and only names safe on a command line", () => {
