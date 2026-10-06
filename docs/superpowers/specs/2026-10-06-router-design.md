@@ -58,6 +58,9 @@ These are out of scope for this PRD:
   2. otherwise the first agent in `cfg.agents` that wrote no subtask
   3. otherwise the first agent in `cfg.agents` that is not the main author (the agent that wrote the most subtasks)
   4. otherwise the configured reviewer itself (a single-agent project)
+
+  Quota limits apply to the reviewer too. If the only agent with quota left is the author, the review still runs (a stall helps nobody), but the PR body's "⚠️ Look here" section says: "reviewed by the same model that wrote it (<agent>), because <others> were at their quota limit". The owner then knows to look closer. The run state records it as `selfReview: true`.
+- **Missing runners.** `EngineDeps.runners` becomes `Partial<Record<AgentName, …>>`. An agent with no runner counts as unavailable, the same as limited. Fixtures that build only claude and codex keep compiling when `gemini` is added.
 - **Daemon.** A paused job is not resumed before its run's `resumeAt`.
 - **Rate-limit messages.** `RATE_LIMIT_RE` also matches `individual quota reached` (agy) and `reached your .* usage limit` (Kimi, in case the owner ever enables it through an API).
 
