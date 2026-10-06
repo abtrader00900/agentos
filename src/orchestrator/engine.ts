@@ -365,6 +365,9 @@ async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: Runn
   }
 }
 
+/** the last non-empty line of an agent's output: what a fallback event reports as the reason */
+const lastLine = (text: string): string => text.trim().split("\n").filter(Boolean).pop()?.trim().slice(0, 200) ?? "";
+
 /**
  * Runs one agent call: its PID is tracked for cancel, output lines are logged, and a failure
  * walks the allowlist — every quota limit moves on, an error or timeout costs one extra attempt.
@@ -432,7 +435,7 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
       if (!next) return { ...res, rateLimited: res.rateLimited && c.cfg.agents.every((x) => !available(c, x)) };
       logEvent(c.root, c.s.id, {
         type: "fallback", from: a, to: next,
-        ...(until ? { why: "quota", until: until.toISOString() } : { why: res.timedOut ? "timeout" : "error", error: redact(res.output.trim().split("\n").filter(Boolean).pop() ?? "").slice(0, 200) }),
+        ...(until ? { why: "quota", until: until.toISOString() } : { why: res.timedOut ? "timeout" : "error", error: lastLine(redact(res.output)) }),
       });
       a = next;
       res = await call(a, req);
@@ -533,18 +536,38 @@ async function work(c: Ctx): Promise<void> {
     saveRun(root, s);
     addWorktree(root, t.worktree, t.branch, head(s.runWorktree));
     linkDeps(root, t.worktree, cfg.link);
-    const res = await agentRunner(c, sub.agent, "write")({ prompt: workerPrompt(s, sub, notes(c, "worker")), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) });
+    const req = { prompt: workerPrompt(s, sub, notes(c, "worker")), cwd: t.worktree, timeoutMs: minutes(cfg.subtaskMinutes) };
+    const gained = () => Number(git(root, ["rev-list", "--count", `${s.branch}..${t.branch}`])) > 0;
+    let res = await agentRunner(c, sub.agent, "write")(req);
     if (res.rateLimited) {
       paused = true;
       t.status = "pending";
       saveRun(root, s);
       return false;
     }
-    t.doneBy = res.agent; // a fallback may have handed the subtask to another agent
     commitAll(t.worktree, `agentos: ${sub.title}`);
+    let changed = gained();
+    // A call that claims success but committed nothing is as useless as an error, so it buys the same one
+    // extra attempt agentRunner gives an error — only here, because only work() can see the worktree.
+    if (res.ok && !changed) {
+      const from = res.agent ?? sub.agent;
+      const nextAgent = cfg.agents.find((a) => a !== from && available(c, a));
+      if (nextAgent) {
+        logEvent(root, s.id, { type: "fallback", from, to: nextAgent, why: "no-change", error: lastLine(redact(finalText(res.output))) });
+        res = await agentRunner(c, nextAgent, "write")(req); // the same worktree: the first agent left nothing behind
+        if (res.rateLimited) {
+          paused = true;
+          t.status = "pending";
+          saveRun(root, s);
+          return false;
+        }
+        commitAll(t.worktree, `agentos: ${sub.title}`);
+        changed = gained();
+      }
+    }
+    t.doneBy = res.agent; // a fallback may have handed the subtask to another agent
     t.summary = redact(finalText(res.output)).slice(0, 1500);
     t.report = parseReport(redact(finalText(res.output)));
-    const changed = Number(git(root, ["rev-list", "--count", `${s.branch}..${t.branch}`])) > 0;
     let ok = res.ok && changed;
     if (ok) {
       const next = merges.then(() => integrate(c, t, sub));
