@@ -367,14 +367,18 @@ async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: Runn
 }
 
 /**
- * What a worktree holds right now: HEAD, the status, and a hash of every tracked change, so a second
- * edit to an already-dirty file (a conflicted one, say) still shows. ponytail: the contents of untracked
- * files are not hashed, only their names; hash them too if an agent ever rewrites its own new file.
+ * What a worktree holds right now: HEAD, the status, a hash of every tracked change and of every
+ * untracked (not ignored) file's contents, so a second edit to an already-dirty file — a conflicted one,
+ * or a new file an earlier attempt left — still shows.
  */
 function worktreeFingerprint(cwd: string): string {
-  const diff = tryGit(cwd, ["diff", "HEAD", "--binary"]);
-  return [tryGit(cwd, ["rev-parse", "HEAD"]).out, statusOf(cwd), createHash("sha256").update(diff.out).digest("hex")].join("
-");
+  const h = createHash("sha256").update(tryGit(cwd, ["diff", "HEAD", "--binary"]).out);
+  const untracked = tryGit(cwd, ["ls-files", "--others", "--exclude-standard"]);
+  for (const f of untracked.ok ? untracked.out.split("\n").filter(Boolean) : []) {
+    h.update(`\0${f}\0`);
+    try { h.update(readFileSync(path.join(cwd, f))); } catch { /* gone or unreadable: the name still counts */ }
+  }
+  return [tryGit(cwd, ["rev-parse", "HEAD"]).out, statusOf(cwd), h.digest("hex")].join("\n");
 }
 
 /** the last non-empty line of an agent's output: what a fallback event reports as the reason */

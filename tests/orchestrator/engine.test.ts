@@ -1046,4 +1046,13 @@ describe("orchestrator engine: write prompts", { timeout: 60_000 }, () => {
     await startRun(repo.root, "same file twice", cfg(), d, "pe3");
     expect(loadRun(repo.root, "pe3").editors).toEqual(["claude", "codex"]);
   });
+
+  it("sees a rewrite of a new file an earlier attempt left behind", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const fail: RunnerResult = { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    d.runners.claude.write = async (r) => { writeFileSync(path.join(r.cwd, "new.txt"), "one\n"); return fail; };
+    d.runners.codex.write = async (r) => { writeFileSync(path.join(r.cwd, "new.txt"), "two\n"); return fail; };
+    await startRun(repo.root, "new file twice", cfg(), d, "pe4");
+    expect(loadRun(repo.root, "pe4").editors).toEqual(["claude", "codex"]);
+  });
 });
