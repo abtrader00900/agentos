@@ -975,4 +975,15 @@ describe("orchestrator engine: no-change fallback", { timeout: 60_000 }, () => {
     expect(claudeWrites).toBe(1);
     expect(codexWrites).toBe(0);
   });
+
+  it("spends the one fallback attempt on the no-change retry, so an erroring second agent ends it", async () => {
+    let claudeWrites = 0;
+    const d = deps({ plan: planOf(sub("a")) });
+    d.runners.claude.write = async () => { claudeWrites++; return reply("nothing left to do"); };
+    d.runners.codex.write = async () => ({ ok: false, output: "boom\n", rateLimited: false, timedOut: false });
+    const s = await startRun(repo.root, "no-change then error", cfg(), d, "n4");
+    expect(s.subtasks[0].status).toBe("failed");
+    expect(s.status).toBe("needs_human");
+    expect(claudeWrites).toBe(1); // the chain is exhausted: no third call back to claude
+  });
 });
