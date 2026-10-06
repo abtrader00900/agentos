@@ -137,6 +137,19 @@ describe("daemon tick", { timeout: 30_000 }, () => {
     expect(listJobs(home)[0]).toMatchObject({ status: "done", attempts: 2 });
   });
 
+  it("waits for a paused run's resumeAt before resuming it", async () => {
+    const j = addJob({ projectId: pid, task: "out of quota", source: "manual" }, home, clock)!;
+    const resumeAt = new Date(clock.getTime() + 30 * 60_000).toISOString();
+    saveRun(repo.root, runState("q9", { status: "paused", resumeFrom: "working", resumeAt }));
+    updateJob(j.id, { status: "paused", runId: "q9" }, home);
+    const d = new Daemon(deps());
+    await d.tick(); await d.idle();
+    expect(launched).toHaveLength(0);
+    clock = new Date(Date.parse(resumeAt) + 60_000);
+    await d.tick(); await d.idle();
+    expect(launched[0].slice(0, 2)).toEqual(["run", "--resume"]);
+  });
+
   it("fails a job whose project turned the daemon off, without running it", async () => {
     writeFileSync(path.join(repo.root, "agent.config.yaml"), CONFIG("{ enabled: false }"));
     addJob({ projectId: pid, task: "x x x", source: "manual" }, home, clock);

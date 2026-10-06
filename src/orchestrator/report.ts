@@ -8,7 +8,7 @@ const PARTS: Array<[keyof AgentReport, string]> = [["notDone", "Not done"], ["as
 /** what the agents themselves say they left out, assumed or could not check */
 function agentReports(s: RunState): string {
   const who = [
-    ...s.subtasks.map((t) => ({ name: `${t.id} (${t.agent})`, r: t.report })),
+    ...s.subtasks.map((t) => ({ name: `${t.id} (${t.doneBy ?? t.agent})`, r: t.report })),
     ...(s.fixRound > 0 ? [{ name: "last fix round", r: s.fixReport }] : []),
   ];
   const lines = who.flatMap(({ name, r }) => {
@@ -19,14 +19,22 @@ function agentReports(s: RunState): string {
   return lines.length ? `**What the agents report:**\n${lines.join("\n")}` : "";
 }
 
+/** the risk flags plus, when the reviewer wrote part of the change itself, a line naming the authors */
+function lookHere(s: RunState): string {
+  const authors = [...new Set([...s.subtasks.map((t) => t.doneBy ?? t.agent), ...(s.editors ?? [])])].join(", ");
+  const bullets = [
+    ...(s.risk ?? []).map((f) => `- ${f.rule}${f.p !== undefined ? ` (${Math.round(f.p * 100)}%)` : ""}${f.files.length ? `: ${f.files.slice(0, 5).join(", ")}${f.files.length > 5 ? ` (+${f.files.length - 5} more)` : ""}` : ""}`),
+    ...(s.selfReview ? [`- reviewed by the same model that wrote it${authors ? ` (${authors})` : ""}, because no other allowed agent could review it (a quota limit, a single-agent project, or every other agent wrote part of this change)`] : []),
+  ];
+  return bullets.length ? `**⚠️ Look here** — risky parts of this change:\n${bullets.join("\n")}` : "";
+}
+
 export function prBody(s: RunState): string {
   const minutes = Math.round((Date.now() - Date.parse(s.createdAt)) / 60_000);
-  const rows = s.subtasks.map((t) => `| ${t.id} | ${t.agent} | ${t.status} | ${cell(t.summary ?? "")} |`).join("\n");
+  const rows = s.subtasks.map((t) => `| ${t.id} | ${t.doneBy ?? t.agent} | ${t.status} | ${cell(t.summary ?? "")} |`).join("\n");
   return [
     `**Task:** ${s.task}`,
-    s.risk?.length
-      ? `**⚠️ Look here** — risky parts of this change:\n${s.risk.map((f) => `- ${f.rule}${f.p !== undefined ? ` (${Math.round(f.p * 100)}%)` : ""}${f.files.length ? `: ${f.files.slice(0, 5).join(", ")}${f.files.length > 5 ? ` (+${f.files.length - 5} more)` : ""}` : ""}`).join("\n")}`
-      : "",
+    lookHere(s),
     s.plan ? `**Plan:** ${s.plan.summary}` : "",
     s.autoQuick ? `**Planner:** skipped by the decider (jevos ${s.autoQuick.p.toFixed(2)})` : "",
     `| Subtask | Agent | Status | Summary |\n|---|---|---|---|\n${rows}`,

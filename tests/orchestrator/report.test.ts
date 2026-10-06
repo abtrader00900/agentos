@@ -34,6 +34,20 @@ describe("prBody", () => {
     expect(body).toContain("Not verified: z");
   });
 
+  it("flags a self-review in the same section, naming who really wrote the code", () => {
+    const body = prBody({ ...base, selfReview: true,
+      subtasks: [{ id: "a", agent: "claude", doneBy: "codex", status: "done", branch: "b", worktree: "w" }] });
+    expect(body.indexOf("⚠️ Look here")).toBeLessThan(body.indexOf("| Subtask |"));
+    expect(body).toContain("reviewed by the same model that wrote it (codex)");
+    const fixedToo = prBody({ ...base, selfReview: true, editors: ["codex"],
+      subtasks: [{ id: "a", agent: "claude", status: "done", branch: "b", worktree: "w" }] });
+    expect(fixedToo).toContain("(claude, codex)"); // a fixer is an author too
+    expect(body).toContain("| a | codex | done |"); // the table names who really did the subtask
+    const plain = prBody(base);
+    expect(plain).not.toContain("⚠️ Look here");
+    expect(plain).not.toContain("reviewed by the same model that wrote it");
+  });
+
   it("says when the decider skipped the planner and shows decider flag percentages", () => {
     const body = prBody({ ...base, quick: true, autoQuick: { p: 0.91 }, risk: [{ rule: "jevos:money", action: "flag", files: [], p: 0.82 }] });
     expect(body).toContain("**Planner:** skipped by the decider (jevos 0.91)");

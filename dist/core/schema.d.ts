@@ -80,7 +80,7 @@ export declare const riskRuleSchema: z.ZodEffects<z.ZodObject<{
     deletedLines?: number | undefined;
 }>;
 /** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
-export declare const orchestratorSchema: z.ZodObject<{
+export declare const orchestratorSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
     /** how far a run may go on its own; merge/deploy come in a later release */
     autonomy: z.ZodEffects<z.ZodDefault<z.ZodEnum<["pr", "merge", "deploy"]>>, "pr", "pr" | "merge" | "deploy" | undefined>;
     maxWorkers: z.ZodDefault<z.ZodNumber>;
@@ -91,8 +91,12 @@ export declare const orchestratorSchema: z.ZodObject<{
     subtaskMinutes: z.ZodDefault<z.ZodNumber>;
     planner: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
     workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
-    /** reviews the diff; swapped for the other CLI when it wrote every subtask */
+    /** reviews the diff; swapped for an agent that wrote none of it when it wrote every subtask */
     reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+    /** the hard boundary of this project: no fallback ever calls an agent outside it */
+    agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+    /** how long an agent counts as limited when its CLI names no wait */
+    quotaCooldownMinutes: z.ZodDefault<z.ZodNumber>;
     /** shell commands that must pass before a PR opens, run in the run worktree */
     verify: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
     /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
@@ -148,6 +152,58 @@ export declare const orchestratorSchema: z.ZodObject<{
     planner: "codex" | "claude";
     workers: ("codex" | "claude")[];
     reviewer: "codex" | "claude";
+    quotaCooldownMinutes: number;
+    verify: string[];
+    build: string[];
+    minFreeMemoryMb: number;
+    link: string[];
+    models: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    };
+    agents?: ("codex" | "claude")[] | undefined;
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
+}, {
+    autonomy?: "pr" | "merge" | "deploy" | undefined;
+    maxWorkers?: number | undefined;
+    maxFixRounds?: number | undefined;
+    maxMinutes?: number | undefined;
+    subtaskMinutes?: number | undefined;
+    planner?: "codex" | "claude" | undefined;
+    workers?: ("codex" | "claude")[] | undefined;
+    reviewer?: "codex" | "claude" | undefined;
+    agents?: ("codex" | "claude")[] | undefined;
+    quotaCooldownMinutes?: number | undefined;
+    verify?: string[] | undefined;
+    build?: string[] | undefined;
+    minFreeMemoryMb?: number | undefined;
+    link?: string[] | undefined;
+    models?: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    } | undefined;
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
+}>, {
+    agents: ("codex" | "claude")[];
+    autonomy: "pr";
+    maxWorkers: number;
+    maxFixRounds: number;
+    maxMinutes: number;
+    subtaskMinutes: number;
+    planner: "codex" | "claude";
+    workers: ("codex" | "claude")[];
+    reviewer: "codex" | "claude";
+    quotaCooldownMinutes: number;
     verify: string[];
     build: string[];
     minFreeMemoryMb: number;
@@ -171,6 +227,58 @@ export declare const orchestratorSchema: z.ZodObject<{
     planner?: "codex" | "claude" | undefined;
     workers?: ("codex" | "claude")[] | undefined;
     reviewer?: "codex" | "claude" | undefined;
+    agents?: ("codex" | "claude")[] | undefined;
+    quotaCooldownMinutes?: number | undefined;
+    verify?: string[] | undefined;
+    build?: string[] | undefined;
+    minFreeMemoryMb?: number | undefined;
+    link?: string[] | undefined;
+    models?: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    } | undefined;
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
+}>, {
+    agents: ("codex" | "claude")[];
+    autonomy: "pr";
+    maxWorkers: number;
+    maxFixRounds: number;
+    maxMinutes: number;
+    subtaskMinutes: number;
+    planner: "codex" | "claude";
+    workers: ("codex" | "claude")[];
+    reviewer: "codex" | "claude";
+    quotaCooldownMinutes: number;
+    verify: string[];
+    build: string[];
+    minFreeMemoryMb: number;
+    link: string[];
+    models: {
+        codex?: string | undefined;
+        claude?: string | undefined;
+    };
+    risk?: {
+        name: string;
+        action: "flag" | "block";
+        paths?: string[] | undefined;
+        deletedLines?: number | undefined;
+    }[] | undefined;
+}, {
+    autonomy?: "pr" | "merge" | "deploy" | undefined;
+    maxWorkers?: number | undefined;
+    maxFixRounds?: number | undefined;
+    maxMinutes?: number | undefined;
+    subtaskMinutes?: number | undefined;
+    planner?: "codex" | "claude" | undefined;
+    workers?: ("codex" | "claude")[] | undefined;
+    reviewer?: "codex" | "claude" | undefined;
+    agents?: ("codex" | "claude")[] | undefined;
+    quotaCooldownMinutes?: number | undefined;
     verify?: string[] | undefined;
     build?: string[] | undefined;
     minFreeMemoryMb?: number | undefined;
@@ -364,7 +472,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         pinnedFactDays?: number | undefined;
     }>>;
     /** agentos run — absent means the command explains how to add it */
-    orchestrator: z.ZodOptional<z.ZodObject<{
+    orchestrator: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodObject<{
         /** how far a run may go on its own; merge/deploy come in a later release */
         autonomy: z.ZodEffects<z.ZodDefault<z.ZodEnum<["pr", "merge", "deploy"]>>, "pr", "pr" | "merge" | "deploy" | undefined>;
         maxWorkers: z.ZodDefault<z.ZodNumber>;
@@ -375,8 +483,12 @@ export declare const agentConfigSchema: z.ZodObject<{
         subtaskMinutes: z.ZodDefault<z.ZodNumber>;
         planner: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
         workers: z.ZodDefault<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
-        /** reviews the diff; swapped for the other CLI when it wrote every subtask */
+        /** reviews the diff; swapped for an agent that wrote none of it when it wrote every subtask */
         reviewer: z.ZodDefault<z.ZodEnum<["claude", "codex"]>>;
+        /** the hard boundary of this project: no fallback ever calls an agent outside it */
+        agents: z.ZodOptional<z.ZodArray<z.ZodEnum<["claude", "codex"]>, "many">>;
+        /** how long an agent counts as limited when its CLI names no wait */
+        quotaCooldownMinutes: z.ZodDefault<z.ZodNumber>;
         /** shell commands that must pass before a PR opens, run in the run worktree */
         verify: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
@@ -432,6 +544,58 @@ export declare const agentConfigSchema: z.ZodObject<{
         planner: "codex" | "claude";
         workers: ("codex" | "claude")[];
         reviewer: "codex" | "claude";
+        quotaCooldownMinutes: number;
+        verify: string[];
+        build: string[];
+        minFreeMemoryMb: number;
+        link: string[];
+        models: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        };
+        agents?: ("codex" | "claude")[] | undefined;
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
+    }, {
+        autonomy?: "pr" | "merge" | "deploy" | undefined;
+        maxWorkers?: number | undefined;
+        maxFixRounds?: number | undefined;
+        maxMinutes?: number | undefined;
+        subtaskMinutes?: number | undefined;
+        planner?: "codex" | "claude" | undefined;
+        workers?: ("codex" | "claude")[] | undefined;
+        reviewer?: "codex" | "claude" | undefined;
+        agents?: ("codex" | "claude")[] | undefined;
+        quotaCooldownMinutes?: number | undefined;
+        verify?: string[] | undefined;
+        build?: string[] | undefined;
+        minFreeMemoryMb?: number | undefined;
+        link?: string[] | undefined;
+        models?: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        } | undefined;
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
+    }>, {
+        agents: ("codex" | "claude")[];
+        autonomy: "pr";
+        maxWorkers: number;
+        maxFixRounds: number;
+        maxMinutes: number;
+        subtaskMinutes: number;
+        planner: "codex" | "claude";
+        workers: ("codex" | "claude")[];
+        reviewer: "codex" | "claude";
+        quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
         minFreeMemoryMb: number;
@@ -455,6 +619,58 @@ export declare const agentConfigSchema: z.ZodObject<{
         planner?: "codex" | "claude" | undefined;
         workers?: ("codex" | "claude")[] | undefined;
         reviewer?: "codex" | "claude" | undefined;
+        agents?: ("codex" | "claude")[] | undefined;
+        quotaCooldownMinutes?: number | undefined;
+        verify?: string[] | undefined;
+        build?: string[] | undefined;
+        minFreeMemoryMb?: number | undefined;
+        link?: string[] | undefined;
+        models?: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        } | undefined;
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
+    }>, {
+        agents: ("codex" | "claude")[];
+        autonomy: "pr";
+        maxWorkers: number;
+        maxFixRounds: number;
+        maxMinutes: number;
+        subtaskMinutes: number;
+        planner: "codex" | "claude";
+        workers: ("codex" | "claude")[];
+        reviewer: "codex" | "claude";
+        quotaCooldownMinutes: number;
+        verify: string[];
+        build: string[];
+        minFreeMemoryMb: number;
+        link: string[];
+        models: {
+            codex?: string | undefined;
+            claude?: string | undefined;
+        };
+        risk?: {
+            name: string;
+            action: "flag" | "block";
+            paths?: string[] | undefined;
+            deletedLines?: number | undefined;
+        }[] | undefined;
+    }, {
+        autonomy?: "pr" | "merge" | "deploy" | undefined;
+        maxWorkers?: number | undefined;
+        maxFixRounds?: number | undefined;
+        maxMinutes?: number | undefined;
+        subtaskMinutes?: number | undefined;
+        planner?: "codex" | "claude" | undefined;
+        workers?: ("codex" | "claude")[] | undefined;
+        reviewer?: "codex" | "claude" | undefined;
+        agents?: ("codex" | "claude")[] | undefined;
+        quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;
@@ -575,6 +791,7 @@ export declare const agentConfigSchema: z.ZodObject<{
     };
     skillRegistry?: string | undefined;
     orchestrator?: {
+        agents: ("codex" | "claude")[];
         autonomy: "pr";
         maxWorkers: number;
         maxFixRounds: number;
@@ -583,6 +800,7 @@ export declare const agentConfigSchema: z.ZodObject<{
         planner: "codex" | "claude";
         workers: ("codex" | "claude")[];
         reviewer: "codex" | "claude";
+        quotaCooldownMinutes: number;
         verify: string[];
         build: string[];
         minFreeMemoryMb: number;
@@ -657,6 +875,8 @@ export declare const agentConfigSchema: z.ZodObject<{
         planner?: "codex" | "claude" | undefined;
         workers?: ("codex" | "claude")[] | undefined;
         reviewer?: "codex" | "claude" | undefined;
+        agents?: ("codex" | "claude")[] | undefined;
+        quotaCooldownMinutes?: number | undefined;
         verify?: string[] | undefined;
         build?: string[] | undefined;
         minFreeMemoryMb?: number | undefined;

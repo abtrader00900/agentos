@@ -1,12 +1,16 @@
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import type { AgentName, Runner } from "./types.js";
+import { type QuotaStore } from "./quota.js";
 import { type RunState } from "./run.js";
 import type { Decide, DeciderConfig } from "../decider/client.js";
 export interface EngineDeps {
-    runners: Record<AgentName, {
+    /** an agent with no runner counts as unavailable, exactly like one at its quota limit */
+    runners: Partial<Record<AgentName, {
         read: Runner;
         write: Runner;
-    }>;
+    }>>;
+    /** when each agent has quota again; the default is the shared file store (~/.agentos/quota.json) */
+    quota?: QuotaStore;
     /** the GitHub CLI: returns stdout, throws on failure */
     gh: (cwd: string, args: string[]) => string;
     freeMemMb?: () => number;

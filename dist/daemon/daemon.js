@@ -124,6 +124,14 @@ export class Daemon {
             return; // try again next tick
         }
         this.waitingOn = undefined;
+        if (job.status === "paused" && job.runId) {
+            // a quota pause: the run itself says when the earliest allowed agent has quota again
+            try {
+                if (Date.parse(loadRun(project.path, job.runId).resumeAt ?? "") > now.getTime())
+                    return;
+            }
+            catch { /* no readable run record: let it resume and find out */ }
+        }
         this.start(job, project.path, now);
     }
     enabledProjects() {

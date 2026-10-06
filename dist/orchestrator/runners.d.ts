@@ -1,4 +1,5 @@
 import type { AgentName, Runner } from "./types.js";
+/** `quota reached` also covers agy's "individual quota reached", `usage limit` Kimi's "reached your <period> usage limit". */
 export declare const RATE_LIMIT_RE: RegExp;
 /** kill a process and its children, by PID only */
 export declare function killTree(pid: number): void;

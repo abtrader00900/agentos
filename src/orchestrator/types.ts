@@ -37,6 +37,8 @@ export interface RunnerResult {
   output: string;
   rateLimited: boolean;
   timedOut: boolean;
+  /** which agent produced this result: a fallback can hand the call to another one */
+  agent?: AgentName;
 }
 
 export type Runner = (req: RunnerRequest) => Promise<RunnerResult>;
