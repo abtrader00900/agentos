@@ -394,7 +394,7 @@ function notes(c, role) {
 const reportLine = (r) => r ? `CHANGED: ${r.changed.join("; ") || "none"}\nNOT DONE: ${r.notDone.join("; ") || "none"}\nASSUMED: ${r.assumed.join("; ") || "none"}\nNOT VERIFIED: ${r.notVerified.join("; ") || "none"}` : "(no report)";
 /** the claims the reviewer must check against the diff; also the review's cache key, so a new claim is never left unchecked */
 const reportsBlock = (s) => [
-    ...s.subtasks.map((t) => `${t.id} (${t.agent}):\n${reportLine(t.report)}`),
+    ...s.subtasks.map((t) => `${t.id} (${t.doneBy ?? t.agent}):\n${reportLine(t.report)}`),
     ...(s.fixReport ? [`last fix round:\n${reportLine(s.fixReport)}`] : []),
 ].join("\n\n");
 /** the reviewer's extra instructions: weakened tests, and the workers' claims to check against the diff */

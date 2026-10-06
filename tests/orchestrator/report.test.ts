@@ -42,6 +42,7 @@ describe("prBody", () => {
     const fixedToo = prBody({ ...base, selfReview: true, editors: ["codex"],
       subtasks: [{ id: "a", agent: "claude", status: "done", branch: "b", worktree: "w" }] });
     expect(fixedToo).toContain("(claude, codex)"); // a fixer is an author too
+    expect(body).toContain("| a | codex | done |"); // the table names who really did the subtask
     const plain = prBody(base);
     expect(plain).not.toContain("⚠️ Look here");
     expect(plain).not.toContain("reviewed by the same model that wrote it");

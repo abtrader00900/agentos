@@ -8,7 +8,7 @@ const PARTS: Array<[keyof AgentReport, string]> = [["notDone", "Not done"], ["as
 /** what the agents themselves say they left out, assumed or could not check */
 function agentReports(s: RunState): string {
   const who = [
-    ...s.subtasks.map((t) => ({ name: `${t.id} (${t.agent})`, r: t.report })),
+    ...s.subtasks.map((t) => ({ name: `${t.id} (${t.doneBy ?? t.agent})`, r: t.report })),
     ...(s.fixRound > 0 ? [{ name: "last fix round", r: s.fixReport }] : []),
   ];
   const lines = who.flatMap(({ name, r }) => {
@@ -31,7 +31,7 @@ function lookHere(s: RunState): string {
 
 export function prBody(s: RunState): string {
   const minutes = Math.round((Date.now() - Date.parse(s.createdAt)) / 60_000);
-  const rows = s.subtasks.map((t) => `| ${t.id} | ${t.agent} | ${t.status} | ${cell(t.summary ?? "")} |`).join("\n");
+  const rows = s.subtasks.map((t) => `| ${t.id} | ${t.doneBy ?? t.agent} | ${t.status} | ${cell(t.summary ?? "")} |`).join("\n");
   return [
     `**Task:** ${s.task}`,
     lookHere(s),

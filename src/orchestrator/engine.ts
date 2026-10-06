@@ -408,7 +408,7 @@ const reportLine = (r: AgentReport | null | undefined) =>
 /** the claims the reviewer must check against the diff; also the review's cache key, so a new claim is never left unchecked */
 const reportsBlock = (s: RunState): string =>
   [
-    ...s.subtasks.map((t) => `${t.id} (${t.agent}):\n${reportLine(t.report)}`),
+    ...s.subtasks.map((t) => `${t.id} (${t.doneBy ?? t.agent}):\n${reportLine(t.report)}`),
     ...(s.fixReport ? [`last fix round:\n${reportLine(s.fixReport)}`] : []),
   ].join("\n\n");
 
