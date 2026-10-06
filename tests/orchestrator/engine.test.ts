@@ -774,6 +774,29 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(cfg({}).agents).toEqual(["claude", "codex"]);
   });
 
+  it("fails the subtask instead of waiting for a cooldown when a limit follows an error", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    // claude never reaches its quota, so a pause would make the daemon wait for codex's cooldown for nothing
+    d.runners.claude.write = async () => ({ ok: false, output: "crashed\n", rateLimited: false, timedOut: false });
+    d.runners.codex.write = async () => LIMIT;
+    const s = await startRun(repo.root, "error then quota", cfg(), d, "q7");
+    expect(s.status).toBe("needs_human");
+    expect(s.resumeAt).toBeUndefined();
+    expect(d.quota!.until("claude", new Date())).toBeUndefined();
+  });
+
+  it("skips a fallback agent that something else limited while the first call ran", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    let codexCalls = 0;
+    // what a parallel worker or another run does to the shared store mid-call
+    d.runners.claude.write = async () => { d.quota!.mark("codex", new Date(Date.now() + 3_600_000)); return LIMIT; };
+    const codexWrite = d.runners.codex.write;
+    d.runners.codex.write = async (r) => { codexCalls++; return codexWrite(r); };
+    const s = await startRun(repo.root, "limited mid-call", cfg(), d, "q8");
+    expect(s.status).toBe("paused");
+    expect(codexCalls).toBe(0);
+  });
+
   it("picks a reviewer that did not write the code, even after a fallback", async () => {
     let reviewers: string[] = [];
     const d = deps({ plan: planOf(sub("a")), work: creates });

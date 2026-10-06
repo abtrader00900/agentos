@@ -290,7 +290,8 @@ function pause(c: Ctx, from: RunStatus): void {
 /**
  * Runs one agent call: its PID is tracked for cancel, output lines are logged, and a failure
  * walks the allowlist — every quota limit moves on, an error or timeout costs one extra attempt.
- * Only when no allowed agent is left does it return the failure, and the caller pauses.
+ * It reports a quota limit, which pauses the run, only when every agent it tried was limited: a
+ * chain that met a limit after an error or timeout left that agent's quota untouched, so it fails.
  */
 function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
   const call = async (a: AgentName, req: RunnerRequest) => {
@@ -311,35 +312,52 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
     }
   };
   return async (req) => {
-    const now = new Date();
-    const available = (a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, now);
+    const available = (a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, new Date());
     // the asked-for agent first (when the allowlist has it), then the rest of the allowlist in order
-    const order = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)].filter(available);
-    if (!order.length) {
+    const queue = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)];
+    /** the next agent that still has quota, re-read from the shared store: a parallel worker or
+     *  another run may have limited it while the call before this one was running */
+    const nextFree = (): AgentName | undefined => {
+      while (queue.length) {
+        const a = queue.shift()!;
+        if (available(a)) return a;
+      }
+      return undefined;
+    };
+    const first = nextFree();
+    if (!first) {
       const until = earliestUntil(c);
       return { ok: false, rateLimited: true, timedOut: false, output: `every allowed agent is limited${until ? ` until ${until.toISOString()}` : ""}` };
     }
+    let a: AgentName = first;
     let errorFallbackUsed = false;
-    let res: RunnerResult = await call(order[0], req);
-    for (let i = 0; i < order.length; i++) {
-      const a = order[i];
-      const next = order[i + 1];
+    /** every failure so far was a quota limit, so every agent this chain tried is marked */
+    let onlyLimits = true;
+    let res: RunnerResult = await call(a, req);
+    for (;;) {
       if (res.ok || cancelRequested(c.root, c.s.id)) return res;
+      let until: Date | undefined;
       if (res.rateLimited) {
-        const until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
+        until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
         c.quota.mark(a, until);
-        if (!next) return res;
-        logEvent(c.root, c.s.id, { type: "fallback", from: a, to: next, why: "quota", until: until.toISOString() });
       } else {
+        onlyLimits = false;
         // an error or timeout buys one more attempt; a second one would just burn the quota twice
-        if (!next || errorFallbackUsed) return res;
+        if (errorFallbackUsed) return res;
         errorFallbackUsed = true;
-        const lastLine = res.output.trim().split("\n").filter(Boolean).pop() ?? "";
-        logEvent(c.root, c.s.id, { type: "fallback", from: a, to: next, why: res.timedOut ? "timeout" : "error", error: redact(lastLine).slice(0, 200) });
       }
-      res = await call(next, req);
+      const next = nextFree();
+      // Only an all-limits chain means no allowed agent is left, and only that one may pause the run
+      // (spec §2). A limit met after an error or timeout leaves that agent's quota untouched, so the
+      // caller treats the exhausted chain as the failure it is instead of waiting for a cooldown.
+      if (!next) return onlyLimits ? res : { ...res, rateLimited: false };
+      logEvent(c.root, c.s.id, {
+        type: "fallback", from: a, to: next,
+        ...(until ? { why: "quota", until: until.toISOString() } : { why: res.timedOut ? "timeout" : "error", error: redact(res.output.trim().split("\n").filter(Boolean).pop() ?? "").slice(0, 200) }),
+      });
+      a = next;
+      res = await call(a, req);
     }
-    return res;
   };
 }
 
@@ -559,8 +577,9 @@ async function review(c: Ctx): Promise<Review> {
   const res = await agentRunner(c, reviewer, "read")({ prompt, cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
   if (res.rateLimited) return { ran: false, rateLimited: true, error: `the reviewer (${reviewer}) hit a rate limit` };
   if (!res.ok) return { ran: false, rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}` };
-  // a review by an author is allowed (a stall helps nobody) but flagged in the PR body; sticky, because it did happen
-  if (cfg.agents.length > 1 && authors.has(res.agent ?? reviewer)) s.selfReview = true;
+  // a review by an author is allowed (a stall helps nobody) but flagged in the PR body; sticky,
+  // because it did happen. A single-agent project always lands here, and its owner must know too.
+  if (authors.has(res.agent ?? reviewer)) s.selfReview = true;
   const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
   return { ran: true, findings, head, reports, kind: scoped ? "fix" : "full" };
 }
