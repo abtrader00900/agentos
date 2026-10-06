@@ -52,6 +52,7 @@ These are out of scope for this PRD:
   3. On `rateLimited`, call `mark(agent, resetFrom(...))`, log `{type:"fallback", from, to, why:"quota"}`, and continue with the next agent.
   4. On error or timeout, keep today's behaviour: fall back once to the next allowed agent, with `why: "timeout"|"error"`.
   5. Only when **every** allowed agent is limited does it return `rateLimited: true`. The run then pauses as today, and `RunState.resumeAt` is set to the earliest `until`.
+- **Who really wrote it.** A fallback can hand a subtask to another agent, so `agentRunner` returns the agent that produced the result (`RunnerResult.agent`). The engine stores it as `subtask.doneBy` in run state. "Wrote a subtask" below means `doneBy ?? agent`.
 - **Reviewer choice** (this replaces `other()`):
   1. the configured reviewer, if it wrote no subtask
   2. otherwise the first agent in `cfg.agents` that wrote no subtask
@@ -62,12 +63,12 @@ These are out of scope for this PRD:
 
 ### 3. Read-mode guard
 
-Planner and reviewer calls must not edit files.
-- **Before** every `mode: "read"` call, agentos records `git rev-parse HEAD` and `git status --porcelain` of the call's cwd.
-- **After** the call:
-  - If either changed, it runs `git reset --hard <head>` and `git clean -fd` (not `-x`, so linked or ignored folders stay), logs `{type:"read-guard", agent, files}`, and turns the result into `ok: false` with that note.
-  - The existing error fallback then applies.
-- The guard is generic, so it covers any CLI whose read-only flag is weak or missing.
+Planner and reviewer calls must not edit files. The reviewer runs **at the same time as the verify commands** in the run worktree, so a before/after diff of that worktree cannot tell a reviewer's edit from a test artifact. The guard therefore isolates the call instead of diffing it:
+- Every `mode: "read"` call runs in a **disposable detached worktree** at the current HEAD: `git worktree add --detach <runDir>/read-<n> HEAD`. Nothing is linked into it, because readers need no installed deps.
+- After the call, agentos checks that worktree's `git status --porcelain` and HEAD.
+  - If anything changed, it logs `{type:"read-guard", agent, files}` and turns the result into `ok: false` with that note. The existing error fallback then applies.
+  - Either way, the worktree is removed with `git worktree remove --force` (it has no junctions), so a reader's edit can never reach the run branch.
+- The guard is generic, so it covers any CLI whose read-only flag is weak or missing. The cost is one `git worktree add` per planner or reviewer call, about 1–2 s.
 
 ### 4. Per-role models
 
