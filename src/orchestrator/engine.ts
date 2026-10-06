@@ -6,7 +6,9 @@ import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
 import { lessonsFor } from "../learning/inject.js";
 import { learnFromRun } from "../learning/learn-run.js";
 import type { Role } from "../learning/lessons.js";
-import type { AgentName, Finding, Plan, Runner, RunnerRequest, Subtask } from "./types.js";
+import type { AgentName, Finding, Plan, Runner, RunnerRequest, RunnerResult, Subtask } from "./types.js";
+import { fileQuota, resetFrom, type QuotaStore } from "./quota.js";
+import { agentosHome } from "../ui/projects.js";
 import {
   type RunState, type RunStatus, type SubtaskState, TERMINAL, newRunId, runDir, saveRun, loadRun,
   setStatus, logEvent, requestCancel, cancelRequested,
@@ -27,7 +29,10 @@ import type { Decide, DeciderConfig } from "../decider/client.js";
 import { AUTO_QUICK, CONTENT_RISK } from "../decider/questions.js";
 
 export interface EngineDeps {
-  runners: Record<AgentName, { read: Runner; write: Runner }>;
+  /** an agent with no runner counts as unavailable, exactly like one at its quota limit */
+  runners: Partial<Record<AgentName, { read: Runner; write: Runner }>>;
+  /** when each agent has quota again; the default is the shared file store (~/.agentos/quota.json) */
+  quota?: QuotaStore;
   /** the GitHub CLI: returns stdout, throws on failure */
   gh: (cwd: string, args: string[]) => string;
   freeMemMb?: () => number;
@@ -46,12 +51,13 @@ interface Ctx {
   s: RunState;
   cfg: OrchestratorConfig;
   deps: EngineDeps;
+  /** one store for the whole run, so every call sees the marks the others made */
+  quota: QuotaStore;
   /** PIDs of agent processes this engine is running right now */
   live: Set<number>;
 }
 
 const minutes = (m: number) => m * 60_000;
-const other = (a: AgentName): AgentName => (a === "claude" ? "codex" : "claude");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const memoryFile = (root: string) => path.join(root, ".agentos", "memory.json");
 
@@ -197,7 +203,7 @@ export async function executeRun(root: string, s: RunState, cfg: OrchestratorCon
 }
 
 async function drive(root: string, s: RunState, cfg: OrchestratorConfig, deps: EngineDeps): Promise<RunState> {
-  const c: Ctx = { root, s, cfg, deps, live: new Set() };
+  const c: Ctx = { root, s, cfg, deps, quota: deps.quota ?? fileQuota(agentosHome()), live: new Set() };
   s.enginePid = process.pid;
   for (const t of s.subtasks) if (t.status === "running") t.status = "pending";
   // an engine that died while a fixer resolved conflicts left the merge half done: start that merge over
@@ -265,17 +271,32 @@ function move(c: Ctx, status: RunStatus, reason?: string): void {
   c.deps.onStatus?.(c.s);
 }
 
+/** when the first allowed agent has quota again; nothing while one of them is free */
+function earliestUntil(c: Ctx): Date | undefined {
+  const now = new Date();
+  return c.cfg.agents
+    .map((a) => c.quota.until(a, now))
+    .filter((d): d is Date => !!d)
+    .sort((x, y) => x.getTime() - y.getTime())[0];
+}
+
 function pause(c: Ctx, from: RunStatus): void {
   c.s.resumeFrom = from;
+  // the daemon waits for this before resuming; unset while any allowed agent still has quota
+  c.s.resumeAt = earliestUntil(c)?.toISOString();
   move(c, "paused", `rate limit or quota reached — continue later with: agentos run --resume ${c.s.id}`);
 }
 
-/** Runs one agent call: its PID is tracked for cancel, output lines are logged, a failure falls back to the other CLI once. */
+/**
+ * Runs one agent call: its PID is tracked for cancel, output lines are logged, and a failure
+ * walks the allowlist — every quota limit moves on, an error or timeout costs one extra attempt.
+ * Only when no allowed agent is left does it return the failure, and the caller pauses.
+ */
 function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
   const call = async (a: AgentName, req: RunnerRequest) => {
     let pid = 0;
     try {
-      return await c.deps.runners[a][mode]({
+      const res = await c.deps.runners[a]![mode]({
         ...req,
         onSpawn: (p) => { pid = p; c.live.add(p); },
         onLine: (line) => {
@@ -284,18 +305,41 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
           logEvent(c.root, c.s.id, { type: "agent", agent: a, line: redact(line).slice(0, 4000) });
         },
       });
+      return { ...res, agent: a };
     } finally {
       c.live.delete(pid);
     }
   };
   return async (req) => {
-    const res = await call(agent, req);
-    if (res.ok || res.rateLimited || cancelRequested(c.root, c.s.id)) return res;
-    const alt = other(agent);
-    if (!c.cfg.workers.includes(alt)) return res;
-    const lastLine = res.output.trim().split("\n").filter(Boolean).pop() ?? "";
-    logEvent(c.root, c.s.id, { type: "fallback", from: agent, to: alt, why: res.timedOut ? "timeout" : "error", error: redact(lastLine).slice(0, 200) });
-    return call(alt, req);
+    const now = new Date();
+    const available = (a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, now);
+    // the asked-for agent first (when the allowlist has it), then the rest of the allowlist in order
+    const order = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)].filter(available);
+    if (!order.length) {
+      const until = earliestUntil(c);
+      return { ok: false, rateLimited: true, timedOut: false, output: `every allowed agent is limited${until ? ` until ${until.toISOString()}` : ""}` };
+    }
+    let errorFallbackUsed = false;
+    let res: RunnerResult = await call(order[0], req);
+    for (let i = 0; i < order.length; i++) {
+      const a = order[i];
+      const next = order[i + 1];
+      if (res.ok || cancelRequested(c.root, c.s.id)) return res;
+      if (res.rateLimited) {
+        const until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
+        c.quota.mark(a, until);
+        if (!next) return res;
+        logEvent(c.root, c.s.id, { type: "fallback", from: a, to: next, why: "quota", until: until.toISOString() });
+      } else {
+        // an error or timeout buys one more attempt; a second one would just burn the quota twice
+        if (!next || errorFallbackUsed) return res;
+        errorFallbackUsed = true;
+        const lastLine = res.output.trim().split("\n").filter(Boolean).pop() ?? "";
+        logEvent(c.root, c.s.id, { type: "fallback", from: a, to: next, why: res.timedOut ? "timeout" : "error", error: redact(lastLine).slice(0, 200) });
+      }
+      res = await call(next, req);
+    }
+    return res;
   };
 }
 
@@ -399,6 +443,7 @@ async function work(c: Ctx): Promise<void> {
       saveRun(root, s);
       return false;
     }
+    t.doneBy = res.agent; // a fallback may have handed the subtask to another agent
     commitAll(t.worktree, `agentos: ${sub.title}`);
     t.summary = redact(finalText(res.output)).slice(0, 1500);
     t.report = parseReport(redact(finalText(res.output)));
@@ -478,11 +523,27 @@ type Review =
   | { ran: false; rateLimited: boolean; error: string }
   | { ran: true; findings: Finding[]; head: string; reports: string; kind: "full" | "fix" | "unchanged" };
 
+/**
+ * Who reviews (spec §2): the configured reviewer unless it wrote part of the change, else the first
+ * allowed agent that wrote none, else the first that is not the main author, else the reviewer itself
+ * (a single-agent project). The quota chain then applies to that choice like to any other call.
+ */
+function pickReviewer(s: RunState, cfg: OrchestratorConfig): AgentName {
+  const wrote = s.subtasks.map((t) => t.doneBy ?? t.agent);
+  const authors = new Set(wrote);
+  if (!authors.has(cfg.reviewer)) return cfg.reviewer;
+  const innocent = cfg.agents.find((a) => !authors.has(a));
+  if (innocent) return innocent;
+  const count = (a: AgentName) => wrote.filter((x) => x === a).length;
+  const main = [...cfg.agents].sort((x, y) => count(y) - count(x))[0]; // a stable sort keeps cfg.agents order on ties
+  return cfg.agents.find((a) => a !== main) ?? cfg.reviewer;
+}
+
 /** The cross-model review. After a fix round it sees only the fix, checked against its earlier findings. */
 async function review(c: Ctx): Promise<Review> {
   const { s, cfg } = c;
-  const authors = new Set(s.subtasks.map((t) => t.agent));
-  const reviewer = authors.size === 1 && authors.has(cfg.reviewer) ? other(cfg.reviewer) : cfg.reviewer;
+  const authors = new Set(s.subtasks.map((t) => t.doneBy ?? t.agent));
+  const reviewer = pickReviewer(s, cfg);
   const head = git(s.runWorktree, ["rev-parse", "HEAD"]);
   const last = s.reviewed;
   const reports = reportsBlock(s);
@@ -498,6 +559,8 @@ async function review(c: Ctx): Promise<Review> {
   const res = await agentRunner(c, reviewer, "read")({ prompt, cwd: s.runWorktree, timeoutMs: minutes(cfg.subtaskMinutes) });
   if (res.rateLimited) return { ran: false, rateLimited: true, error: `the reviewer (${reviewer}) hit a rate limit` };
   if (!res.ok) return { ran: false, rateLimited: false, error: `the reviewer (${reviewer}) failed${res.timedOut ? " (timeout)" : ""}: ${redact(res.output.trim().slice(-300))}` };
+  // a review by an author is allowed (a stall helps nobody) but flagged in the PR body; sticky, because it did happen
+  if (cfg.agents.length > 1 && authors.has(res.agent ?? reviewer)) s.selfReview = true;
   const findings = parseFindings(finalText(res.output)) ?? [{ severity: "low", file: "", line: 0, issue: `the reviewer (${reviewer}) gave no parseable findings` }];
   return { ran: true, findings, head, reports, kind: scoped ? "fix" : "full" };
 }
@@ -554,7 +617,7 @@ async function fix(c: Ctx): Promise<void> {
   const { s } = c;
   s.fixRound++;
   saveRun(c.root, s);
-  const author = s.subtasks[0]?.agent ?? c.cfg.workers[0];
+  const author = s.subtasks[0]?.doneBy ?? s.subtasks[0]?.agent ?? c.cfg.workers[0];
   const res = await agentRunner(c, author, "write")({ prompt: fixPrompt(s, notes(c, "fixer")), cwd: s.runWorktree, timeoutMs: minutes(c.cfg.subtaskMinutes) });
   if (res.rateLimited) {
     s.fixRound--;
@@ -587,7 +650,7 @@ async function gate(c: Ctx): Promise<void> {
     s.reviewed = undefined;
     saveRun(root, s);
     const m = mergeBranch(s.runWorktree, latest, `agentos: merge ${s.baseBranch}`);
-    const merged = m.ok ? "ok" : await resolveConflicts(c, m.conflicts, s.subtasks[0]?.agent ?? c.cfg.workers[0]);
+    const merged = m.ok ? "ok" : await resolveConflicts(c, m.conflicts, s.subtasks[0]?.doneBy ?? s.subtasks[0]?.agent ?? c.cfg.workers[0]);
     if (merged === "paused") return pause(c, "verifying");
     if (merged === "failed") return move(c, "needs_human", `${s.baseBranch} moved during the run and merging it conflicted`);
     s.base = latest;
