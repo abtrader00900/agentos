@@ -242,8 +242,6 @@ orchestrator:
     claude: { read: opus, write: sonnet }  #   or one per mode
 ```
 
-`models.<agent>` takes either a model name for every role, or `{ read, write }`: `read` is the planner and the reviewer, `write` is the workers, the fixers and conflict resolution. Suggested pairs (suggestions, not defaults): `claude: { read: opus, write: sonnet }` — Opus plans and reviews, Sonnet writes; `codex: <current Sol model>` for both.
-
 ```bash
 agentos run "add a discount field to customers"   # plan → parallel agents → tests + review → PR
 agentos run --quick "fix the typo in the footer"    # small task: no planner, one agent does it all
@@ -259,6 +257,38 @@ The `build` commands run in the run worktree right before the PR and their outpu
 The tests and the cross-model review run at the same time, so a fix round gets failing checks and review findings together. After a fix round the reviewer sees only the fixer's change, checked against its earlier findings; a full review runs again whenever the base branch is merged in.
 
 A run ends with a pull request, or with a reason it needs you. It never pushes your default branch or deploys. It never uses the agents' skip-permission flags. It blocks the PR when any commit in the run adds a secret, even one a later fix removed. Run state and logs are kept in `.agentos/runs/<id>/`.
+
+### Model router
+
+Which agent takes a call, and on which model, is decided per call:
+
+```yaml
+orchestrator:
+  workers: [claude, codex]
+  reviewer: codex
+  agents: [claude, codex, gemini]        # the only agents this project may call, in fallback order
+  quotaCooldownMinutes: 60               # how long an agent counts as limited when its CLI names no wait
+  models:
+    codex: gpt-5.6-sol
+    claude: { read: opus, write: sonnet }
+    gemini: gemini-3.1-pro-high
+```
+
+**The allowlist.** `orchestrator.agents` lists the agents this project may call — `claude`, `codex`, `gemini`. It defaults to the planner, the workers and the reviewer, deduped, in that order, and the config is rejected if it leaves one of those roles out. It is the hard boundary of a project: no fallback ever calls an agent outside it, and the chain walks it in the order you wrote. Because the fallback may hand any of them a call, `agentos run` refuses to start when the CLI of any allowed agent is missing from PATH, not just the role agents.
+
+**Quota fallback.** A call starts with the agent whose role it is, when that agent is in the allowlist, then the rest of the allowlist in order. When a CLI reports a rate limit or an exhausted quota, that agent is marked in `~/.agentos/quota.json` — until the time its own message states ("try again in 45 minutes"), or `quotaCooldownMinutes` from now when it states none — and the next allowed agent that still has quota takes the same call. The marks live in one file, so parallel workers, other runs and the daemon all see them. A plain error or timeout, and a worker call that committed nothing, buys one extra attempt instead of walking the whole list. Every hand-over is logged as a `fallback` event with the agent it came from, the agent it went to and why (`quota`, `timeout`, `error`, `no-change`), visible on the run page in the dashboard.
+
+**Pausing.** The run pauses only when every allowed agent is limited at that moment. It goes to status `paused` with `resumeAt` set to the earliest time an allowed agent has quota again; continue it with `agentos run --resume <id>` (the daemon waits for `resumeAt`). Availability is re-read at that boundary, so if a mark expired meanwhile the run simply carries on instead of pausing.
+
+`agentos quota` prints one line per limited agent (`claude: limited until <ISO timestamp>`) or `no agent is limited`. `agentos quota clear [agent]` drops a mark the CLI has already forgotten, and with no agent clears every mark. `agentos doctor` shows an `agent:<name>` line per CLI with its path and any `limited until`.
+
+`models.<agent>` takes either a model name for every role, or `{ read, write }`: `read` is the planner and the reviewer, `write` is the workers, the fixers and conflict resolution. Suggested pairs (suggestions, not defaults): `claude: { read: opus, write: sonnet }` — Opus plans and reviews, Sonnet writes; `codex: <current Sol model>` for both.
+
+**Read-mode guard.** Every read-mode call — the planner and the reviewer — runs in a disposable detached worktree created at HEAD under `.agentos/runs/<id>/`, never in the run worktree where the verify commands run at the same time, so anything the call writes dies with that worktree. If the worktree ends up dirty or its HEAD moved, or tracked files in the run worktree changed during the call, the change is put back, a `read-guard` event is logged, and the call is turned into a failure so the ordinary fallback hands it to the next allowed agent. A verify command that changes tracked files belongs in `orchestrator.build`.
+
+**Self-review.** The reviewer is swapped for the first allowed agent that wrote none of the change. When there is none — a single-agent project, every other allowed agent wrote part of it, or they are all at a quota limit — the review by an author still runs rather than stalling, but the PR body says the change was reviewed by the same model that wrote it.
+
+**The `gemini` agent** is Google's `agy` CLI (Antigravity). Its prompt goes only on stdin, as one NDJSON line, never on the command line. Read calls get `--mode plan` and write calls `--mode accept-edits`, with `--sandbox` in both, plus `--model` when configured. `--mode plan` is agy's own promise not to edit rather than something agentos enforces, so a read call still relies on the read-mode guard above. The executable is resolved on PATH first, then on Windows at `%LOCALAPPDATA%\agy\bin\agy.exe` — Antigravity puts that folder on PATH, which a shell, editor or daemon started earlier never sees. Only an agy result line reporting `SUCCESS` counts as a successful call, and agy's "individual quota reached" is read as a rate limit, which feeds the same fallback chain.
 
 ### Smart gates
 
