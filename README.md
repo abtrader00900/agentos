@@ -266,7 +266,7 @@ Which agent takes a call, and on which model, is decided per call:
 orchestrator:
   workers: [claude, codex]
   reviewer: codex
-  agents: [claude, codex, gemini]        # the only agents this project may call, in fallback order
+  agents: [claude, codex, gemini]        # the only agents this project may call; after the role's own agent, fallback walks them in this order
   quotaCooldownMinutes: 60               # how long an agent counts as limited when its CLI names no wait
   models:
     codex: gpt-5.6-sol
@@ -274,7 +274,7 @@ orchestrator:
     gemini: gemini-3.1-pro-high
 ```
 
-**The allowlist.** `orchestrator.agents` lists the agents this project may call — `claude`, `codex`, `gemini`. It defaults to the planner, the workers and the reviewer, deduped, in that order, and the config is rejected if it leaves one of those roles out. It is the hard boundary of a project: no fallback ever calls an agent outside it, and the chain walks it in the order you wrote. Because the fallback may hand any of them a call, `agentos run` refuses to start when the CLI of any allowed agent cannot be found, not just the role agents (on PATH, or for `agy` on Windows also in `%LOCALAPPDATA%\agy\bin`).
+**The allowlist.** `orchestrator.agents` lists the agents this project may call — `claude`, `codex`, `gemini`. It defaults to the planner, the workers and the reviewer, deduped, in that order, and the config is rejected if it leaves one of those roles out. It is the hard boundary of a project: no fallback ever calls an agent outside it, and after the role's own agent the chain walks it in the order you wrote. Because the fallback may hand any of them a call, `agentos run` refuses to start when the CLI of any allowed agent cannot be found, not just the role agents (on PATH, or for `agy` on Windows also in `%LOCALAPPDATA%\agy\bin`).
 
 **Quota fallback.** A call starts with the agent whose role it is, when that agent is in the allowlist and not currently limited, then the rest of the allowlist in order. When a CLI reports a rate limit or an exhausted quota, that agent is marked in `~/.agentos/quota.json` — for the wait its own message states, when it says something like "try again in 45 minutes" (a whole number of seconds, minutes or hours), or `quotaCooldownMinutes` from now when it states none — and the next allowed agent that still has quota takes the same call. The marks live in one file, so parallel workers, other runs and the daemon all see them. A plain error or timeout, and a worker call that committed nothing, buys one extra attempt instead of walking the whole list. Every hand-over is logged as a `fallback` event with the agent it came from, the agent it went to and why (`quota`, `timeout`, `error`, `no-change`), visible on the run page in the dashboard.
 
