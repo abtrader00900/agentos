@@ -797,6 +797,19 @@ describe("orchestrator engine: quota fallback", { timeout: 60_000 }, () => {
     expect(codexCalls).toBe(0);
   });
 
+  it("retries an agent whose limit expired while the fallback ran, instead of pausing", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    let claudeCalls = 0;
+    const claudeWrite = d.runners.claude.write;
+    d.runners.claude.write = async (r) => { claudeCalls++; return claudeWrite(r); };
+    // claude is limited when the chain starts, and free again by the time codex burns its own quota
+    d.quota!.mark("claude", new Date(Date.now() + 3_600_000));
+    d.runners.codex.write = async () => { d.quota!.clear("claude"); return LIMIT; };
+    const s = await startRun(repo.root, "limit expired mid-chain", cfg(), d, "q9");
+    expect(s.status).toBe("pr_open");
+    expect(claudeCalls).toBe(1);
+  });
+
   it("picks a reviewer that did not write the code, even after a fallback", async () => {
     let reviewers: string[] = [];
     const d = deps({ plan: planOf(sub("a")), work: creates });

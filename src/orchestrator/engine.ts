@@ -290,8 +290,9 @@ function pause(c: Ctx, from: RunStatus): void {
 /**
  * Runs one agent call: its PID is tracked for cancel, output lines are logged, and a failure
  * walks the allowlist — every quota limit moves on, an error or timeout costs one extra attempt.
- * It reports a quota limit, which pauses the run, only when every agent it tried was limited: a
- * chain that met a limit after an error or timeout left that agent's quota untouched, so it fails.
+ * It reports a quota limit, which pauses the run, only while every allowed agent is at a limit
+ * when the chain gives up: an agent that merely errored, or whose limit expired meanwhile, means
+ * waiting for a cooldown would help nothing, so the call fails instead.
  */
 function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
   const call = async (a: AgentName, req: RunnerRequest) => {
@@ -314,15 +315,15 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
   return async (req) => {
     const available = (a: AgentName) => !!c.deps.runners[a] && !c.quota.until(a, new Date());
     // the asked-for agent first (when the allowlist has it), then the rest of the allowlist in order
-    const queue = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)];
-    /** the next agent that still has quota, re-read from the shared store: a parallel worker or
-     *  another run may have limited it while the call before this one was running */
+    const order = [...(c.cfg.agents.includes(agent) ? [agent] : []), ...c.cfg.agents.filter((a) => a !== agent)];
+    /** the agents this chain already called; a limit it skipped instead may be gone by the next failure */
+    const tried = new Set<AgentName>();
+    /** Takes the next untried agent that has quota, re-read from the shared store: a parallel worker
+     *  or another run may have limited it — or let it free again — while the last call was running. */
     const nextFree = (): AgentName | undefined => {
-      while (queue.length) {
-        const a = queue.shift()!;
-        if (available(a)) return a;
-      }
-      return undefined;
+      const a = order.find((x) => !tried.has(x) && available(x));
+      if (a) tried.add(a);
+      return a;
     };
     const first = nextFree();
     if (!first) {
@@ -331,8 +332,6 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
     }
     let a: AgentName = first;
     let errorFallbackUsed = false;
-    /** every failure so far was a quota limit, so every agent this chain tried is marked */
-    let onlyLimits = true;
     let res: RunnerResult = await call(a, req);
     for (;;) {
       if (res.ok || cancelRequested(c.root, c.s.id)) return res;
@@ -341,16 +340,15 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write"): Runner {
         until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
         c.quota.mark(a, until);
       } else {
-        onlyLimits = false;
         // an error or timeout buys one more attempt; a second one would just burn the quota twice
         if (errorFallbackUsed) return res;
         errorFallbackUsed = true;
       }
       const next = nextFree();
-      // Only an all-limits chain means no allowed agent is left, and only that one may pause the run
-      // (spec §2). A limit met after an error or timeout leaves that agent's quota untouched, so the
-      // caller treats the exhausted chain as the failure it is instead of waiting for a cooldown.
-      if (!next) return onlyLimits ? res : { ...res, rateLimited: false };
+      // Nothing left to try. Only "every allowed agent is at a limit right now" may pause the run
+      // (spec §2), and that is re-read here: an agent that only errored, or one whose limit expired
+      // while this chain ran, means a cooldown wait would help nothing, so the failure stands.
+      if (!next) return { ...res, rateLimited: res.rateLimited && c.cfg.agents.every((x) => !available(x)) };
       logEvent(c.root, c.s.id, {
         type: "fallback", from: a, to: next,
         ...(until ? { why: "quota", until: until.toISOString() } : { why: res.timedOut ? "timeout" : "error", error: redact(res.output.trim().split("\n").filter(Boolean).pop() ?? "").slice(0, 200) }),
