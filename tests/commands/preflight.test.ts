@@ -68,3 +68,16 @@ describe("run preflight: the gemini agent runs Google's agy CLI", () => {
     }
   });
 });
+
+describe("run preflight: fallback agents", () => {
+  it("also requires the CLI of an agent that is only in the agents allowlist", () => {
+    const repo = makeRepo({ "agent.config.yaml": "project: { name: p }\norchestrator:\n  agents: [claude, gemini]\n  planner: claude\n  workers: [claude]\n  reviewer: claude\n  link: []\n" });
+    try {
+      process.env.PATH = [fakeBin("claude"), pathWithoutAgy()].join(path.delimiter);
+      process.env.LOCALAPPDATA = mkdtempSync(path.join(tmpdir(), "agentos-empty-"));
+      expect(() => preflight(repo.root, () => "")).toThrow(/gemini \(agy\)/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});

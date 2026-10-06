@@ -25,9 +25,10 @@ export function preflight(root, ghCli = gh) {
     const cfg = loadConfig(root).config.orchestrator;
     if (!cfg)
         throw new Error(`agent.config.yaml has no orchestrator block. Add one, for example:\n\n${ORCHESTRATOR_SNIPPET}`);
-    const missing = [...new Set([cfg.planner, cfg.reviewer, ...cfg.workers])].filter((a) => !resolveAgentCli(AGENT_BIN[a]));
+    // every allowed agent, not only the configured roles: the fallback chain may hand any of them a call
+    const missing = [...new Set([cfg.planner, cfg.reviewer, ...cfg.workers, ...cfg.agents])].filter((a) => !resolveAgentCli(AGENT_BIN[a]));
     if (missing.length)
-        throw new Error(`not on PATH: ${missing.map((a) => (AGENT_BIN[a] === a ? a : `${a} (${AGENT_BIN[a]})`)).join(", ")} — install it, or remove it from orchestrator planner/reviewer/workers`);
+        throw new Error(`not on PATH: ${missing.map((a) => (AGENT_BIN[a] === a ? a : `${a} (${AGENT_BIN[a]})`)).join(", ")} — install it, or remove it from orchestrator agents/planner/reviewer/workers`);
     assertCleanCheckout(root);
     ghCli(root, ["auth", "status"]);
     return cfg;
