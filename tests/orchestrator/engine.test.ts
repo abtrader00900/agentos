@@ -999,3 +999,69 @@ describe("orchestrator engine: no-change fallback", { timeout: 60_000 }, () => {
     expect(claudeWrites).toBe(1); // the chain is exhausted: no third call back to claude
   });
 });
+
+describe("orchestrator engine: write prompts", { timeout: 60_000 }, () => {
+  it("tells the worker that a refused shell command is no reason to stop", async () => {
+    let workPrompt = "";
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const claudeWrite = d.runners.claude.write;
+    d.runners.claude.write = async (r) => { workPrompt = r.prompt; return claudeWrite(r); };
+    const s = await startRun(repo.root, "add a", cfg(), d, "sh1");
+    expect(s.status).toBe("pr_open");
+    expect(workPrompt).toContain("Shell commands may be refused in this environment");
+    expect(workPrompt).toContain("your own file tools");
+  });
+
+  it("counts an agent whose failed call left edits behind as an author", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    // claude writes part of the subtask and then crashes: codex finishes it, and both files are committed
+    d.runners.claude.write = async (r) => {
+      writeFileSync(path.join(r.cwd, "partial.txt"), "x");
+      return { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    };
+    const s = await startRun(repo.root, "partial then fallback", cfg(), d, "pe1");
+    expect(s.status).toBe("pr_open");
+    expect(s.subtasks[0].doneBy).toBe("codex");
+    expect(sh(repo.remote, ["ls-tree", "--name-only", s.branch])).toContain("partial.txt");
+    expect(loadRun(repo.root, "pe1").editors).toContain("claude");
+  });
+
+  it("never blames an agent for leftovers it found: only its own change makes it an author", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    d.runners.claude.write = async (r) => {
+      writeFileSync(path.join(r.cwd, "partial.txt"), "x");
+      return { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    };
+    // codex finds claude's leftovers, changes nothing and errors too
+    d.runners.codex.write = async () => ({ ok: false, output: "crashed\n", rateLimited: false, timedOut: false });
+    await startRun(repo.root, "two failures", cfg(), d, "pe2");
+    expect(loadRun(repo.root, "pe2").editors).toEqual(["claude"]);
+  });
+
+  it("sees a second edit to a file that was already changed, though git status looks the same", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const fail: RunnerResult = { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    d.runners.claude.write = async (r) => { writeFileSync(path.join(r.cwd, "README.md"), "claude was here\n"); return fail; };
+    d.runners.codex.write = async (r) => { writeFileSync(path.join(r.cwd, "README.md"), "codex too\n"); return fail; };
+    await startRun(repo.root, "same file twice", cfg(), d, "pe3");
+    expect(loadRun(repo.root, "pe3").editors).toEqual(["claude", "codex"]);
+  });
+
+  it("sees a rewrite of a new file an earlier attempt left behind", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const fail: RunnerResult = { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    d.runners.claude.write = async (r) => { writeFileSync(path.join(r.cwd, "new.txt"), "one\n"); return fail; };
+    d.runners.codex.write = async (r) => { writeFileSync(path.join(r.cwd, "new.txt"), "two\n"); return fail; };
+    await startRun(repo.root, "new file twice", cfg(), d, "pe4");
+    expect(loadRun(repo.root, "pe4").editors).toEqual(["claude", "codex"]);
+  });
+
+  it("sees a rewrite of a new file with a non-ASCII name", async () => {
+    const d = deps({ plan: planOf(sub("a")), work: creates });
+    const fail: RunnerResult = { ok: false, output: "crashed\n", rateLimited: false, timedOut: false };
+    d.runners.claude.write = async (r) => { writeFileSync(path.join(r.cwd, "hisaab-حساب.txt"), "one\n"); return fail; };
+    d.runners.codex.write = async (r) => { writeFileSync(path.join(r.cwd, "hisaab-حساب.txt"), "two\n"); return fail; };
+    await startRun(repo.root, "unicode name twice", cfg(), d, "pe5");
+    expect(loadRun(repo.root, "pe5").editors).toEqual(["claude", "codex"]);
+  });
+});

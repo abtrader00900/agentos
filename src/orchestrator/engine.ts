@@ -1,5 +1,7 @@
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, openSync, writeSync, closeSync, rmSync, mkdirSync } from "node:fs";
 import { MemoryStore } from "../mcp/memory/store.js";
 import type { OrchestratorConfig, LearningConfig } from "../core/schema.js";
@@ -365,6 +367,27 @@ async function guardRead(c: Ctx, a: AgentName, req: RunnerRequest, run: (r: Runn
   }
 }
 
+/**
+ * What a worktree holds right now: HEAD, the status, a hash of every tracked change and of every
+ * untracked (not ignored) file's contents, so a second edit to an already-dirty file — a conflicted one,
+ * or a new file an earlier attempt left — still shows.
+ */
+function worktreeFingerprint(cwd: string): string {
+  // raw git output throughout: tryGit trims, which would hide a whitespace-only edit at the very end.
+  // ponytail: file modes of untracked files are not part of it (an exec bit flip on a new file goes
+  // unseen); add `git ls-files -s`-style modes if that ever matters
+  const raw = (args: string[]) => {
+    try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, maxBuffer: 256 * 1024 * 1024 }); } catch { return ""; }
+  };
+  const h = createHash("sha256").update(raw(["diff", "HEAD", "--binary"]));
+  // -z: raw paths, NUL-separated (without it git C-quotes non-ASCII names and readFileSync misses them)
+  for (const f of raw(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean)) {
+    h.update(`\0${f}\0`);
+    try { h.update(readFileSync(path.join(cwd, f))); } catch { /* gone or unreadable: the name still counts */ }
+  }
+  return [tryGit(cwd, ["rev-parse", "HEAD"]).out, statusOf(cwd), h.digest("hex")].join("\n");
+}
+
 /** the last non-empty line of an agent's output: what a fallback event reports as the reason */
 const lastLine = (text: string): string => text.trim().split("\n").filter(Boolean).pop()?.trim().slice(0, 200) ?? "";
 
@@ -421,10 +444,22 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write", rejectOk?
     }
     let a: AgentName = first;
     let errorFallbackUsed = false;
+    // the worktree as it was before the current attempt: only a change from this is that attempt's own edit
+    const snap = () => (mode === "write" ? worktreeFingerprint(req.cwd) : "");
+    let before = snap();
     let res: RunnerResult = await call(a, req);
     for (;;) {
       const vetoed = res.ok ? rejectOk?.(res) : undefined;
       if ((res.ok && !vetoed) || cancelRequested(c.root, c.s.id)) return res;
+      // this result is thrown away, but whatever it already wrote stays in the worktree and is committed
+      // with the next agent's work: that makes this agent an author too, so a later review by it counts
+      // as a self-review. Compared with the worktree as it was before this attempt, so a merge in progress or
+      // an earlier agent's leftovers never make it one.
+      // (read calls edit only their disposable worktree, which guardRead throws away.)
+      if (mode === "write" && worktreeFingerprint(req.cwd) !== before) {
+        addEditor(c.s, a);
+        saveRun(c.root, c.s); // before the next attempt starts: an engine that dies during it must not forget this author
+      }
       let until: Date | undefined;
       if (res.rateLimited) {
         until = resetFrom(res.output, new Date(), c.cfg.quotaCooldownMinutes);
@@ -444,6 +479,7 @@ function agentRunner(c: Ctx, agent: AgentName, mode: "read" | "write", rejectOk?
         ...(until ? { why: "quota", until: until.toISOString() } : (vetoed ?? { why: res.timedOut ? "timeout" : "error", error: lastLine(redact(res.output)) })),
       });
       a = next;
+      before = snap();
       res = await call(a, req);
     }
   };
@@ -516,6 +552,12 @@ function planned(c: Ctx, p: Plan): void {
   return move(c, "working");
 }
 
+/**
+ * Every write call gets this: a real worker tried a shell command first, this environment denied it,
+ * and the worker quit without editing a single file.
+ */
+const SHELL_RULE = "Shell commands may be refused in this environment. When one is denied, read, search and edit files with your own file tools instead; a denied command is never a reason to stop or give up, and agentos runs the tests itself.";
+
 function workerPrompt(s: RunState, sub: Subtask, note = ""): string {
   return [
     `You are one worker in a team. Overall goal: ${s.task}`,
@@ -523,6 +565,7 @@ function workerPrompt(s: RunState, sub: Subtask, note = ""): string {
     `Your subtask (${sub.id}): ${sub.title}\n${sub.prompt}`,
     sub.files.length ? `Files you are expected to change: ${sub.files.join(", ")}` : "",
     "Rules: work only inside the current directory. Do not commit, push, deploy, run migrations against real databases, or delete anything outside this directory. agentos commits your changes and runs the tests.",
+    SHELL_RULE,
     note,
     REPORT_INSTRUCTIONS,
   ]
@@ -604,6 +647,7 @@ function conflictPrompt(s: RunState, files: string[]): string {
     `Goal: ${s.task}`,
     `A git merge in this directory stopped with conflicts in: ${files.join(", ")}.`,
     "Resolve every conflict so both sides' intent is kept, and remove all conflict markers. Edit files only; do not commit or abort the merge.",
+    SHELL_RULE,
   ].join("\n\n");
 }
 
@@ -735,6 +779,7 @@ function fixPrompt(s: RunState, note = ""): string {
     "The change in this directory does not pass yet. Fix it. Edit files only; do not commit.",
     s.verifyOk === false ? `Failing checks:\n${s.verifyOutput}` : "",
     found.length ? `Review findings to fix:\n${found.map((f) => `- [${f.severity}] ${f.file}:${f.line} ${f.issue}`).join("\n")}` : "",
+    SHELL_RULE,
     note,
     REPORT_INSTRUCTIONS,
   ]
