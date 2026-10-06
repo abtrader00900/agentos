@@ -10,7 +10,10 @@ import { listRuns, loadRun, runDir, saveRun, logEvent } from "../orchestrator/ru
 import { cliRunners } from "../orchestrator/runners.js";
 import { runLine } from "../orchestrator/report.js";
 import { registerProject } from "../ui/projects.js";
-import { isCommandOnPath } from "./doctor.js";
+import { resolveAgentCli } from "./doctor.js";
+
+/** the executable each agent runs: gemini is Google's agy CLI */
+const AGENT_BIN = { claude: "claude", codex: "codex", gemini: "agy" } as const;
 
 export const ORCHESTRATOR_SNIPPET = `orchestrator:
   verify: [npm test]          # commands that must pass before a PR opens
@@ -27,8 +30,8 @@ const gh = (cwd: string, args: string[]) =>
 export function preflight(root: string, ghCli = gh): OrchestratorConfig {
   const cfg = loadConfig(root).config.orchestrator;
   if (!cfg) throw new Error(`agent.config.yaml has no orchestrator block. Add one, for example:\n\n${ORCHESTRATOR_SNIPPET}`);
-  const missing = [...new Set([cfg.planner, cfg.reviewer, ...cfg.workers])].filter((a) => !isCommandOnPath(a));
-  if (missing.length) throw new Error(`not on PATH: ${missing.join(", ")} — install it, or remove it from orchestrator planner/reviewer/workers`);
+  const missing = [...new Set([cfg.planner, cfg.reviewer, ...cfg.workers])].filter((a) => !resolveAgentCli(AGENT_BIN[a]));
+  if (missing.length) throw new Error(`not on PATH: ${missing.map((a) => (AGENT_BIN[a] === a ? a : `${a} (${AGENT_BIN[a]})`)).join(", ")} — install it, or remove it from orchestrator planner/reviewer/workers`);
   assertCleanCheckout(root);
   ghCli(root, ["auth", "status"]);
   return cfg;
