@@ -131,6 +131,12 @@ describe("learning after a run", { timeout: 90_000 }, () => {
       read: async (r) => { claudeCalls++; return claude.read(r); },
       write: async (r) => { claudeCalls++; return claude.write(r); },
     };
+    // the shared fixture plan gives subtask "a" to claude, which this project does not allow
+    const codexRead = d.runners.codex!.read;
+    d.runners.codex = {
+      ...d.runners.codex!,
+      read: async (r) => (r.prompt.includes("You are the planner") ? reply(JSON.stringify({ ...plan, subtasks: [{ ...plan.subtasks[0], agent: "codex" }] })) : codexRead(r)),
+    };
     // retroAgent defaults to claude; this project allows only codex, so the run's evidence never reaches claude
     const c = orchestratorSchema.parse({ link: [], planner: "codex", workers: ["codex"], reviewer: "codex", agents: ["codex"] });
     const s = await startRun(repo.root, "create a", c, d, "la1");

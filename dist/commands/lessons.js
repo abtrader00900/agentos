@@ -5,7 +5,7 @@ import { listRuns, loadRun, TERMINAL } from "../orchestrator/run.js";
 import { runLockState } from "../orchestrator/engine.js";
 import { cliRunners } from "../orchestrator/runners.js";
 import { listLessons, approveLesson, forgetLesson, promoteLesson, ROLES } from "../learning/lessons.js";
-import { learnFromRun } from "../learning/learn-run.js";
+import { allowedRunners, learnFromRun } from "../learning/learn-run.js";
 import { listDrafts, readDraft, approveDraft, rejectDraft } from "../learning/skilldraft.js";
 const repoRoot = (cwd = process.cwd()) => git(cwd, ["rev-parse", "--show-toplevel"]);
 /** agentos lessons [approve|forget|promote <key>] */
@@ -53,7 +53,8 @@ export async function learnRuns(opts, runners) {
     const { config } = loadConfig(root);
     const learning = config.learning ?? learningSchema.parse({});
     const timeoutMs = (config.orchestrator?.subtaskMinutes ?? 20) * 60_000;
-    const use = runners ?? cliRunners(config.orchestrator?.models ?? {});
+    // the allowlist binds this command too: a codex-only project never hands its runs to claude
+    const use = allowedRunners(runners ?? cliRunners(config.orchestrator?.models ?? {}), config.orchestrator?.agents);
     if (opts.run) {
         const s = loadRun(root, opts.run); // throws `No run "<id>"`
         if (!TERMINAL.includes(s.status))

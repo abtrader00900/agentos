@@ -1,6 +1,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { resolveOnPath } from "../commands/doctor.js";
+/** `quota reached` also covers agy's "individual quota reached", `usage limit` Kimi's "reached your <period> usage limit". */
 export const RATE_LIMIT_RE = /rate[ _-]?limit|usage limit|quota (?:exceeded|reached)|too many requests|\b429\b/i;
 const MAX_OUTPUT = 400_000;
 const WIN = process.platform === "win32";

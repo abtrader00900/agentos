@@ -36,6 +36,8 @@ export const riskRuleSchema = z
 })
     .strict()
     .refine((r) => (r.paths !== undefined) !== (r.deletedLines !== undefined), { message: "a risk rule needs exactly one of paths or deletedLines" });
+/** the agents a config puts to work, in order, deduped — the default for `agents` */
+const roleAgents = (o) => [...new Set([o.planner, ...o.workers, o.reviewer])];
 /** `agentos run`: plan → parallel workers → verify + cross-model review → PR (PRD 1) */
 export const orchestratorSchema = z.object({
     /** how far a run may go on its own; merge/deploy come in a later release */
@@ -51,8 +53,12 @@ export const orchestratorSchema = z.object({
     subtaskMinutes: z.number().positive().default(20),
     planner: agentNameSchema.default("claude"),
     workers: z.array(agentNameSchema).min(1).default(["claude", "codex"]),
-    /** reviews the diff; swapped for the other CLI when it wrote every subtask */
+    /** reviews the diff; swapped for an agent that wrote none of it when it wrote every subtask */
     reviewer: agentNameSchema.default("codex"),
+    /** the hard boundary of this project: no fallback ever calls an agent outside it */
+    agents: z.array(agentNameSchema).min(1).optional(),
+    /** how long an agent counts as limited when its CLI names no wait */
+    quotaCooldownMinutes: z.number().positive().default(60),
     /** shell commands that must pass before a PR opens, run in the run worktree */
     verify: z.array(z.string().min(1)).default([]),
     /** shell commands run in the run worktree right before the PR, e.g. to refresh committed build output */
@@ -68,6 +74,14 @@ export const orchestratorSchema = z.object({
         .default({}),
     /** replaces the built-in risk rules (all "flag") when given */
     risk: z.array(riskRuleSchema).optional(),
+})
+    // a .default() cannot read sibling fields, so the allowlist is filled here instead
+    .transform((o) => ({ ...o, agents: o.agents ?? roleAgents(o) }))
+    .superRefine((o, ctx) => {
+    const missing = roleAgents(o).filter((a) => !o.agents.includes(a));
+    if (missing.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["agents"], message: `agents must contain planner, workers and reviewer (missing: ${missing.join(", ")})` });
+    }
 });
 /** learning from runs (PRD 2): lessons fed into later runs, skill drafts after repeated success */
 export const learningSchema = z.object({
