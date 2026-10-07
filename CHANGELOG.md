@@ -25,7 +25,7 @@ PRD 5 adds the model router. A run no longer stops when one subscription hits it
 - **A flaky Windows daemon test** now polls instead of waiting a fixed time.
 
 ### Known limits
-- Gemini as a worker needs allow-rules in agy's permission grants for the commands it wants (for example its test command). agy's headless mode ends a turn at the first command it cannot ask about.
+- **Gemini as a worker is experimental.** With agy 1.2.17, headless Gemini reaches for the shell whatever the prompt says, and any command outside agy's permission grants ends its turn. Keep `gemini` last in `agents`, or leave it out. A failed attempt ends the run as `needs_human` and claims nothing.
 - Codex cannot write on Windows machines hit by Codex's sandbox bug (openai/codex#37940). It can still plan and review.
 
 ## 0.8.0 — 2026-10-06
